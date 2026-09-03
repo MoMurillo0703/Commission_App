@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./demo.css";
 
 export const metadata: Metadata = {
   title: "Commissions | Murillo Insurance",

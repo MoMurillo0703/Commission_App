@@ -15,9 +15,16 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     if (!statement.storedPath) return NextResponse.json({ message: "This statement has no stored original file." }, { status: 404 });
 
     const bytes = await readStatementFile(statement.storedPath);
+    const contentType = statement.sourceType === "pdf"
+      ? "application/pdf"
+      : statement.sourceType === "csv"
+        ? "text/csv; charset=utf-8"
+        : statement.sourceType === "xls"
+          ? "application/vnd.ms-excel"
+          : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     return new NextResponse(new Uint8Array(bytes), {
       headers: {
-        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Type": contentType,
         "Content-Disposition": `attachment; filename="${statement.originalFilename.replaceAll('"', "")}"`,
       },
     });

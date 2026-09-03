@@ -20,10 +20,12 @@ export function NameEntityManager({
   endpoint: string;
 }) {
   const [rows, setRows] = useState(initial);
+  const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Named | null>(null);
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const visible = rows.filter((row) => row.name.toLowerCase().includes(query.trim().toLowerCase()));
 
   function startEdit(row: Named) {
     setEditing(row);
@@ -80,8 +82,13 @@ export function NameEntityManager({
           )}
         </div>
       </form>
+      <label className="directory-controls">
+        <input aria-label={`Search ${title.toLowerCase()}`} placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
+      </label>
       {rows.length === 0 ? (
         <p className="empty">{empty}</p>
+      ) : visible.length === 0 ? (
+        <p className="empty">No matches for this search.</p>
       ) : (
         <table>
           <thead>
@@ -91,7 +98,7 @@ export function NameEntityManager({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {visible.map((row) => (
               <tr key={row.id}>
                 <td>
                   <strong>{row.name}</strong>

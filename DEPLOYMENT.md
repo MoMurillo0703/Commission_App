@@ -76,6 +76,7 @@ The service-role key is server-only. Do not expose it in client code or screensh
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `SUPABASE_STORAGE_BUCKET` (`commission-statements`)
    - `DEMO_ALLOWED_EMAILS` (required for this private demo)
+   - `ENABLE_REGISTRATION=false` (change to `true` only when intentionally allowing sign-up)
 
 4. Deploy.
 
@@ -87,6 +88,7 @@ The service-role key is server-only. Do not expose it in client code or screensh
 4. Create a carrier or upload an Excel statement and assign a carrier during intake.
 5. Confirm the statement list shows the carrier and that **Download** returns the original file.
 6. Confirm a new commission or posted Excel row still keeps paid month, optional premium month, and stored compensation snapshots.
+7. Sign out, sign back in, and test **Forgot password** before sharing the demo.
 
 ## Local development
 

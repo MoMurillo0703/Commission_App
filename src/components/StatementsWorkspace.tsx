@@ -12,6 +12,7 @@ import { formatPaidMonthTitle } from "@/domain/dates";
 export function StatementsWorkspace({
   initialPaidMonth,
   initialStatements,
+  availablePaidMonths,
   commissions,
   groups,
   carriers,
@@ -21,6 +22,7 @@ export function StatementsWorkspace({
 }: {
   initialPaidMonth: string;
   initialStatements: ImportStatementView[];
+  availablePaidMonths: string[];
   commissions: CommissionView[];
   groups: Group[];
   carriers: Carrier[];
@@ -42,6 +44,7 @@ export function StatementsWorkspace({
       <StatementIntake
         initialPaidMonth={initialPaidMonth}
         initialStatements={initialStatements}
+        availablePaidMonths={availablePaidMonths}
         carriers={carriers}
         onPaidMonthChange={setPaidMonth}
       />

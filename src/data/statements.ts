@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import { importStatements, type ImportStatement } from "@/db/schema";
@@ -20,7 +20,7 @@ export type ImportStatementWrite = {
   displayName?: string;
   paidMonth: string;
   carrierId?: number | null;
-  sourceType: "excel";
+  sourceType: "excel" | "csv" | "xls" | "pdf";
   status: string;
   fingerprint: string;
   preview: StatementPreview;
@@ -67,6 +67,29 @@ export async function listImportStatements(paidMonth: string, db?: AppDatabase) 
     .where(eq(importStatements.paidMonth, paidMonth))
     .orderBy(desc(importStatements.uploadedAt), desc(importStatements.id));
   return Promise.all(rows.map((row) => toViewWithCarrier(database, row, null)));
+}
+
+export async function findLatestColumnMappingForCarrier(carrierId: number, db?: AppDatabase) {
+  const database = await resolveDb(db);
+  const rows = await database
+    .select()
+    .from(importStatements)
+    .where(eq(importStatements.carrierId, carrierId))
+    .orderBy(desc(importStatements.updatedAt), desc(importStatements.id));
+  for (const row of rows) {
+    const mapping = parseMapping(row.columnMappingJson);
+    if (mapping && Object.values(mapping).some(Boolean)) return mapping;
+  }
+  return null;
+}
+
+export async function listImportPaidMonths(db?: AppDatabase) {
+  const database = await resolveDb(db);
+  const rows = await database
+    .selectDistinct({ paidMonth: importStatements.paidMonth })
+    .from(importStatements)
+    .orderBy(desc(sql`${importStatements.paidMonth}`));
+  return rows.map((row) => row.paidMonth);
 }
 
 export async function getImportStatement(db: AppDatabase | undefined, id: number) {
@@ -117,7 +140,13 @@ export async function createImportStatement(db: AppDatabase | undefined, input: 
     }).returning();
 
     if (input.fileBuffer) {
-      const storedPath = await storeStatementFile(inserted.id, input.originalFilename, input.fileBuffer);
+      let storedPath: string;
+      try {
+        storedPath = await storeStatementFile(inserted.id, input.originalFilename, input.fileBuffer);
+      } catch (error) {
+        await database.delete(importStatements).where(eq(importStatements.id, inserted.id));
+        throw error;
+      }
       const [updated] = await database.update(importStatements).set({ storedPath, updatedAt: now }).where(eq(importStatements.id, inserted.id)).returning();
       return toViewWithCarrier(database, updated);
     }

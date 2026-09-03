@@ -1,0 +1,23 @@
+.drop-zone { border: 2px dashed #9cb1ab; border-radius: 10px; padding: 22px; display: grid !important; place-items: center; text-align: center; background: white; cursor: pointer; }
+.drop-zone.dragging { border-color: var(--green); background: var(--mint); }
+.drop-zone input { max-width: 100%; margin-top: 8px; }
+.drop-zone span, .drop-zone small { color: var(--muted); margin-top: 4px; }
+.month-links, .directory-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 18px; }
+.month-links button { padding: 8px 11px; }
+.directory-controls input, .directory-controls select { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font: inherit; background: white; }
+.directory-controls input { min-width: 260px; }
+.workflow-steps { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); padding: 0; margin: 0 0 16px; gap: 6px; }
+.workflow-steps li { border-top: 4px solid var(--line); padding-top: 6px; color: var(--muted); font-size: 11px; text-transform: uppercase; font-weight: 700; }
+.workflow-steps li.done { border-color: var(--green); color: var(--green); }
+.workflow-steps li.active { border-color: var(--amber); color: var(--amber); }
+.form-success { color: var(--green); margin-top: 12px; }
+.auth-page { max-width: 480px !important; margin: 80px auto !important; }
+.auth-links { margin-top: 18px; }
+.auth-links a { color: var(--green); }
+.pill.needs_conversion { background: #f7ebd6; color: #8b5c18; }
+@media (max-width: 950px) {
+  aside { display: flex; padding: 16px 20px; }
+  aside nav { display: flex; overflow-x: auto; margin-top: 18px; gap: 5px; }
+  aside nav a { white-space: nowrap; }
+  .aside-note { display: none; }
+}

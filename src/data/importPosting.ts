@@ -9,6 +9,7 @@ import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import type { ColumnMapping } from "@/domain/columnMapping";
 import { validateMappedRows } from "@/domain/importRows";
+import { canReviewRows } from "@/domain/statementWorkflow";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 
 async function references(db: AppDatabase, statementCarrierId?: number | null) {
@@ -27,7 +28,9 @@ export async function previewImportPosting(db: AppDatabase | undefined, statemen
   const database = await resolveDb(db);
   const statement = await getImportStatement(database, statementId);
   if (!statement) throw new NotFoundError("Statement not found.");
-  if (!statement.preview) throw new ValidationError("This statement has no inspected rows to map.");
+  if (!statement.preview || !canReviewRows(statement.preview)) {
+    throw new ValidationError("This statement has no readable rows to review or post.");
+  }
   const saved = await saveImportColumnMapping(database, statementId, mapping);
   const postedKeys = new Set(await listPostedSourceRowKeys(database, statementId));
   const rows = validateMappedRows(statement.preview.sheets, mapping, statement.paidMonth, await references(database, statement.carrierId), postedKeys);

@@ -2,13 +2,14 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import type { AgreementView } from "@/data/agreements";
-import type { Agent, Group, LineOfBusiness } from "@/db/schema";
+import type { AccountManager, Agent, Group, LineOfBusiness } from "@/db/schema";
 import { formatStatementMonth } from "@/domain/dates";
 import { bpsToPercentString } from "@/domain/money";
 
 export function GroupCompensationManager({
   groups,
   agents,
+  accountManagers = [],
   linesOfBusiness,
   initial,
   selectedGroupId,
@@ -16,13 +17,16 @@ export function GroupCompensationManager({
 }: {
   groups: Group[];
   agents: Agent[];
+  accountManagers?: AccountManager[];
   linesOfBusiness: LineOfBusiness[];
   initial: AgreementView[];
   selectedGroupId: number | null;
-  onSelectGroup: (id: number | null) => void;
+  onSelectGroup?: (id: number | null) => void;
 }) {
   const [rows, setRows] = useState(initial);
-  const groupId = selectedGroupId == null ? "" : String(selectedGroupId);
+  const [localSelectedGroupId, setLocalSelectedGroupId] = useState(selectedGroupId);
+  const effectiveSelectedGroupId = onSelectGroup ? selectedGroupId : localSelectedGroupId;
+  const groupId = effectiveSelectedGroupId == null ? "" : String(effectiveSelectedGroupId);
   const [agentId, setAgentId] = useState("");
   const [lineOfBusinessId, setLineOfBusinessId] = useState("");
   const [compensationPercent, setCompensationPercent] = useState("");
@@ -30,10 +34,28 @@ export function GroupCompensationManager({
   const [effectiveEnd, setEffectiveEnd] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
+
+  function accountManagerName(group: Group | undefined) {
+    if (!group?.accountManagerId) return "—";
+    return accountManagers.find((manager) => manager.id === group.accountManagerId)?.name || "—";
+  }
 
   const visible = useMemo(
-    () => rows.filter((row) => (groupId ? row.groupId === Number(groupId) : true)),
-    [rows, groupId],
+    () => rows.filter((row) => {
+      if (groupId && row.groupId !== Number(groupId)) return false;
+      const needle = query.trim().toLowerCase();
+      if (!needle) return true;
+      const group = groups.find((item) => item.id === row.groupId);
+      const managerName = group?.accountManagerId
+        ? accountManagers.find((manager) => manager.id === group.accountManagerId)?.name || "—"
+        : "—";
+      return [row.groupName, row.agentName, row.lineOfBusinessName, managerName]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    }),
+    [accountManagers, groupId, groups, query, rows],
   );
 
   async function refresh() {
@@ -111,7 +133,11 @@ export function GroupCompensationManager({
           Group
           <select
             value={groupId}
-            onChange={(event) => onSelectGroup(event.target.value ? Number(event.target.value) : null)}
+            onChange={(event) => {
+              const value = event.target.value ? Number(event.target.value) : null;
+              if (onSelectGroup) onSelectGroup(value);
+              else setLocalSelectedGroupId(value);
+            }}
             required
           >
             <option value="">Select a group</option>
@@ -161,6 +187,9 @@ export function GroupCompensationManager({
           <button disabled={busy}>{busy ? "Saving…" : "Add arrangement"}</button>
         </div>
       </form>
+      <label className="directory-controls">
+        <input aria-label="Search compensation" placeholder="Search group, agent, or line" value={query} onChange={(event) => setQuery(event.target.value)} />
+      </label>
       {visible.length === 0 ? (
         <p className="empty">
           {groupId
@@ -171,6 +200,8 @@ export function GroupCompensationManager({
         <table>
           <thead>
             <tr>
+              <th>Group</th>
+              <th>Account manager</th>
               <th>Agent</th>
               <th>Line</th>
               <th>Split</th>
@@ -184,6 +215,8 @@ export function GroupCompensationManager({
               const historical = row.status === "inactive" || row.effectiveEnd != null;
               return (
                 <tr key={row.id} className={historical ? "history-row" : undefined}>
+                  <td><strong>{row.groupName}</strong></td>
+                  <td>{accountManagerName(groups.find((group) => group.id === row.groupId))}</td>
                   <td>
                     <strong>{row.agentName}</strong>
                   </td>

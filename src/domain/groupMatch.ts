@@ -16,9 +16,9 @@ export type GroupMatch = {
   sourceNumber: string | null;
 };
 
-const groupNameHeader = /^(group(\s*name)?|client(\s*name)?|account(\s*name)?)$/i;
+const groupNameHeader = /^(group(\s*name)?|name\s*\/\s*group name|client(\s*name)?|account(\s*name)?)$/i;
 const groupNumberHeader = /^(group\s*(number|no\.?|#|id)|account\s*(number|no\.?|#|id)|client\s*(number|no\.?|#|id)|group\s*#)$/i;
-const premiumMonthHeader = /^(premium|coverage|policy)\s*month$|^(coverage|benefit)\s*period$/i;
+const premiumMonthHeader = /^(premium|coverage|policy)\s*month$|^(coverage|benefit)\s*period$|^due date$/i;
 
 function normalize(value: string | null | undefined) {
   const trimmed = value?.trim();

@@ -12,6 +12,7 @@ const mapping = {
 const sheets: PreviewSheet[] = [
   {
     name: "Commissions",
+    headerRowNumber: 1,
     rowCount: 1,
     headers: ["Group Name", "Carrier", "LOB", "Commission"],
     groupNameHeader: "Group Name",

@@ -4,8 +4,10 @@ const items = [
   { href: "/", id: "overview", label: "Overview" },
   { href: "/statements", id: "statements", label: "Statements" },
   { href: "/groups", id: "groups", label: "Groups" },
-  { href: "/products", id: "products", label: "Products" },
-  { href: "/agents", id: "agents", label: "Agents" },
+  { href: "/carriers", id: "carriers", label: "Carriers" },
+  { href: "/people", id: "people", label: "People" },
+  { href: "/compensation", id: "compensation", label: "Compensation" },
+  { href: "/reports", id: "reports", label: "Reports" },
 ] as const;
 
 export type NavId = (typeof items)[number]["id"];
@@ -37,7 +39,6 @@ export function AppShell({
               {item.label}
             </Link>
           ))}
-          <a>Reports</a>
         </nav>
         <div className="aside-note">
           {month} close

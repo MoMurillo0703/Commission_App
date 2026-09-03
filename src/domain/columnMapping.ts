@@ -18,10 +18,10 @@ export type ColumnMapping = Partial<Record<MappingField, string | null>>;
 
 const headerPatterns: Record<Exclude<MappingField, "groupName" | "groupNumber" | "premiumMonth">, RegExp> = {
   carrier: /^(carrier|company|insurer)$/i,
-  lineOfBusiness: /^(line of business|lob|product( line)?)$/i,
-  agent: /^(agent|producer|broker)$/i,
-  premium: /^(premium|billed premium)$/i,
-  grossCommission: /^(gross )?commission|comm\.?$/i,
+  lineOfBusiness: /^(line of business|lob|product( line| type)?)$/i,
+  agent: /^(agent|producer( name)?|broker)$/i,
+  premium: /^(premium|billed premium|premium received)$/i,
+  grossCommission: /^(gross |current )?commission|comm\.?$/i,
   compensationPercent: /^(split|agent %|agent split|compensation( %| percent)?)$/i,
   notes: /^(notes?|comments?)$/i,
 };

@@ -9,9 +9,9 @@ import { postImportStatement, previewImportPosting } from "./importPosting";
 import { createLineOfBusiness } from "./linesOfBusiness";
 import { createImportStatement } from "./statements";
 import { createTestDb } from "@/db/test-db";
-import type { ColumnMapping } from "@/domain/columnMapping";
+import { suggestColumnMapping, type ColumnMapping } from "@/domain/columnMapping";
 import { fingerprintBuffer } from "@/domain/fingerprint";
-import { previewWorkbook } from "@/domain/workbook";
+import { previewCsv, previewWorkbook } from "@/domain/workbook";
 
 const mapping: ColumnMapping = {
   groupName: "Group Name",
@@ -61,6 +61,33 @@ async function savedStatement(
 }
 
 describe("excel row posting", () => {
+  it("posts an Anthem-layout CSV without treating the carrier split as agent compensation", async () => {
+    const { db, group, carrier, lineOfBusiness, agent } = await seed();
+    await createAgreement(db, { groupId: group.id, agentId: agent.id, lineOfBusinessId: lineOfBusiness.id, compensationBps: 4000, effectiveStart: "2026-01" });
+    const csv = [
+      "Agency,,,,TOTAL PREMIUM RECEIVED THIS MONTH,,1000.00",
+      "Address,,,,STATEMENT OF ACCOUNT",
+      "City,,,,PERIOD ENDING :07/31/2026",
+      "",
+      "TRACKING CODE,PRODUCER NAME,PRODUCT TYPE,NAME / GROUP NAME,SPLIT % AMT,DUE DATE,PREMIUM RECEIVED,CURRENT COMMISSION,COMMENTS",
+      ",Alex Morgan,Dental,Acme Benefits,100.0,07/01/2026,793.86,79.38,REINSTATE",
+    ].join("\n");
+    const buffer = new TextEncoder().encode(csv);
+    const preview = previewCsv(buffer, await listGroups(db));
+    const statement = await createImportStatement(db, { originalFilename: "anthem.csv", paidMonth: "2026-08", carrierId: carrier.id, sourceType: "csv", status: "ready_to_map", fingerprint: fingerprintBuffer(buffer), preview });
+    const anthemMapping = suggestColumnMapping(preview.sheets[0].headers);
+
+    expect(anthemMapping.compensationPercent).toBeNull();
+    expect((await postImportStatement(db, statement.id, anthemMapping)).postedCount).toBe(1);
+    const [row] = await listCommissions(db);
+    expect(row.statementMonth).toBe("2026-08");
+    expect(row.premiumMonth).toBe("2026-07");
+    expect(row.grossCommissionCents).toBe(7938);
+    expect(row.compensationBps).toBe(4000);
+    expect(row.agentCompensationCents).toBe(3175);
+    expect(row.agencyNetCents).toBe(4763);
+  });
+
   it("posts ready rows using the statement paid month and keeps coverage month separate", async () => {
     const { db } = await seed();
     const statement = await savedStatement(db, [
@@ -179,5 +206,22 @@ describe("excel row posting", () => {
     expect(preview.rows[0]?.exceptions.join(" ")).toMatch(/Unmatched carrier/);
     expect((await postImportStatement(db, statement.id, mapping)).postedCount).toBe(0);
     expect(await listCarriers(db)).toHaveLength(before);
+  });
+
+  it("rejects review and posting for a saved file with no readable rows", async () => {
+    const { db, carrier } = await seed();
+    const statement = await createImportStatement(db, {
+      originalFilename: "scan.pdf",
+      paidMonth: "2026-08",
+      carrierId: carrier.id,
+      sourceType: "pdf",
+      status: "needs_profile",
+      fingerprint: fingerprintBuffer(new Uint8Array([91, 92, 93])),
+      preview: { sheets: [], unmatchedGroups: [], rowCount: 0, newGroupCount: 0 },
+    });
+
+    await expect(previewImportPosting(db, statement.id, {})).rejects.toThrow(/no readable rows/i);
+    await expect(postImportStatement(db, statement.id, {})).rejects.toThrow(/no readable rows/i);
+    expect(await listCommissions(db)).toHaveLength(0);
   });
 });

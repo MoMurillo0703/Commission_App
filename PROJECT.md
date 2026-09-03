@@ -37,7 +37,7 @@ Contacts, activities, tasks, policy servicing, invoices, disbursements, and gene
 
 ## Current implementation boundary
 
-The repository now has a small SQLite/Drizzle persistence foundation for groups, carriers, lines of business, agents, and manually entered commission records. Commission amounts are stored as integer cents; a single agent split is stored in basis points and used to calculate agent compensation and agency net. The overview reads persisted data. Agent-to-account assignments, import posting, missing-commission reconciliation, required reporting, and export are not implemented.
+The repository uses Postgres/Drizzle for groups, carriers, lines of business, agents, account managers, effective-dated compensation agreements, imported statements, and commission records. Commission amounts use integer cents and compensation rates use basis points. CSV and XLSX statements can be read, reviewed, and posted; PDF and legacy XLS originals can be retained for review but do not yet have row extraction. Missing-commission reconciliation, required reporting, and export are not implemented.
 
 ## Core accuracy principles
 

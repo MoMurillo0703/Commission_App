@@ -70,7 +70,10 @@ export function StatementPosting({
 
   return (
     <div className="result">
-      <strong>Map and review before posting</strong>
+      <ol className="workflow-steps" aria-label="Statement workflow">
+        <li className="done">Upload</li><li className="done">Read</li><li className={review ? "done" : "active"}>Review</li><li className={review?.postedCount ? "done" : ""}>Post</li>
+      </ol>
+      <strong>Review anything the app could not determine, then continue the import</strong>
       <p>
         Paid month is {statement.paidMonth}
         {statement.carrierName ? ` · statement carrier is ${statement.carrierName}` : ""}.
@@ -96,15 +99,16 @@ export function StatementPosting({
       </div>
       <div className="form-actions" style={{ marginTop: 12 }}>
         <button type="button" className="secondary" disabled={busy} onClick={runPreview}>
-          {busy ? "Working…" : "Preview rows"}
+          {busy ? "Working…" : "Review Statement"}
         </button>
         <button type="button" disabled={busy || !review || review.readyCount === 0} onClick={postReady}>
-          {review ? `Post ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Post ready rows"}
+          {review ? `Continue Import · post ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Continue Import"}
         </button>
       </div>
       {error && <p className="form-error">{error}</p>}
       {review && (
         <>
+          {review.postedCount > 0 && <p className="form-success">Posted rows are now commission records. Reopening this statement will not post them twice.</p>}
           <p>
             {review.readyCount} ready · {review.blockedCount} blocked · {review.postedCount} already posted
           </p>

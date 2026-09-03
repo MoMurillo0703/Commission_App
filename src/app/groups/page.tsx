@@ -1,11 +1,9 @@
 import { AppShell } from "@/components/AppShell";
-import { GroupsWorkspace } from "@/components/GroupsWorkspace";
+import { GroupsManager } from "@/components/GroupsManager";
 import { listAccountManagers } from "@/data/accountManagers";
-import { listAgreements } from "@/data/agreements";
 import { listAgents } from "@/data/agents";
 import { countUnassignedCommissions } from "@/data/commissions";
 import { listGroups } from "@/data/groups";
-import { listLinesOfBusiness } from "@/data/linesOfBusiness";
 
 export const dynamic = "force-dynamic";
 
@@ -16,15 +14,14 @@ export default async function GroupsPage() {
         <div>
           <p className="eyebrow">Reference data</p>
           <h1>Groups</h1>
-          <p>Assign an account manager and primary agent. Compensation is a separate dated agreement by group, agent, and line of business.</p>
+          <p>Maintain group names, identifiers, and primary assignments. Compensation terms are managed separately.</p>
         </div>
       </header>
-      <GroupsWorkspace
-        groups={await listGroups()}
+      <GroupsManager
+        initial={await listGroups()}
         accountManagers={await listAccountManagers()}
         agents={await listAgents()}
-        linesOfBusiness={await listLinesOfBusiness()}
-        agreements={await listAgreements()}
+        selectedId={null}
       />
     </AppShell>
   );

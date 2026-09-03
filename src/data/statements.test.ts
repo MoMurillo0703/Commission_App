@@ -2,7 +2,15 @@ import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
 import { createCarrier, listCarriers, resolveStatementCarrier } from "./carriers";
 import { createGroup } from "./groups";
-import { createImportStatement, getImportStatement, listImportStatements, renameImportStatement } from "./statements";
+import {
+  createImportStatement,
+  findLatestColumnMappingForCarrier,
+  getImportStatement,
+  listImportPaidMonths,
+  listImportStatements,
+  renameImportStatement,
+  saveImportColumnMapping,
+} from "./statements";
 import { createTestDb } from "@/db/test-db";
 import { fingerprintBuffer } from "@/domain/fingerprint";
 import { previewWorkbook } from "@/domain/workbook";
@@ -151,5 +159,92 @@ describe("import statement intake", () => {
     expect(statement.carrierName).toBeNull();
     expect((await getImportStatement(db, statement.id))?.displayName).toBe("legacy.xlsx");
     expect((await listImportStatements("2026-08", db))[0]?.carrierName).toBeNull();
+  });
+
+  it("lists statements by paid month so an upload remains findable", async () => {
+    const db = await createTestDb();
+    const first = await workbookBuffer([{ groupName: "Acme", groupNumber: "A1", premiumMonth: "2026-07", commission: "10" }]);
+    const second = await workbookBuffer([{ groupName: "Beta", groupNumber: "B2", premiumMonth: "2026-07", commission: "12" }]);
+    await createImportStatement(db, {
+      originalFilename: "august.csv",
+      paidMonth: "2026-08",
+      sourceType: "csv",
+      status: "ready_to_map",
+      fingerprint: fingerprintBuffer(first),
+      preview: await previewWorkbook(first, []),
+    });
+    await createImportStatement(db, {
+      originalFilename: "july.xlsx",
+      paidMonth: "2026-07",
+      sourceType: "excel",
+      status: "ready_to_map",
+      fingerprint: fingerprintBuffer(second),
+      preview: await previewWorkbook(second, []),
+    });
+    expect(await listImportPaidMonths(db)).toEqual(["2026-08", "2026-07"]);
+    expect((await listImportStatements("2026-08", db)).map((row) => row.originalFilename)).toEqual(["august.csv"]);
+  });
+
+  it("reuses a saved carrier column layout and keeps an unfinished statement resumable", async () => {
+    const db = await createTestDb();
+    const carrier = await createCarrier(db, { name: "Anthem" });
+    const first = await workbookBuffer([{ groupName: "Acme", groupNumber: "A1", premiumMonth: "2026-07", commission: "10" }]);
+    const second = await workbookBuffer([{ groupName: "Beta", groupNumber: "B2", premiumMonth: "2026-07", commission: "20" }]);
+    const original = await createImportStatement(db, {
+      originalFilename: "anthem-1.csv",
+      paidMonth: "2026-08",
+      carrierId: carrier.id,
+      sourceType: "csv",
+      status: "ready_to_map",
+      fingerprint: fingerprintBuffer(first),
+      preview: await previewWorkbook(first, []),
+    });
+    await saveImportColumnMapping(db, original.id, { groupName: "Group Name", grossCommission: "Commission" });
+    expect(await findLatestColumnMappingForCarrier(carrier.id, db)).toEqual({
+      groupName: "Group Name",
+      grossCommission: "Commission",
+    });
+    const unfinished = await getImportStatement(db, original.id);
+    expect(unfinished?.status).toBe("mapped");
+    expect(unfinished?.columnMapping?.groupName).toBe("Group Name");
+    const later = await createImportStatement(db, {
+      originalFilename: "anthem-2.csv",
+      paidMonth: "2026-08",
+      carrierId: carrier.id,
+      sourceType: "csv",
+      status: "ready_to_map",
+      fingerprint: fingerprintBuffer(second),
+      preview: await previewWorkbook(second, []),
+    });
+    expect(later.status).toBe("ready_to_map");
+    expect(await findLatestColumnMappingForCarrier(carrier.id, db)).toMatchObject({ grossCommission: "Commission" });
+  });
+
+  it("saves PDF and XLS originals as resumable statements without pretending they were parsed", async () => {
+    const db = await createTestDb();
+    const carrier = await createCarrier(db, { name: "Principal" });
+    const emptyPreview = { sheets: [], unmatchedGroups: [], rowCount: 0, newGroupCount: 0 };
+    const pdf = await createImportStatement(db, {
+      originalFilename: "scan.pdf",
+      paidMonth: "2026-08",
+      carrierId: carrier.id,
+      sourceType: "pdf",
+      status: "needs_profile",
+      fingerprint: fingerprintBuffer(new Uint8Array([1, 2, 3])),
+      preview: emptyPreview,
+    });
+    const xls = await createImportStatement(db, {
+      originalFilename: "legacy.xls",
+      paidMonth: "2026-08",
+      carrierId: carrier.id,
+      sourceType: "xls",
+      status: "needs_conversion",
+      fingerprint: fingerprintBuffer(new Uint8Array([4, 5, 6])),
+      preview: emptyPreview,
+    });
+    expect((await listImportStatements("2026-08", db)).map((row) => row.originalFilename)).toEqual(["legacy.xls", "scan.pdf"]);
+    expect(pdf.status).toBe("needs_profile");
+    expect(xls.status).toBe("needs_conversion");
+    expect(pdf.preview?.rowCount).toBe(0);
   });
 });

@@ -1,0 +1,4 @@
+export default async function ResetPasswordPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const params = await searchParams;
+  return <main className="content auth-page"><section className="panel"><p className="eyebrow">Account recovery</p><h1>Choose a new password</h1><p>Your new password must contain at least eight characters.</p>{params.error && <p className="form-error">{params.error}</p>}<form className="form-grid" action="/auth/reset-password" method="post"><label>New password<input type="password" name="password" minLength={8} autoComplete="new-password" required /></label><label>Confirm password<input type="password" name="confirmPassword" minLength={8} autoComplete="new-password" required /></label><button>Update password</button></form></section></main>;
+}

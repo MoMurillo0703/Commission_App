@@ -15,8 +15,8 @@ export function GroupsManager({
   accountManagers: AccountManager[];
   agents: Agent[];
   selectedId: number | null;
-  onSelect: (id: number) => void;
-  onGroupsChange: (rows: Group[]) => void;
+  onSelect?: (id: number) => void;
+  onGroupsChange?: (rows: Group[]) => void;
 }) {
   const [rows, setRows] = useState(initial);
   const [managers, setManagers] = useState(accountManagers);
@@ -29,6 +29,7 @@ export function GroupsManager({
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
 
   async function refreshLookups() {
     const [nextManagers, nextAgents] = await Promise.all([
@@ -41,7 +42,7 @@ export function GroupsManager({
 
   function startEdit(row: Group) {
     setEditing(row);
-    onSelect(row.id);
+    onSelect?.(row.id);
     setName(row.name);
     setGroupNumber(row.groupNumber ?? "");
     setAccountManagerId(row.accountManagerId == null ? "" : String(row.accountManagerId));
@@ -83,8 +84,8 @@ export function GroupsManager({
     }
     const next = await fetch("/api/groups").then((res) => res.json());
     setRows(next);
-    onGroupsChange(next);
-    onSelect(body.id);
+    onGroupsChange?.(next);
+    onSelect?.(body.id);
     reset();
   }
 
@@ -95,6 +96,15 @@ export function GroupsManager({
   function agentName(id: number | null) {
     return agentRows.find((agent) => agent.id === id)?.name || "—";
   }
+
+  const visible = rows.filter((row) => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return true;
+    return [row.name, row.groupNumber ?? "", managerName(row.accountManagerId), agentName(row.primaryAgentId)]
+      .join(" ")
+      .toLowerCase()
+      .includes(needle);
+  });
 
   return (
     <section className="panel">
@@ -143,8 +153,13 @@ export function GroupsManager({
           )}
         </div>
       </form>
+      <label className="directory-controls">
+        <input aria-label="Search groups" placeholder="Search groups" value={query} onChange={(event) => setQuery(event.target.value)} />
+      </label>
       {rows.length === 0 ? (
         <p className="empty">No groups on file yet.</p>
+      ) : visible.length === 0 ? (
+        <p className="empty">No groups match this search.</p>
       ) : (
         <table>
           <thead>
@@ -157,10 +172,10 @@ export function GroupsManager({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {visible.map((row) => (
               <tr key={row.id} className={selectedId === row.id ? "selected-row" : undefined}>
                 <td>
-                  <button type="button" className="linkish" onClick={() => onSelect(row.id)}>
+                  <button type="button" className="linkish" onClick={() => onSelect?.(row.id)}>
                     <strong>{row.name}</strong>
                   </button>
                 </td>

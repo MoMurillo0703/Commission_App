@@ -66,6 +66,15 @@ function parseOptionalMoney(value: string | null, label: string, exceptions: str
   }
 }
 
+function normalizeImportedMonth(value: string | null, exceptions: string[]) {
+  if (!value) return null;
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) return value;
+  const date = value.match(/^(0?[1-9]|1[0-2])[/-]\d{1,2}[/-](\d{4})$/);
+  if (date) return `${date[2]}-${date[1].padStart(2, "0")}`;
+  exceptions.push("Premium / coverage month is not a valid month or date.");
+  return null;
+}
+
 export function validateMappedRows(
   sheets: PreviewSheet[],
   mapping: ColumnMapping,
@@ -87,7 +96,7 @@ export function validateMappedRows(
       const agent = matchNamedRecord(references.agents, mappingValue(row.values, mapping.agent));
       const compensationText = mappingValue(row.values, mapping.compensationPercent);
       const grossText = mappingValue(row.values, mapping.grossCommission);
-      const premiumMonth = mappingValue(row.values, mapping.premiumMonth) ?? row.premiumMonth;
+      const premiumMonth = normalizeImportedMonth(mappingValue(row.values, mapping.premiumMonth) ?? row.premiumMonth, exceptions);
       const notes = mappingValue(row.values, mapping.notes);
 
       if (!mapping.groupName && !mapping.groupNumber) exceptions.push("Map a group name or group number column.");
