@@ -29,11 +29,12 @@ describe("deployment database integrity", () => {
       FROM pg_class
       WHERE relname IN (
         'carriers', 'lines_of_business', 'account_managers', 'agents', 'groups',
-        'import_statements', 'group_compensation_agreements', 'commission_records'
+        'import_statements', 'group_compensation_agreements', 'commission_records',
+        'carrier_statement_layouts'
       )
     `);
     const rows = (result as unknown as { rows: Array<{ relname: string; relrowsecurity: boolean }> }).rows;
-    expect(rows).toHaveLength(8);
+    expect(rows).toHaveLength(9);
     expect(rows.every((row) => row.relrowsecurity)).toBe(true);
   });
 });

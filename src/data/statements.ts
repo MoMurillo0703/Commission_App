@@ -5,6 +5,7 @@ import { commissionRecords, importStatements, type ImportStatement } from "@/db/
 import { paidMonthPattern } from "@/domain/dates";
 import { normalizeColumnMapping, type ColumnMapping } from "@/domain/columnMapping";
 import type { GroupImportResolution } from "@/domain/groupMatch";
+import type { NamedImportResolution } from "@/domain/namedImport";
 import { statementCanBeDeleted, statementDeleteBlockedReason } from "@/domain/statementWorkflow";
 import type { StatementPreview } from "@/domain/workbook";
 import { getCarrier } from "./carriers";
@@ -27,6 +28,9 @@ export type ImportStatementWrite = {
   fingerprint: string;
   preview: StatementPreview;
   fileBuffer?: Uint8Array;
+  layoutId?: number | null;
+  layoutVersion?: number | null;
+  extractionPath?: string | null;
 };
 
 function parsePreview(json: string | null): StatementPreview | null {
@@ -137,6 +141,9 @@ export async function createImportStatement(db: AppDatabase | undefined, input: 
       columnMappingJson: null,
       postedRowCount: 0,
       carrierId: input.carrierId ?? null,
+      layoutId: input.layoutId ?? null,
+      layoutVersion: input.layoutVersion ?? null,
+      extractionPath: input.extractionPath ?? null,
       createdAt: now,
       updatedAt: now,
     }).returning();
@@ -181,6 +188,55 @@ export async function saveImportGroupResolutions(
   const [row] = await database.update(importStatements).set({
     previewJson: JSON.stringify({ ...preview, groupResolutions: resolutions, newGroupCount: remainingUnmatched }),
     newGroupCount: remainingUnmatched,
+    updatedAt: new Date().toISOString(),
+  }).where(eq(importStatements.id, id)).returning();
+  return toViewWithCarrier(database, row);
+}
+
+export async function saveImportNamedResolutions(
+  db: AppDatabase | undefined,
+  id: number,
+  kind: "line" | "agent",
+  resolutions: NamedImportResolution[],
+) {
+  const database = await resolveDb(db);
+  const existing = await getImportStatement(database, id);
+  if (!existing) throw new NotFoundError("Statement not found.");
+  const preview = existing.preview ?? { sheets: [], unmatchedGroups: [], rowCount: 0, newGroupCount: 0 };
+  const nextPreview = kind === "line"
+    ? { ...preview, lineResolutions: resolutions }
+    : { ...preview, agentResolutions: resolutions };
+  const [row] = await database.update(importStatements).set({
+    previewJson: JSON.stringify(nextPreview),
+    updatedAt: new Date().toISOString(),
+  }).where(eq(importStatements.id, id)).returning();
+  return toViewWithCarrier(database, row);
+}
+
+export async function saveImportPreview(db: AppDatabase | undefined, id: number, preview: StatementPreview) {
+  const database = await resolveDb(db);
+  const existing = await getImportStatement(database, id);
+  if (!existing) throw new NotFoundError("Statement not found.");
+  const [row] = await database.update(importStatements).set({
+    previewJson: JSON.stringify(preview),
+    rowCount: preview.rowCount,
+    newGroupCount: preview.newGroupCount,
+    updatedAt: new Date().toISOString(),
+  }).where(eq(importStatements.id, id)).returning();
+  return toViewWithCarrier(database, row);
+}
+
+export async function saveImportExtractionPath(db: AppDatabase | undefined, id: number, extractionPath: string) {
+  const database = await resolveDb(db);
+  const existing = await getImportStatement(database, id);
+  if (!existing) throw new NotFoundError("Statement not found.");
+  const preview = existing.preview ?? { sheets: [], unmatchedGroups: [], rowCount: 0, newGroupCount: 0 };
+  const [row] = await database.update(importStatements).set({
+    extractionPath,
+    previewJson: JSON.stringify({
+      ...preview,
+      pdf: { ...preview.pdf, extractionPath, pageCount: preview.pdf?.pageCount ?? 0, classification: preview.pdf?.classification ?? "readable" },
+    }),
     updatedAt: new Date().toISOString(),
   }).where(eq(importStatements.id, id)).returning();
   return toViewWithCarrier(database, row);
@@ -247,6 +303,14 @@ export async function deleteImportStatement(db: AppDatabase | undefined, id: num
     } catch (error) {
       storageCleanupFailed = true;
       console.error(`Statement ${id} was deleted from the database, but its stored file could not be removed.`, error);
+    }
+  }
+  if (existing.extractionPath) {
+    try {
+      await deleteStatementFile(existing.id, "extraction.json", existing.extractionPath);
+    } catch (error) {
+      storageCleanupFailed = true;
+      console.error(`Statement ${id} was deleted, but its extraction artifact could not be removed.`, error);
     }
   }
 

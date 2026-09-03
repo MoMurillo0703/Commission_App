@@ -127,8 +127,30 @@ describe("excel row posting", () => {
     expect(preview.rows[0]?.exceptions.join(" ")).toMatch(/Unmatched group/);
     expect(preview.unmatchedGroups).toHaveLength(1);
     expect(preview.unmatchedGroups[0]?.sourceName).toBe("Empower Speech");
-    expect((await postImportStatement(db, statement.id, mapping)).postedCount).toBe(0);
+    await expect(postImportStatement(db, statement.id, mapping)).rejects.toMatchObject({ name: "StatementBlockedError" });
     expect((await listGroups(db)).map((group) => group.name)).toEqual(["Acme Benefits"]);
+    expect(await listCommissions(db)).toHaveLength(0);
+  });
+
+  it("rejects the whole statement when any business row is blocked", async () => {
+    const { db } = await seed();
+    const statement = await savedStatement(db, [
+      ["Acme Benefits", "A1", "Principal", "Dental", "Alex Morgan", "1000.00", "80.00", "40", "2026-07"],
+      ["Empower Speech", "ES-9", "Principal", "Dental", "Alex Morgan", "500.00", "not money", "40", "2026-07"],
+    ]);
+
+    const preview = await previewImportPosting(db, statement.id, mapping);
+    expect(preview.readyCount).toBe(1);
+    expect(preview.blockedCount).toBe(1);
+    expect(preview.readiness.canContinue).toBe(false);
+    expect(preview.readiness.blockers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "groups", count: 1 }),
+    ]));
+
+    await expect(postImportStatement(db, statement.id, mapping)).rejects.toMatchObject({
+      name: "StatementBlockedError",
+      blockers: expect.arrayContaining([expect.objectContaining({ kind: "groups", count: 1 })]),
+    });
     expect(await listCommissions(db)).toHaveLength(0);
   });
 
@@ -256,7 +278,7 @@ describe("excel row posting", () => {
     const preview = await previewImportPosting(db, statement.id, mapping);
     expect(preview.rows[0]?.status).toBe("blocked");
     expect(preview.rows[0]?.exceptions.join(" ")).toMatch(/Unmatched carrier/);
-    expect((await postImportStatement(db, statement.id, mapping)).postedCount).toBe(0);
+    await expect(postImportStatement(db, statement.id, mapping)).rejects.toMatchObject({ name: "StatementBlockedError" });
     expect(await listCarriers(db)).toHaveLength(before);
   });
 

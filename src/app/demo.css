@@ -6,7 +6,10 @@
 .month-links button { padding: 8px 11px; }
 .directory-controls input, .directory-controls select { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font: inherit; background: white; }
 .directory-controls input { min-width: 260px; }
-.workflow-steps { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); padding: 0; margin: 0 0 16px; gap: 6px; }
+.workflow-steps { list-style: none; display: grid; grid-template-columns: repeat(5, 1fr); padding: 0; margin: 0 0 16px; gap: 6px; }
+.blocker-summary { border: 1px solid #e6c48a; background: #fff8ea; border-radius: 10px; padding: 14px 16px; margin: 14px 0; }
+.blocker-summary ol { margin: 8px 0 0; padding-left: 18px; }
+.blocker-summary .form-actions { margin-top: 10px; }
 .workflow-steps li { border-top: 4px solid var(--line); padding-top: 6px; color: var(--muted); font-size: 11px; text-transform: uppercase; font-weight: 700; }
 .workflow-steps li.done { border-color: var(--green); color: var(--green); }
 .workflow-steps li.active { border-color: var(--amber); color: var(--amber); }

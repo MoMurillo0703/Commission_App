@@ -9,9 +9,11 @@ import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import { normalizeColumnMapping, type ColumnMapping } from "@/domain/columnMapping";
 import { collectUnmatchedImportGroups } from "@/domain/importGroups";
+import { collectUnmatchedImportAgents, collectUnmatchedImportLines } from "@/domain/namedImport";
 import { validateMappedRows } from "@/domain/importRows";
+import { collectMappingBlockers, statementReadiness } from "@/domain/statementReadiness";
 import { canReviewRows } from "@/domain/statementWorkflow";
-import { NotFoundError, ValidationError } from "@/lib/errors";
+import { NotFoundError, StatementBlockedError, ValidationError } from "@/lib/errors";
 
 async function references(db: AppDatabase, statementCarrierId?: number | null) {
   const statementCarrier = statementCarrierId ? await getCarrier(db, statementCarrierId) : null;
@@ -39,59 +41,90 @@ export async function previewImportPosting(db: AppDatabase | undefined, statemen
     statement.preview.sheets,
     normalizedMapping,
     statement.paidMonth,
-    { ...(await references(database, statement.carrierId)), groupResolutions: statement.preview.groupResolutions },
+    {
+      ...(await references(database, statement.carrierId)),
+      groupResolutions: statement.preview.groupResolutions,
+      lineResolutions: statement.preview.lineResolutions,
+      agentResolutions: statement.preview.agentResolutions,
+    },
     postedKeys,
   );
+  const unmatchedGroups = collectUnmatchedImportGroups(rows);
+  const unmatchedLines = collectUnmatchedImportLines(rows.map((row) => ({ exceptions: row.exceptions, importedName: row.importedLineName })));
+  const unmatchedAgents = collectUnmatchedImportAgents(rows.map((row) => ({ exceptions: row.exceptions, importedName: row.importedAgentName })));
+  const readyCount = rows.filter((row) => row.status === "ready").length;
+  const blockedCount = rows.filter((row) => row.status === "blocked").length;
+  const postedCount = rows.filter((row) => row.status === "posted").length;
+  const readiness = statementReadiness({
+    unmatchedGroups,
+    unmatchedLines,
+    unmatchedAgents,
+    mappingReasons: collectMappingBlockers(rows),
+    readyCount,
+    blockedCount,
+    postedCount,
+  });
   return {
     statement: saved,
     paidMonth: statement.paidMonth,
     rows,
-    unmatchedGroups: collectUnmatchedImportGroups(rows),
-    readyCount: rows.filter((row) => row.status === "ready").length,
-    blockedCount: rows.filter((row) => row.status === "blocked").length,
-    postedCount: rows.filter((row) => row.status === "posted").length,
+    unmatchedGroups,
+    unmatchedLines,
+    unmatchedAgents,
+    readiness,
+    readyCount,
+    blockedCount,
+    postedCount,
   };
 }
 
 export async function postImportStatement(db: AppDatabase | undefined, statementId: number, mapping: ColumnMapping) {
   const database = await resolveDb(db);
-  const preview = await previewImportPosting(database, statementId, mapping);
-  const posted: number[] = [];
-
-  for (const row of preview.rows) {
-    if (row.status !== "ready" || row.groupId == null || row.carrierId == null || row.lineOfBusinessId == null || row.grossCommissionCents == null) {
-      continue;
+  const run = async (tx: AppDatabase) => {
+    const preview = await previewImportPosting(tx, statementId, mapping);
+    if (preview.blockedCount > 0 || preview.unmatchedGroups.length > 0 || preview.unmatchedLines.length > 0 || preview.unmatchedAgents.length > 0 || preview.readiness.blockers.length > 0) {
+      throw new StatementBlockedError(
+        `This statement was not posted because ${preview.blockedCount} row${preview.blockedCount === 1 ? " is" : "s are"} blocked. Resolve every blocker and review again.`,
+        preview.readiness.blockers,
+      );
     }
-    const created = await createCommission(database, {
-      statementMonth: preview.paidMonth,
-      groupId: row.groupId,
-      carrierId: row.carrierId,
-      lineOfBusinessId: row.lineOfBusinessId,
-      agentId: row.agentId,
-      premiumCents: row.premiumCents,
-      grossCommissionCents: row.grossCommissionCents,
-      sourceReference: `import:${statementId}:${row.sourceRowKey}`,
-      notes: [row.notes, row.importedGroupName ? `Source group: ${row.importedGroupName}` : null].filter(Boolean).join(" · ") || null,
-      premiumMonth: row.premiumMonth,
-      importStatementId: statementId,
-      sourceRowKey: row.sourceRowKey,
-    });
-    posted.push(created.id);
-  }
+    const posted: number[] = [];
+    for (const row of preview.rows) {
+      if (row.status !== "ready" || row.groupId == null || row.carrierId == null || row.lineOfBusinessId == null || row.grossCommissionCents == null) continue;
+      const created = await createCommission(tx, {
+        statementMonth: preview.paidMonth,
+        groupId: row.groupId,
+        carrierId: row.carrierId,
+        lineOfBusinessId: row.lineOfBusinessId,
+        agentId: row.agentId,
+        premiumCents: row.premiumCents,
+        grossCommissionCents: row.grossCommissionCents,
+        sourceReference: `import:${statementId}:${row.sourceRowKey}`,
+        notes: [row.notes, row.importedGroupName ? `Source group: ${row.importedGroupName}` : null].filter(Boolean).join(" · ") || null,
+        premiumMonth: row.premiumMonth,
+        importStatementId: statementId,
+        sourceRowKey: row.sourceRowKey,
+      });
+      posted.push(created.id);
+    }
+    const postedCount = preview.postedCount + posted.length;
+    const statement = await markImportStatementPosted(tx, statementId, postedCount, postedCount > 0 ? "posted" : preview.statement.status);
+    return { preview, posted, postedCount, statement };
+  };
 
-  const postedCount = preview.postedCount + posted.length;
-  const remainingReady = preview.readyCount - posted.length;
-  const status = remainingReady > 0 || preview.blockedCount > 0 ? (postedCount > 0 ? "partially_posted" : preview.statement.status) : "posted";
-  const statement = await markImportStatementPosted(database, statementId, postedCount, postedCount === 0 && preview.postedCount === 0 ? "mapped" : status);
+  const result = typeof database.transaction === "function"
+    ? await database.transaction(async (tx) => run(tx as unknown as AppDatabase))
+    : await run(database);
+  const after = await previewImportPosting(database, statementId, mapping);
 
   return {
-    statement,
-    paidMonth: preview.paidMonth,
-    postedCount: posted.length,
-    alreadyPostedCount: preview.postedCount,
-    blockedCount: preview.blockedCount,
-    remainingReadyCount: remainingReady,
-    commissionIds: posted,
-    rows: (await previewImportPosting(database, statementId, mapping)).rows,
+    ...after,
+    statement: result.statement,
+    paidMonth: result.preview.paidMonth,
+    postedCount: result.posted.length,
+    alreadyPostedCount: result.preview.postedCount,
+    blockedCount: after.blockedCount,
+    remainingReadyCount: 0,
+    commissionIds: result.posted,
   };
 }

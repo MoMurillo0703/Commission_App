@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { detectGroupHeaders, matchImportedGroup, unmatchedGroupKey, type GroupCandidate, type GroupImportResolution, type GroupMatch } from "./groupMatch";
+import type { NamedImportResolution } from "./namedImport";
 
 export type InspectedSheet = {
   name: string;
@@ -12,6 +13,8 @@ export type PreviewRow = {
   values: Record<string, string>;
   premiumMonth: string | null;
   group: GroupMatch;
+  pageNumber?: number;
+  sourceIdentity?: string;
 };
 
 export type PreviewSheet = InspectedSheet & {
@@ -28,12 +31,24 @@ export type UnmatchedGroup = {
   rowCount: number;
 };
 
+export type PdfPreviewMeta = {
+  classification: "readable" | "needs_layout" | "unreadable" | "failed";
+  pageCount: number;
+  layoutId?: number | null;
+  layoutVersion?: number | null;
+  layoutName?: string | null;
+  extractionPath?: string | null;
+};
+
 export type StatementPreview = {
   sheets: PreviewSheet[];
   unmatchedGroups: UnmatchedGroup[];
   rowCount: number;
   newGroupCount: number;
   groupResolutions?: GroupImportResolution[];
+  lineResolutions?: NamedImportResolution[];
+  agentResolutions?: NamedImportResolution[];
+  pdf?: PdfPreviewMeta;
 };
 
 function cellText(cell: ExcelJS.Cell) {
@@ -43,6 +58,14 @@ function cellText(cell: ExcelJS.Cell) {
 function asExcelBuffer(contents: ArrayBuffer | Uint8Array) {
   const bytes = contents instanceof Uint8Array ? contents : new Uint8Array(contents);
   return Buffer.from(bytes) as unknown as Parameters<ExcelJS.Xlsx["load"]>[0];
+}
+
+export function previewFromSheets(sheets: PreviewSheet[]): StatementPreview {
+  return buildPreview(sheets);
+}
+
+export function previewFromTableRows(rows: string[][], name: string, groups: GroupCandidate[]): PreviewSheet {
+  return normalizedRows(rows, name, groups);
 }
 
 function normalizedRows(rows: string[][], name: string, groups: GroupCandidate[]): PreviewSheet {

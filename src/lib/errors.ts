@@ -12,6 +12,16 @@ export class ValidationError extends Error {
   }
 }
 
+export class StatementBlockedError extends ValidationError {
+  constructor(
+    message: string,
+    readonly blockers: unknown,
+  ) {
+    super(message);
+    this.name = "StatementBlockedError";
+  }
+}
+
 export class ConflictError extends Error {
   constructor(
     message: string,

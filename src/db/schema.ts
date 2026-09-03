@@ -43,6 +43,18 @@ export const groups = pgTable("groups", {
   updatedAt: text("updated_at").notNull(),
 });
 
+export const carrierStatementLayouts = pgTable("carrier_statement_layouts", {
+  id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
+  carrierId: integer("carrier_id").notNull().references(() => carriers.id),
+  name: text("name").notNull(),
+  version: integer("version").notNull(),
+  status: text("status").notNull(),
+  detectionSignatureJson: text("detection_signature_json").notNull(),
+  mappingJson: text("mapping_json").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
 export const importStatements = pgTable("import_statements", {
   id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
   originalFilename: text("original_filename").notNull(),
@@ -59,6 +71,9 @@ export const importStatements = pgTable("import_statements", {
   columnMappingJson: text("column_mapping_json"),
   postedRowCount: integer("posted_row_count").notNull(),
   carrierId: integer("carrier_id").references(() => carriers.id),
+  layoutId: integer("layout_id").references(() => carrierStatementLayouts.id),
+  layoutVersion: integer("layout_version"),
+  extractionPath: text("extraction_path"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -113,3 +128,4 @@ export type Agent = typeof agents.$inferSelect;
 export type GroupCompensationAgreement = typeof groupCompensationAgreements.$inferSelect;
 export type CommissionRecord = typeof commissionRecords.$inferSelect;
 export type ImportStatement = typeof importStatements.$inferSelect;
+export type CarrierStatementLayout = typeof carrierStatementLayouts.$inferSelect;

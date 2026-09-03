@@ -132,6 +132,27 @@ describe("statement compensation from agreements", () => {
     expect(rows[0]?.compensationBps).toBe(0);
   });
 
+  it("uses saved line and agent resolutions so unmatched names can proceed after review", () => {
+    const unmatchedSheets = compensationSheets.map((sheet) => ({
+      ...sheet,
+      rows: sheet.rows.map((row) => ({ ...row, values: { ...row.values, LOB: "PPO Dental", Agent: "Pat Lee" } })),
+    }));
+    const unmatched = validateMappedRows(unmatchedSheets, compensationMapping, "2026-08", compensationRefs);
+    expect(unmatched[0]?.status).toBe("blocked");
+    expect(unmatched[0]?.exceptions.join(" ")).toMatch(/Unmatched line of business/);
+    expect(unmatched[0]?.exceptions.join(" ")).toMatch(/Unmatched agent/);
+    const resolved = validateMappedRows(unmatchedSheets, compensationMapping, "2026-08", {
+      ...compensationRefs,
+      lineResolutions: [{ key: "name:ppo dental", entityId: 3, sourceName: "PPO Dental", action: "match" }],
+      agentResolutions: [{ key: "name:pat lee", entityId: 5, sourceName: "Pat Lee", action: "create" }],
+    });
+    expect(resolved[0]?.status).toBe("ready");
+    expect(resolved[0]?.lineOfBusinessId).toBe(3);
+    expect(resolved[0]?.agentId).toBe(5);
+    expect(resolved[0]?.importedLineName).toBe("PPO Dental");
+    expect(resolved[0]?.importedAgentName).toBe("Pat Lee");
+  });
+
   it("uses the Group + Agent + LOB agreement selected by paid month, not premium month", () => {
     const agreements = [
       { id: 1, groupId: 1, agentId: 5, lineOfBusinessId: 3, compensationBps: 4000, effectiveStart: "2026-01", effectiveEnd: "2026-06", status: "active" as const },

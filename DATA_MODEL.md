@@ -43,8 +43,13 @@ The application uses Postgres through Drizzle ORM. Numbered SQL files in `migrat
 
 ### `import_statements`
 
-- Stores paid month, carrier, original filename, storage path, source type, status, mapping/preview data, and a unique file fingerprint.
+- Stores paid month, carrier, original filename, storage path, source type, status, mapping/preview data, optional PDF extraction path, optional statement-layout version reference, and a unique file fingerprint.
 - Posted source rows are uniquely protected by statement ID and source-row key on commission records.
+
+### `carrier_statement_layouts`
+
+- Stores versioned Carrier layout signatures and column mappings used to recognize later readable statements; the application service creates a new version instead of editing a mapping in place.
+- A statement records the exact layout ID and version used; material mapping changes create another version rather than rewriting the prior row.
 
 ### `commission_records`
 

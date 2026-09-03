@@ -2,6 +2,7 @@ import { resolveCompensationAgreement, type CompensationAgreementCandidate } fro
 import { mappingValue, type ColumnMapping } from "./columnMapping";
 import { applyGroupResolutions, matchImportedGroup, type GroupCandidate, type GroupImportResolution } from "./groupMatch";
 import { parseDollarsToCents } from "./money";
+import { resolveNamedImport, type NamedImportResolution } from "./namedImport";
 import { matchNamedRecord, type NamedRecord } from "./nameMatch";
 import type { PreviewSheet } from "./workbook";
 
@@ -30,6 +31,8 @@ export type ValidatedImportRow = {
   notes: string | null;
   importedGroupName: string | null;
   importedGroupNumber: string | null;
+  importedLineName: string | null;
+  importedAgentName: string | null;
   exceptions: string[];
 };
 
@@ -41,6 +44,8 @@ export type ImportReferenceData = {
   agreements?: CompensationAgreementCandidate[];
   statementCarrier?: NamedRecord | null;
   groupResolutions?: GroupImportResolution[];
+  lineResolutions?: NamedImportResolution[];
+  agentResolutions?: NamedImportResolution[];
 };
 
 export function resolveImportedCarrier(
@@ -96,7 +101,7 @@ export function validateMappedRows(
   return sheets.flatMap((sheet) =>
     sheet.rows.map((row) => {
       const exceptions: string[] = [];
-      const key = sourceRowKey(sheet.name, row.rowNumber);
+      const key = row.sourceIdentity ?? sourceRowKey(sheet.name, row.rowNumber);
       const groupSourceName = mappingValue(row.values, mapping.groupName);
       const groupSourceNumber = mappingValue(row.values, mapping.groupNumber);
       const group = applyGroupResolutions(
@@ -106,9 +111,11 @@ export function validateMappedRows(
       );
       const mappedCarrier = mappingValue(row.values, mapping.carrier);
       const carrier = resolveImportedCarrier(mapping, row.values, references.carriers, references.statementCarrier);
-      const line = matchNamedRecord(references.linesOfBusiness, mappingValue(row.values, mapping.lineOfBusiness));
+      const importedLineName = mappingValue(row.values, mapping.lineOfBusiness);
+      const importedAgentName = mappingValue(row.values, mapping.agent);
+      const line = resolveNamedImport(references.linesOfBusiness, importedLineName, references.lineResolutions);
       const matchedGroup = references.groups.find((candidate) => candidate.id === group.groupId);
-      const agent = matchNamedRecord(references.agents, mappingValue(row.values, mapping.agent));
+      const agent = resolveNamedImport(references.agents, importedAgentName, references.agentResolutions);
       const grossText = mappingValue(row.values, mapping.grossCommission);
       const premiumMonth = normalizeImportedMonth(mappingValue(row.values, mapping.premiumMonth) ?? row.premiumMonth, exceptions);
       const notes = mappingValue(row.values, mapping.notes);
@@ -193,6 +200,8 @@ export function validateMappedRows(
         notes,
         importedGroupName: group.sourceName,
         importedGroupNumber: group.sourceNumber,
+        importedLineName,
+        importedAgentName,
         exceptions: postedKeys.has(key) ? ["Already posted from this statement."] : exceptions,
       };
     }),

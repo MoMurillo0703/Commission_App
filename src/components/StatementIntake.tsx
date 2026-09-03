@@ -253,7 +253,7 @@ export function StatementIntake({
       {result && (
         <div className="result">
           <strong>{result.fileName ?? result.statement?.displayName}</strong>
-          <span className={`pill ${result.status}`}>{statementStatusLabel(result.status, result.fileType ?? result.statement?.sourceType)}</span>
+          <span className={`pill ${result.status}`}>{statementStatusLabel(result.status, result.fileType ?? result.statement?.sourceType, canReviewRows(result.preview ?? result.statement?.preview))}</span>
           {result.statement?.carrierName && <p>Carrier: {result.statement.carrierName}{result.carrierCreated ? " (created with this upload)" : ""}</p>}
           <p>{result.message}</p>
           {result.statement && (
@@ -279,11 +279,11 @@ export function StatementIntake({
           ))}
         </div>
       )}
-      {activeStatement && isUnparsedStatement(activeStatement) && (
+      {activeStatement && isUnparsedStatement(activeStatement, canReviewRows(preview ?? activeStatement.preview)) && (
         <div className="result">
-          <strong>{statementStatusLabel(activeStatement.status, activeStatement.sourceType)}</strong>
-          <p>The original file was saved. Commission rows were not extracted, so there is nothing to map, review, or post.</p>
-          <p>Download the saved original for reference. To process commissions now, upload a CSV or XLSX version of this statement.</p>
+          <strong>{statementStatusLabel(activeStatement.status, activeStatement.sourceType, false)}</strong>
+          <p>{statementGuidance({ status: activeStatement.status, sourceType: activeStatement.sourceType, hasReadableRows: false, pdfClassification: activeStatement.preview?.pdf?.classification }).why}</p>
+          <p>{statementGuidance({ status: activeStatement.status, sourceType: activeStatement.sourceType, hasReadableRows: false, pdfClassification: activeStatement.preview?.pdf?.classification }).next}</p>
           {activeStatement.storedPath && (
             <p>
               <a className="secondary" href={`/api/imports/statements/${activeStatement.id}/file`} style={{ display: "inline-block", textDecoration: "none" }}>
@@ -293,7 +293,7 @@ export function StatementIntake({
           )}
         </div>
       )}
-      {preview && !isUnparsedStatement(activeStatement ?? {}) && canReviewRows(preview) && (
+      {preview && !isUnparsedStatement(activeStatement ?? {}, canReviewRows(preview)) && canReviewRows(preview) && (
         <div className="result">
           <strong>Import preview</strong>
           <p>
@@ -302,12 +302,13 @@ export function StatementIntake({
           </p>
           {preview.unmatchedGroups.length > 0 && (
             <p>
-              New groups will stay unmatched until you confirm them below. They are not created at upload.
+              {preview.newGroupCount} Groups need review. Use Review {preview.newGroupCount} Group{preview.newGroupCount === 1 ? "" : "s"} below. They are not created at upload.
             </p>
           )}
+          {preview.pdf?.layoutName && <p>Recognized carrier layout: {preview.pdf.layoutName}</p>}
         </div>
       )}
-      {activeStatement && preview && canReviewRows(preview) && !isUnparsedStatement(activeStatement) && (
+      {activeStatement && preview && canReviewRows(preview) && !isUnparsedStatement(activeStatement, true) && (
         <StatementPosting statement={activeStatement} preview={preview} />
       )}
       {availablePaidMonths.length > 0 && (
@@ -360,7 +361,7 @@ export function StatementIntake({
                 <td>{new Date(statement.uploadedAt).toLocaleString()}</td>
                 <td>{statement.sourceType}</td>
                 <td>
-                  <span className={`pill ${statement.status}`}>{statementStatusLabel(statement.status, statement.sourceType)}</span>
+                  <span className={`pill ${statement.status}`}>{statementStatusLabel(statement.status, statement.sourceType, statementHasReadableRows(statement))}</span>
                 </td>
                 <td>
                   <div className="form-actions">

@@ -247,7 +247,7 @@ describe("import statement intake", () => {
     expect(pdf.status).toBe("needs_profile");
     expect(xls.status).toBe("needs_conversion");
     expect(pdf.preview?.rowCount).toBe(0);
-    expect(statementStatusLabel(pdf.status, pdf.sourceType)).toBe("PDF reading not supported yet");
+    expect(statementStatusLabel(pdf.status, pdf.sourceType)).toBe("Scanned/image PDF cannot yet be read");
     expect(isUnparsedStatement(pdf)).toBe(true);
     expect(statementNextAction(pdf.status, false, pdf.sourceType)).toBe("View original");
   });

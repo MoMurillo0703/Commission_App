@@ -4,12 +4,22 @@ export type StatementWorkflowStatus =
   | "posted"
   | "partially_posted"
   | "needs_profile"
+  | "needs_layout"
   | "needs_conversion"
+  | "unreadable"
+  | "extraction_failed"
   | "review";
 
-export function statementStatusLabel(status: string, sourceType?: string | null) {
-  if (status === "needs_profile" || sourceType === "pdf") return "PDF reading not supported yet";
+export function statementStatusLabel(status: string, sourceType?: string | null, hasReadableRows = false) {
+  if (status === "unreadable") return "Scanned/image PDF cannot yet be read";
+  if (status === "extraction_failed") return "PDF extraction failed — original retained";
+  if (status === "needs_layout") return "PDF needs layout confirmation";
   if (status === "needs_conversion" || sourceType === "xls") return "XLS reading not supported yet";
+  if (status === "needs_profile" && sourceType === "pdf" && !hasReadableRows) {
+    return "Scanned/image PDF cannot yet be read";
+  }
+  if (sourceType === "pdf" && hasReadableRows) return "Text-based PDF successfully read";
+  if (status === "needs_profile") return "PDF needs layout confirmation";
   switch (status) {
     case "ready_to_map":
       return "Needs review";
@@ -27,7 +37,7 @@ export function statementStatusLabel(status: string, sourceType?: string | null)
 }
 
 export function statementNextAction(status: string, hasReadableRows: boolean, sourceType?: string | null) {
-  if (isUnparsedStatement({ status, sourceType })) return "View original";
+  if (isUnparsedStatement({ status, sourceType }, hasReadableRows)) return "View original";
   if (hasReadableRows && (status === "mapped" || status === "partially_posted")) return "Continue Import";
   if (hasReadableRows) return "Review Statement";
   if (status === "posted") return "View statement";
@@ -44,12 +54,20 @@ export function statementGuidance(input: {
   unmatchedGroupCount?: number;
   hasReadableRows?: boolean;
   reusedMapping?: boolean;
+  pdfClassification?: string | null;
 }) {
-  if (input.status === "needs_profile" || input.sourceType === "pdf") {
+  if (input.status === "unreadable" || input.pdfClassification === "unreadable") {
     return {
-      title: "The app saved this PDF, but could not read its rows",
-      why: "PDF commission statements are not extracted yet. The original file is kept so you can download it and continue later.",
-      next: "Convert the statement to CSV or XLSX, or keep it on file and resume when extraction is available.",
+      title: "This PDF appears to be scanned or image-based",
+      why: "Automatic reading is not supported yet. The original file has been saved.",
+      next: "Download the original if you need it. A CSV or XLSX version can be uploaded for this paid month.",
+    };
+  }
+  if (input.status === "extraction_failed" || input.pdfClassification === "failed") {
+    return {
+      title: "PDF extraction failed — original retained",
+      why: "The app could not read commission rows from this file. The original PDF was saved.",
+      next: "Download the original, or upload a CSV or XLSX version into the same paid month.",
     };
   }
   if (input.status === "needs_conversion" || input.sourceType === "xls") {
@@ -57,6 +75,20 @@ export function statementGuidance(input: {
       title: "The app saved this older Excel file, but could not read its rows",
       why: "Legacy .xls files are not mapped by the current reader. The original file is kept.",
       next: "Save the file as .xlsx or .csv, then upload that version into the same paid month.",
+    };
+  }
+  if ((input.status === "needs_layout" || input.pdfClassification === "needs_layout") && input.hasReadableRows) {
+    return {
+      title: "We found a table in this statement",
+      why: "Confirm which columns contain Group, Group number, line of business, Agent, Premium, Gross commission, coverage month, and Notes.",
+      next: "Confirm the columns, then review unmatched Groups, lines of business, and Agents before posting.",
+    };
+  }
+  if (input.status === "needs_profile" && input.sourceType === "pdf" && !input.hasReadableRows) {
+    return {
+      title: "This PDF appears to be scanned or image-based",
+      why: "Automatic reading is not supported yet. The original file has been saved.",
+      next: "Download the original if you need it. A CSV or XLSX version can be uploaded for this paid month.",
     };
   }
   if (input.status === "posted") {
@@ -69,17 +101,29 @@ export function statementGuidance(input: {
   const unmatched = input.unmatchedGroupCount ?? 0;
   return {
     title: input.reusedMapping
-      ? "The app read this statement and reused the last column layout for this carrier"
+      ? input.sourceType === "pdf"
+        ? "The app recognized this carrier layout and extracted candidate rows"
+        : "The app read this statement and reused the last column layout for this carrier"
+      : input.sourceType === "pdf"
+        ? "The app read this text-based PDF and needs you to confirm it"
       : "The app read this statement and needs you to confirm it",
     why: unmatched
       ? `${unmatched} group name${unmatched === 1 ? "" : "s"} did not match a group already on file. Review them as new groups or match them to existing groups before posting.`
       : "Confirm the columns and any unmatched values before posting.",
-    next: input.hasReadableRows ? "Review the statement, then continue the import when the rows look correct." : "Open the statement to see what still needs attention.",
+    next: input.hasReadableRows
+      ? "Resolve unmatched items, review the financial rows, then continue the import."
+      : "Open the statement to see what still needs attention.",
   };
 }
 
-export function isUnparsedStatement(statement: { status?: string | null; sourceType?: string | null }) {
-  return statement.sourceType === "pdf" || statement.sourceType === "xls" || statement.status === "needs_profile" || statement.status === "needs_conversion";
+export function isUnparsedStatement(
+  statement: { status?: string | null; sourceType?: string | null },
+  hasReadableRows = false,
+) {
+  if (statement.sourceType === "xls" || statement.status === "needs_conversion") return true;
+  if (statement.status === "unreadable" || statement.status === "extraction_failed") return true;
+  if (hasReadableRows) return false;
+  return statement.status === "needs_profile" || statement.status === "needs_layout";
 }
 
 export function canReviewRows(preview: { sheets?: Array<{ rows?: unknown[] }> } | null | undefined) {
@@ -92,7 +136,7 @@ export function statementHasReadableRows(statement: {
   sourceType?: string | null;
 }) {
   if (canReviewRows(statement.preview)) return true;
-  return (statement.rowCount ?? 0) > 0 && (statement.sourceType === "csv" || statement.sourceType === "excel");
+  return (statement.rowCount ?? 0) > 0 && (statement.sourceType === "csv" || statement.sourceType === "excel" || statement.sourceType === "pdf");
 }
 
 export function statementCanBeDeleted(statement: { status?: string | null; postedRowCount?: number | null }) {

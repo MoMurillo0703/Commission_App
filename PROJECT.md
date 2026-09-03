@@ -37,7 +37,7 @@ Contacts, activities, tasks, policy servicing, invoices, disbursements, and gene
 
 ## Current implementation boundary
 
-The repository uses Postgres/Drizzle for groups, carriers, lines of business, agents, account managers, effective-dated compensation agreements, imported statements, and commission records. Commission amounts use integer cents and compensation rates use basis points. CSV and XLSX statements can be read, reviewed, and posted; PDF and legacy XLS originals can be retained for review but do not yet have row extraction. Missing-commission reconciliation, required reporting, and export are not implemented.
+The repository uses Postgres/Drizzle for groups, carriers, lines of business, agents, account managers, effective-dated compensation agreements, imported statements, and commission records. Commission amounts use integer cents and compensation rates use basis points. CSV, XLSX, and readable text-based PDF statements can enter the same review and posting workflow. Scanned/image-only PDFs and legacy XLS originals are retained but are not parsed. Missing-commission reconciliation, required reporting, and export are not implemented.
 
 ## Core accuracy principles
 

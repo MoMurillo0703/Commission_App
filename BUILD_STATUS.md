@@ -8,7 +8,7 @@ Status reflects code verified on September 2, 2026 after Demo Feedback Round 1.
 - Responsive overview-page presentation is implemented.
 - `.xlsx` and CSV inspection reads statement rows and detects headers after carrier preambles.
 - Unsupported upload types receive an HTTP 415 response.
-- PDF and legacy XLS uploads are retained and resumable. Rows are not extracted. The UI explains that limitation in plain language.
+- PDF and legacy XLS uploads are retained and resumable. Text-based PDFs can be extracted into the same review pipeline. Scanned/image PDFs and legacy XLS remain unparsed with a clear next step.
 - In-memory agency and per-agent summary functions calculate commission, available premium, distinct groups, and mapping exceptions.
 - Two unit tests cover the current summary examples.
 - Persistence is Postgres through Drizzle. Hosted demo uses Supabase Postgres. Tests use in-memory PGlite. Historical SQLite migrations remain in `migrations/sqlite/` and are not applied.
@@ -20,7 +20,7 @@ Status reflects code verified on September 2, 2026 after Demo Feedback Round 1.
 - Create, view, and edit screens exist for groups, carriers, lines of business, agents, and commission records.
 - Focused tests cover currency parsing, agency net calculation, foreign-key relationships, and basic persistence.
 - Paid-month Excel statements can be uploaded, inspected, column-mapped, previewed, and posted into commission records. New uploads require a statement-level Carrier: select an existing one or create one in the intake form. Normalized names reuse the existing carrier. Legacy statements without a carrier remain readable.
-- Statement intake supports drag/drop and multiple selected files. Each file becomes its own statement. CSV and XLSX rows can be read, reviewed, and posted. PDF and legacy XLS originals are retained with a clear next step. Saved carrier column layouts are reused when safe.
+- Statement intake supports drag/drop and multiple selected files. Each file becomes its own statement. CSV and XLSX rows can be read, unresolved Groups/LOBs/Agents are reviewed in batch, then ready rows can be posted. Text-based PDFs enter the same resolve/review/post path. Saved carrier column layouts and recognized PDF statement layouts are reused when safe.
 - The Anthem August 2026 CSV layout is verified with a sanitized acceptance fixture, including its row-5 header, suggested group/product/premium/commission fields, and coverage-date normalization. Real statement identifiers are not committed.
 - When a statement has a carrier, imported rows can use that carrier without mapping a Carrier column. A mapped row-level carrier still wins when present. Unmatched row-level carrier names are blocked and not auto-created.
 - Import posting uses the statement paid month, keeps premium/coverage month on the posted row when mapped, leaves unmatched groups uncreated, and resolves agent compensation only from the dated group compensation agreement. Carrier statement rate/split columns are not compensation inputs, and deprecated defaults are not used.
@@ -39,7 +39,7 @@ Status reflects code verified on September 2, 2026 after Demo Feedback Round 1.
 
 ## IN PROGRESS
 
-- Statement intake: CSV/XLSX mapping, review, and posting exist; PDF extraction and legacy XLS parsing do not.
+- Statement intake: CSV/XLSX and text-based PDF mapping, resolve, review, and posting exist; OCR for scanned PDFs and legacy XLS parsing do not.
 - Reporting presentation: the overview now uses persisted totals, but dedicated report pages and filters are not built.
 - Exception handling: unmatched import rows are blocked in preview; unassigned posted records are counted as needing review, but there is no broader correction workflow.
 - Hosted demo: code is deployment-ready. Live Supabase/Vercel credentials were not available in this environment, so the Product Owner still needs to create the project, set env vars, and deploy.
@@ -49,7 +49,7 @@ Status reflects code verified on September 2, 2026 after Demo Feedback Round 1.
 - Multi-agent allocation tables or a compensation-plan engine
 - Carrier-specific compensation split rules
 - Missing commission expectation and reconciliation
-- PDF extraction
+- OCR for scanned/image-only PDF statements
 - Real monthly, group, carrier, line-of-business, and agent report pages
 - YTD and month-over-month reporting
 - Data export
@@ -59,9 +59,9 @@ Status reflects code verified on September 2, 2026 after Demo Feedback Round 1.
 ## KNOWN ISSUES
 
 - Navigation Reports remains a visual placeholder.
-- Legacy `.xls` and PDF files are retained but cannot be mapped or posted until conversion/extraction support exists.
+- Legacy `.xls` files are retained but cannot be mapped or posted until conversion support exists. Scanned/image PDFs are retained but cannot be read until OCR is approved.
 - Agents and account managers remain independent records. A durable “both roles” identity is not modeled; matching display names are intentionally shown as separate role records.
-- Uploads have no explicit size limit, malware control, or content-signature validation.
+- Uploads are limited to 20 MB, and PDF extraction is limited to 200 pages. Malware scanning and content-signature validation are not implemented.
 - Import errors are collapsed into one generic workbook error and provide no row-level diagnostics.
 - The in-memory `CommissionRow` type still uses display strings and JavaScript `number`; it is not the persisted model.
 - `summarizeByAgent` still groups in-memory rows by display name.

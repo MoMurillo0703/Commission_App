@@ -68,7 +68,8 @@ The service-role key is server-only. Do not expose it in client code or screensh
 
 1. Import the GitHub repository into Vercel.
 2. Framework preset: **Next.js**.
-3. Add environment variables:
+3. Select Node.js **22.x or newer**. Text-based PDF extraction requires Node.js 22 or newer.
+4. Add environment variables:
 
    - `DATABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_URL`
@@ -78,7 +79,7 @@ The service-role key is server-only. Do not expose it in client code or screensh
    - `DEMO_ALLOWED_EMAILS` (required for this private demo)
    - `ENABLE_REGISTRATION=false` (change to `true` only when intentionally allowing sign-up)
 
-4. Deploy.
+5. Deploy.
 
 ## 8. Verify the demo
 

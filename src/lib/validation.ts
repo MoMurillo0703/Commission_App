@@ -94,6 +94,21 @@ export const importGroupConfirmSchema = z.object({
   decisions: z.array(importGroupDecisionSchema).default([]),
 });
 
+export const importNamedDecisionSchema = z.object({
+  key: z.string().min(1),
+  action: z.enum(["create", "match"]),
+  existingId: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
+});
+
+export const importNamedConfirmSchema = z.object({
+  columnMapping: columnMappingSchema,
+  decisions: z.array(importNamedDecisionSchema).default([]),
+});
+
+export const statementLayoutSaveSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+});
+
 export function emptyToNull(value: string | null | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
