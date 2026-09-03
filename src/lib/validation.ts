@@ -84,6 +84,17 @@ export const importMappingSchema = z.object({
   columnMapping: columnMappingSchema,
 });
 
+export const importGroupDecisionSchema = z.object({
+  key: z.string().min(1),
+  action: z.enum(["create", "match"]),
+  existingGroupId: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
+});
+
+export const importGroupConfirmSchema = z.object({
+  columnMapping: columnMappingSchema,
+  decisions: z.array(importGroupDecisionSchema).default([]),
+});
+
 export function emptyToNull(value: string | null | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;

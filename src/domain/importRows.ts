@@ -1,6 +1,6 @@
 import { resolveCompensationAgreement, type CompensationAgreementCandidate } from "./agreements";
 import { mappingValue, type ColumnMapping } from "./columnMapping";
-import { matchImportedGroup, type GroupCandidate } from "./groupMatch";
+import { applyGroupResolutions, matchImportedGroup, type GroupCandidate, type GroupImportResolution } from "./groupMatch";
 import { parseDollarsToCents, parsePercentToBps } from "./money";
 import { matchNamedRecord, type NamedRecord } from "./nameMatch";
 import type { PreviewSheet } from "./workbook";
@@ -26,6 +26,8 @@ export type ValidatedImportRow = {
   grossCommissionCents: number | null;
   compensationBps: number | null;
   notes: string | null;
+  importedGroupName: string | null;
+  importedGroupNumber: string | null;
   exceptions: string[];
 };
 
@@ -36,6 +38,7 @@ export type ImportReferenceData = {
   agents: NamedRecord[];
   agreements?: CompensationAgreementCandidate[];
   statementCarrier?: NamedRecord | null;
+  groupResolutions?: GroupImportResolution[];
 };
 
 export function resolveImportedCarrier(
@@ -88,7 +91,11 @@ export function validateMappedRows(
       const key = sourceRowKey(sheet.name, row.rowNumber);
       const groupSourceName = mappingValue(row.values, mapping.groupName);
       const groupSourceNumber = mappingValue(row.values, mapping.groupNumber);
-      const group = matchImportedGroup(references.groups, groupSourceName, groupSourceNumber);
+      const group = applyGroupResolutions(
+        matchImportedGroup(references.groups, groupSourceName, groupSourceNumber),
+        references.groupResolutions,
+        references.groups,
+      );
       const mappedCarrier = mappingValue(row.values, mapping.carrier);
       const carrier = resolveImportedCarrier(mapping, row.values, references.carriers, references.statementCarrier);
       const line = matchNamedRecord(references.linesOfBusiness, mappingValue(row.values, mapping.lineOfBusiness));
@@ -108,7 +115,10 @@ export function validateMappedRows(
 
       if (group.status === "missing") exceptions.push("Group is missing.");
       if (group.status === "new_group") {
-        exceptions.push(`Unmatched group: ${group.sourceName || group.sourceNumber}. It will not be created automatically.`);
+        exceptions.push(`Unmatched group: ${group.sourceName || group.sourceNumber}. Confirm it as a new group or match an existing group.`);
+      }
+      if (group.status === "ambiguous") {
+        exceptions.push(`Ambiguous group: ${group.sourceName || group.sourceNumber}. Confirm it as a new group or match an existing group.`);
       }
       if (carrier.status === "missing") exceptions.push("Carrier is missing.");
       if (carrier.status === "unmatched") exceptions.push(`Unmatched carrier: ${carrier.source}.`);
@@ -185,6 +195,8 @@ export function validateMappedRows(
         grossCommissionCents,
         compensationBps: resolvedAgentId == null ? 0 : compensationBps,
         notes,
+        importedGroupName: group.sourceName,
+        importedGroupNumber: group.sourceNumber,
         exceptions: postedKeys.has(key) ? ["Already posted from this statement."] : exceptions,
       };
     }),

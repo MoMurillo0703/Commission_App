@@ -4,6 +4,7 @@ import { resolveDb } from "@/db";
 import { importStatements, type ImportStatement } from "@/db/schema";
 import { paidMonthPattern } from "@/domain/dates";
 import type { ColumnMapping } from "@/domain/columnMapping";
+import type { GroupImportResolution } from "@/domain/groupMatch";
 import type { StatementPreview } from "@/domain/workbook";
 import { getCarrier } from "./carriers";
 import { ConflictError, isUniqueConstraintError, NotFoundError, ValidationError } from "@/lib/errors";
@@ -164,6 +165,24 @@ export async function createImportStatement(db: AppDatabase | undefined, input: 
     }
     throw error;
   }
+}
+
+export async function saveImportGroupResolutions(
+  db: AppDatabase | undefined,
+  id: number,
+  resolutions: GroupImportResolution[],
+  remainingUnmatched = 0,
+) {
+  const database = await resolveDb(db);
+  const existing = await getImportStatement(database, id);
+  if (!existing) throw new NotFoundError("Statement not found.");
+  const preview = existing.preview ?? { sheets: [], unmatchedGroups: [], rowCount: 0, newGroupCount: remainingUnmatched };
+  const [row] = await database.update(importStatements).set({
+    previewJson: JSON.stringify({ ...preview, groupResolutions: resolutions, newGroupCount: remainingUnmatched }),
+    newGroupCount: remainingUnmatched,
+    updatedAt: new Date().toISOString(),
+  }).where(eq(importStatements.id, id)).returning();
+  return toViewWithCarrier(database, row);
 }
 
 export async function saveImportColumnMapping(db: AppDatabase | undefined, id: number, columnMapping: ColumnMapping) {

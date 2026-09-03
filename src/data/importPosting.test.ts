@@ -116,6 +116,8 @@ describe("excel row posting", () => {
     const preview = await previewImportPosting(db, statement.id, mapping);
     expect(preview.rows[0]?.status).toBe("blocked");
     expect(preview.rows[0]?.exceptions.join(" ")).toMatch(/Unmatched group/);
+    expect(preview.unmatchedGroups).toHaveLength(1);
+    expect(preview.unmatchedGroups[0]?.sourceName).toBe("Empower Speech");
     expect((await postImportStatement(db, statement.id, mapping)).postedCount).toBe(0);
     expect((await listGroups(db)).map((group) => group.name)).toEqual(["Acme Benefits"]);
     expect(await listCommissions(db)).toHaveLength(0);

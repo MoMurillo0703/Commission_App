@@ -36,5 +36,7 @@ describe("CSV statement inspection", () => {
     expect(preview.rowCount).toBeGreaterThan(0);
     expect(preview.sheets[0].headers).toContain("CURRENT COMMISSION");
     expect(preview.sheets[0].rows[0].values["NAME / GROUP NAME"]).toBeTruthy();
+    expect(suggestColumnMapping(preview.sheets[0].headers).groupNumber).toBe("POLICY NUMBER");
+    expect(preview.newGroupCount).toBe(2);
   });
 });

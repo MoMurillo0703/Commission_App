@@ -13,6 +13,7 @@ import {
 } from "./statements";
 import { createTestDb } from "@/db/test-db";
 import { fingerprintBuffer } from "@/domain/fingerprint";
+import { isUnparsedStatement, statementNextAction, statementStatusLabel } from "@/domain/statementWorkflow";
 import { previewWorkbook } from "@/domain/workbook";
 import { ConflictError } from "@/lib/errors";
 
@@ -246,5 +247,8 @@ describe("import statement intake", () => {
     expect(pdf.status).toBe("needs_profile");
     expect(xls.status).toBe("needs_conversion");
     expect(pdf.preview?.rowCount).toBe(0);
+    expect(statementStatusLabel(pdf.status, pdf.sourceType)).toBe("PDF reading not supported yet");
+    expect(isUnparsedStatement(pdf)).toBe(true);
+    expect(statementNextAction(pdf.status, false, pdf.sourceType)).toBe("View original");
   });
 });

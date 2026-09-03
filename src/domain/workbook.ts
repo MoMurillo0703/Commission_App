@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { detectGroupHeaders, matchImportedGroup, unmatchedGroupKey, type GroupCandidate, type GroupMatch } from "./groupMatch";
+import { detectGroupHeaders, matchImportedGroup, unmatchedGroupKey, type GroupCandidate, type GroupImportResolution, type GroupMatch } from "./groupMatch";
 
 export type InspectedSheet = {
   name: string;
@@ -33,6 +33,7 @@ export type StatementPreview = {
   unmatchedGroups: UnmatchedGroup[];
   rowCount: number;
   newGroupCount: number;
+  groupResolutions?: GroupImportResolution[];
 };
 
 function cellText(cell: ExcelJS.Cell) {

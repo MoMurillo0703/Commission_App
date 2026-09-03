@@ -7,7 +7,9 @@ export type StatementWorkflowStatus =
   | "needs_conversion"
   | "review";
 
-export function statementStatusLabel(status: string) {
+export function statementStatusLabel(status: string, sourceType?: string | null) {
+  if (status === "needs_profile" || sourceType === "pdf") return "PDF reading not supported yet";
+  if (status === "needs_conversion" || sourceType === "xls") return "XLS reading not supported yet";
   switch (status) {
     case "ready_to_map":
       return "Needs review";
@@ -17,8 +19,6 @@ export function statementStatusLabel(status: string) {
       return "Posted";
     case "partially_posted":
       return "Partially posted";
-    case "needs_profile":
-    case "needs_conversion":
     case "review":
       return "Needs attention";
     default:
@@ -26,10 +26,10 @@ export function statementStatusLabel(status: string) {
   }
 }
 
-export function statementNextAction(status: string, hasReadableRows: boolean) {
+export function statementNextAction(status: string, hasReadableRows: boolean, sourceType?: string | null) {
+  if (isUnparsedStatement({ status, sourceType })) return "View original";
   if (hasReadableRows && (status === "mapped" || status === "partially_posted")) return "Continue Import";
   if (hasReadableRows) return "Review Statement";
-  if (status === "needs_conversion" || status === "needs_profile") return "Open statement";
   if (status === "posted") return "View statement";
   return "Open statement";
 }
@@ -72,10 +72,14 @@ export function statementGuidance(input: {
       ? "The app read this statement and reused the last column layout for this carrier"
       : "The app read this statement and needs you to confirm it",
     why: unmatched
-      ? `${unmatched} group name${unmatched === 1 ? "" : "s"} did not match a group already on file. The app will not create groups automatically.`
+      ? `${unmatched} group name${unmatched === 1 ? "" : "s"} did not match a group already on file. Review them as new groups or match them to existing groups before posting.`
       : "Confirm the columns and any unmatched values before posting.",
     next: input.hasReadableRows ? "Review the statement, then continue the import when the rows look correct." : "Open the statement to see what still needs attention.",
   };
+}
+
+export function isUnparsedStatement(statement: { status?: string | null; sourceType?: string | null }) {
+  return statement.sourceType === "pdf" || statement.sourceType === "xls" || statement.status === "needs_profile" || statement.status === "needs_conversion";
 }
 
 export function canReviewRows(preview: { sheets?: Array<{ rows?: unknown[] }> } | null | undefined) {

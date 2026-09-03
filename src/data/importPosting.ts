@@ -8,6 +8,7 @@ import { getImportStatement, markImportStatementPosted, saveImportColumnMapping 
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import type { ColumnMapping } from "@/domain/columnMapping";
+import { collectUnmatchedImportGroups } from "@/domain/importGroups";
 import { validateMappedRows } from "@/domain/importRows";
 import { canReviewRows } from "@/domain/statementWorkflow";
 import { NotFoundError, ValidationError } from "@/lib/errors";
@@ -33,11 +34,18 @@ export async function previewImportPosting(db: AppDatabase | undefined, statemen
   }
   const saved = await saveImportColumnMapping(database, statementId, mapping);
   const postedKeys = new Set(await listPostedSourceRowKeys(database, statementId));
-  const rows = validateMappedRows(statement.preview.sheets, mapping, statement.paidMonth, await references(database, statement.carrierId), postedKeys);
+  const rows = validateMappedRows(
+    statement.preview.sheets,
+    mapping,
+    statement.paidMonth,
+    { ...(await references(database, statement.carrierId)), groupResolutions: statement.preview.groupResolutions },
+    postedKeys,
+  );
   return {
     statement: saved,
     paidMonth: statement.paidMonth,
     rows,
+    unmatchedGroups: collectUnmatchedImportGroups(rows),
     readyCount: rows.filter((row) => row.status === "ready").length,
     blockedCount: rows.filter((row) => row.status === "blocked").length,
     postedCount: rows.filter((row) => row.status === "posted").length,
@@ -63,7 +71,7 @@ export async function postImportStatement(db: AppDatabase | undefined, statement
       grossCommissionCents: row.grossCommissionCents,
       compensationBps: row.agentId == null ? 0 : row.compensationBps,
       sourceReference: `import:${statementId}:${row.sourceRowKey}`,
-      notes: row.notes,
+      notes: [row.notes, row.importedGroupName ? `Source group: ${row.importedGroupName}` : null].filter(Boolean).join(" · ") || null,
       premiumMonth: row.premiumMonth,
       importStatementId: statementId,
       sourceRowKey: row.sourceRowKey,

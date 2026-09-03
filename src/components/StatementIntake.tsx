@@ -6,7 +6,7 @@ import { currentPaidMonth, formatPaidMonthTitle, formatStatementMonth } from "@/
 import type { ImportStatementView } from "@/data/statements";
 import type { Carrier } from "@/db/schema";
 import type { StatementPreview } from "@/domain/workbook";
-import { canReviewRows, statementGuidance, statementHasReadableRows, statementNextAction, statementStatusLabel } from "@/domain/statementWorkflow";
+import { canReviewRows, isUnparsedStatement, statementGuidance, statementHasReadableRows, statementNextAction, statementStatusLabel } from "@/domain/statementWorkflow";
 import { StatementPosting } from "./StatementPosting";
 
 type IntakeResult = {
@@ -222,14 +222,14 @@ export function StatementIntake({
         <div className="result">
           <strong>Upload results</strong>
           {batchResults.map((item, index) => (
-            <p key={`${item.fileName}-${index}`}><span className={`pill ${item.status}`}>{statementStatusLabel(item.status)}</span> {item.fileName}: {item.message}</p>
+            <p key={`${item.fileName}-${index}`}><span className={`pill ${item.status}`}>{statementStatusLabel(item.status, item.fileType)}</span> {item.fileName}: {item.message}</p>
           ))}
         </div>
       )}
       {result && (
         <div className="result">
           <strong>{result.fileName ?? result.statement?.displayName}</strong>
-          <span className={`pill ${result.status}`}>{statementStatusLabel(result.status)}</span>
+          <span className={`pill ${result.status}`}>{statementStatusLabel(result.status, result.fileType ?? result.statement?.sourceType)}</span>
           {result.statement?.carrierName && <p>Carrier: {result.statement.carrierName}{result.carrierCreated ? " (created with this upload)" : ""}</p>}
           <p>{result.message}</p>
           {result.statement && (
@@ -255,25 +255,37 @@ export function StatementIntake({
           ))}
         </div>
       )}
-      {preview && (
+      {activeStatement && isUnparsedStatement(activeStatement) && (
         <div className="result">
-          <strong>Import preview</strong>
-          <p>
-            {preview.rowCount} rows ready to map
-            {preview.newGroupCount ? ` · ${preview.newGroupCount} unmatched group${preview.newGroupCount === 1 ? "" : "s"}` : ""}
-          </p>
-          {preview.unmatchedGroups.length > 0 && (
+          <strong>{statementStatusLabel(activeStatement.status, activeStatement.sourceType)}</strong>
+          <p>The original file was saved. Commission rows were not extracted, so there is nothing to map, review, or post.</p>
+          <p>Download the saved original for reference. To process commissions now, upload a CSV or XLSX version of this statement.</p>
+          {activeStatement.storedPath && (
             <p>
-              New groups pending review:{" "}
-              {preview.unmatchedGroups
-                .map((group) => group.sourceName || group.sourceNumber || "Unnamed group")
-                .join(", ")}
-              . They will not be created until reviewed.
+              <a className="secondary" href={`/api/imports/statements/${activeStatement.id}/file`} style={{ display: "inline-block", textDecoration: "none" }}>
+                Download original
+              </a>
             </p>
           )}
         </div>
       )}
-      {activeStatement && preview && preview.sheets.length > 0 && <StatementPosting statement={activeStatement} preview={preview} />}
+      {preview && !isUnparsedStatement(activeStatement ?? {}) && canReviewRows(preview) && (
+        <div className="result">
+          <strong>Import preview</strong>
+          <p>
+            {preview.rowCount} row{preview.rowCount === 1 ? "" : "s"} read
+            {preview.newGroupCount ? ` · ${preview.newGroupCount} unmatched group name${preview.newGroupCount === 1 ? "" : "s"} to review` : ""}
+          </p>
+          {preview.unmatchedGroups.length > 0 && (
+            <p>
+              New groups will stay unmatched until you confirm them below. They are not created at upload.
+            </p>
+          )}
+        </div>
+      )}
+      {activeStatement && preview && canReviewRows(preview) && !isUnparsedStatement(activeStatement) && (
+        <StatementPosting statement={activeStatement} preview={preview} />
+      )}
       {availablePaidMonths.length > 0 && (
         <div className="month-links" aria-label="Statement paid months">
           <strong>Open paid month:</strong>
@@ -324,12 +336,12 @@ export function StatementIntake({
                 <td>{new Date(statement.uploadedAt).toLocaleString()}</td>
                 <td>{statement.sourceType}</td>
                 <td>
-                  <span className={`pill ${statement.status}`}>{statementStatusLabel(statement.status)}</span>
+                  <span className={`pill ${statement.status}`}>{statementStatusLabel(statement.status, statement.sourceType)}</span>
                 </td>
                 <td>
                   <div className="form-actions">
                     <button type="button" className="secondary" onClick={() => inspectSaved(statement.id)}>
-                      {statementNextAction(statement.status, statementHasReadableRows(statement))}
+                      {statementNextAction(statement.status, statementHasReadableRows(statement), statement.sourceType)}
                     </button>
                     {statement.storedPath && (
                       <a className="secondary" href={`/api/imports/statements/${statement.id}/file`} style={{ display: "inline-block", textDecoration: "none" }}>
