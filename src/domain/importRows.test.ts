@@ -46,12 +46,12 @@ const references = {
 describe("statement-level carrier row resolution", () => {
   it("uses the statement carrier when the row has no carrier value", () => {
     const match = resolveImportedCarrier(mapping, { Carrier: "" }, references.carriers, references.statementCarrier);
-    expect(match).toMatchObject({ status: "matched", id: 9, name: "Principal" });
+    expect(match).toMatchObject({ status: "matched", id: 9, name: "Principal", sourceKind: "statement" });
   });
 
   it("does not force the statement carrier when a row names a different carrier", () => {
     const match = resolveImportedCarrier(mapping, { Carrier: "Aetna" }, references.carriers, references.statementCarrier);
-    expect(match).toMatchObject({ status: "matched", id: 10, name: "Aetna" });
+    expect(match).toMatchObject({ status: "matched", id: 10, name: "Aetna", sourceKind: "column" });
   });
 
   it("leaves unmatched row-level carrier names unmatched", () => {
@@ -69,5 +69,7 @@ describe("statement-level carrier row resolution", () => {
     expect(rows[0]?.status).toBe("ready");
     expect(rows[0]?.carrierId).toBe(9);
     expect(rows[0]?.carrierLabel).toBe("Principal");
+    expect(rows[0]?.carrierSource).toBe("statement");
+    expect(rows[0]?.exceptions.join(" ")).not.toMatch(/carrier/i);
   });
 });

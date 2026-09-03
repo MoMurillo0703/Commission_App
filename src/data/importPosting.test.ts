@@ -1,4 +1,6 @@
 import ExcelJS from "exceljs";
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createAgreement } from "./agreements";
 import { createAgent } from "./agents";
@@ -181,6 +183,7 @@ describe("excel row posting", () => {
     const preview = await previewImportPosting(db, statement.id, withoutCarrierColumn);
     expect(preview.rows[0]?.status).toBe("ready");
     expect(preview.rows[0]?.carrierId).toBe(carrier.id);
+    expect(preview.rows[0]?.carrierSource).toBe("statement");
     expect((await postImportStatement(db, statement.id, withoutCarrierColumn)).postedCount).toBe(1);
     expect((await listCommissions(db))[0]?.carrierId).toBe(carrier.id);
   });
@@ -225,5 +228,33 @@ describe("excel row posting", () => {
     await expect(previewImportPosting(db, statement.id, {})).rejects.toThrow(/no readable rows/i);
     await expect(postImportStatement(db, statement.id, {})).rejects.toThrow(/no readable rows/i);
     expect(await listCommissions(db)).toHaveLength(0);
+  });
+
+  it("applies an Anthem statement carrier without requiring a mapped Carrier column", async () => {
+    const db = await createTestDb();
+    const carrier = await createCarrier(db, { name: "Anthem" });
+    await createLineOfBusiness(db, { name: "MED" });
+    await createGroup(db, { name: "EXAMPLE SPEECH GROUP", groupNumber: "DEMO-POLICY-1" });
+    await createGroup(db, { name: "EXAMPLE DENTAL GROUP", groupNumber: "DEMO-POLICY-2" });
+    const buffer = fs.readFileSync(path.join(process.cwd(), "tests/fixtures/anthem-08-2026.csv"));
+    const preview = previewCsv(buffer, await listGroups(db));
+    const statement = await createImportStatement(db, {
+      originalFilename: "anthem-08-2026.csv",
+      paidMonth: "2026-08",
+      carrierId: carrier.id,
+      sourceType: "csv",
+      status: "ready_to_map",
+      fingerprint: fingerprintBuffer(buffer),
+      preview,
+    });
+    const anthemMapping = { ...suggestColumnMapping(preview.sheets[0].headers), carrier: null, agent: null };
+
+    expect(anthemMapping.carrier).toBeNull();
+    const review = await previewImportPosting(db, statement.id, anthemMapping);
+    expect(review.rows.length).toBeGreaterThan(0);
+    expect(review.rows.every((row) => row.carrierId === carrier.id)).toBe(true);
+    expect(review.rows.every((row) => row.carrierSource === "statement")).toBe(true);
+    expect(review.rows.every((row) => !row.exceptions.some((item) => /carrier/i.test(item)))).toBe(true);
+    expect(review.readyCount).toBe(review.rows.length);
   });
 });

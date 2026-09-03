@@ -67,3 +67,32 @@ export async function readStatementFile(storedPath: string) {
   if (!fs.existsSync(storedPath)) throw new Error("Statement file was not found.");
   return fs.readFileSync(storedPath);
 }
+
+export function statementStoredPathBelongsTo(id: number, originalFilename: string, storedPath: string) {
+  const key = objectKey(id, originalFilename);
+  if (storedPath === key) return true;
+  const expectedLocalPath = path.resolve(localDirectory(), path.basename(key));
+  return path.resolve(storedPath) === expectedLocalPath;
+}
+
+export async function deleteStatementFile(id: number, originalFilename: string, storedPath: string | null | undefined) {
+  const target = storedPath?.trim();
+  if (!target) return;
+  if (!statementStoredPathBelongsTo(id, originalFilename, target)) {
+    throw new Error("The stored file path does not belong to this statement.");
+  }
+
+  if (storageDriver() === "supabase" || target.startsWith("statements/")) {
+    const { error } = await supabaseAdmin().storage.from(bucket()).remove([target]);
+    if (error) throw new Error(`Unable to delete the stored statement file: ${error.message}`);
+    return;
+  }
+
+  if (!fs.existsSync(target)) return;
+  try {
+    fs.unlinkSync(target);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "The stored statement file could not be removed.";
+    throw new Error(`Unable to delete the stored statement file: ${message}`);
+  }
+}

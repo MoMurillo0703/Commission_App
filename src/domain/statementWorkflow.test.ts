@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   canReviewRows,
   isUnparsedStatement,
+  statementCanBeDeleted,
+  statementDeleteBlockedReason,
   statementGuidance,
   statementHasReadableRows,
   statementNextAction,
@@ -42,5 +44,15 @@ describe("statement workflow language", () => {
     expect(canReviewRows(null)).toBe(false);
     expect(statementHasReadableRows({ preview: null, rowCount: 12, sourceType: "csv" })).toBe(true);
     expect(statementHasReadableRows({ preview: null, rowCount: 0, sourceType: "pdf" })).toBe(false);
+  });
+
+  it("blocks deletion only after commissions have been posted", () => {
+    expect(statementCanBeDeleted({ status: "ready_to_map", postedRowCount: 0 })).toBe(true);
+    expect(statementCanBeDeleted({ status: "mapped", postedRowCount: 0 })).toBe(true);
+    expect(statementCanBeDeleted({ status: "needs_profile", postedRowCount: 0 })).toBe(true);
+    expect(statementCanBeDeleted({ status: "posted", postedRowCount: 1 })).toBe(false);
+    expect(statementCanBeDeleted({ status: "partially_posted", postedRowCount: 2 })).toBe(false);
+    expect(statementCanBeDeleted({ status: "mapped", postedRowCount: 1 })).toBe(false);
+    expect(statementDeleteBlockedReason()).toMatch(/audit trail/i);
   });
 });

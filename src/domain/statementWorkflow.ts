@@ -94,3 +94,12 @@ export function statementHasReadableRows(statement: {
   if (canReviewRows(statement.preview)) return true;
   return (statement.rowCount ?? 0) > 0 && (statement.sourceType === "csv" || statement.sourceType === "excel");
 }
+
+export function statementCanBeDeleted(statement: { status?: string | null; postedRowCount?: number | null }) {
+  if ((statement.postedRowCount ?? 0) > 0) return false;
+  return statement.status !== "posted" && statement.status !== "partially_posted";
+}
+
+export function statementDeleteBlockedReason() {
+  return "This statement has posted commissions and cannot be deleted. Posted rows are part of the audit trail.";
+}

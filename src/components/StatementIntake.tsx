@@ -6,7 +6,7 @@ import { currentPaidMonth, formatPaidMonthTitle, formatStatementMonth } from "@/
 import type { ImportStatementView } from "@/data/statements";
 import type { Carrier } from "@/db/schema";
 import type { StatementPreview } from "@/domain/workbook";
-import { canReviewRows, isUnparsedStatement, statementGuidance, statementHasReadableRows, statementNextAction, statementStatusLabel } from "@/domain/statementWorkflow";
+import { canReviewRows, isUnparsedStatement, statementCanBeDeleted, statementDeleteBlockedReason, statementGuidance, statementHasReadableRows, statementNextAction, statementStatusLabel } from "@/domain/statementWorkflow";
 import { StatementPosting } from "./StatementPosting";
 
 type IntakeResult = {
@@ -152,6 +152,30 @@ export function StatementIntake({
       setRenamingId(null);
       await loadStatements(paidMonth);
     }
+  }
+
+  async function removeStatement(statement: ImportStatementView) {
+    if (!statementCanBeDeleted(statement)) return;
+    if (!window.confirm(`Delete “${statement.displayName}” and its original file? Groups, carriers, people, and compensation already on file will be kept.`)) {
+      return;
+    }
+    setBusy(true);
+    const response = await fetch(`/api/imports/statements/${statement.id}`, { method: "DELETE" });
+    const body = await response.json().catch(() => ({})) as { message?: string; storageCleanupFailed?: boolean };
+    if (response.ok) {
+      if (activeStatement?.id === statement.id) {
+        setActiveStatement(null);
+        setPreview(null);
+        setResult(null);
+      }
+      await loadStatements(paidMonth);
+      if (body.storageCleanupFailed) {
+        setResult({ status: "review", message: body.message ?? "The statement was deleted, but its stored file still needs cleanup." });
+      }
+    } else {
+      setResult({ status: "review", message: body.message ?? "Unable to delete that statement." });
+    }
+    setBusy(false);
   }
 
   return (
@@ -358,6 +382,15 @@ export function StatementIntake({
                         }}
                       >
                         Rename
+                      </button>
+                    )}
+                    {statementCanBeDeleted(statement) ? (
+                      <button type="button" className="secondary" disabled={busy} onClick={() => removeStatement(statement)}>
+                        Delete
+                      </button>
+                    ) : (
+                      <button type="button" className="secondary" disabled title={statementDeleteBlockedReason()}>
+                        Posted — cannot delete
                       </button>
                     )}
                   </div>

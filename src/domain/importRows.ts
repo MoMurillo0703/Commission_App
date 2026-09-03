@@ -6,6 +6,7 @@ import { matchNamedRecord, type NamedRecord } from "./nameMatch";
 import type { PreviewSheet } from "./workbook";
 
 export type ImportRowStatus = "ready" | "blocked" | "posted";
+export type CarrierSourceKind = "statement" | "column";
 
 export type ValidatedImportRow = {
   sourceRowKey: string;
@@ -18,6 +19,7 @@ export type ValidatedImportRow = {
   groupLabel: string | null;
   carrierId: number | null;
   carrierLabel: string | null;
+  carrierSource: CarrierSourceKind | null;
   lineOfBusinessId: number | null;
   lineOfBusinessLabel: string | null;
   agentId: number | null;
@@ -48,11 +50,17 @@ export function resolveImportedCarrier(
   statementCarrier?: NamedRecord | null,
 ) {
   const source = mappingValue(values, mapping.carrier);
-  if (source) return matchNamedRecord(carriers, source);
+  if (source) return { ...matchNamedRecord(carriers, source), sourceKind: "column" as const };
   if (statementCarrier) {
-    return { status: "matched" as const, id: statementCarrier.id, name: statementCarrier.name, source: null };
+    return {
+      status: "matched" as const,
+      id: statementCarrier.id,
+      name: statementCarrier.name,
+      source: null,
+      sourceKind: "statement" as const,
+    };
   }
-  return { status: "missing" as const, id: null, name: null, source: null };
+  return { status: "missing" as const, id: null, name: null, source: null, sourceKind: null };
 }
 
 export function sourceRowKey(sheetName: string, rowNumber: number) {
@@ -187,6 +195,7 @@ export function validateMappedRows(
         groupLabel: group.groupName ?? group.sourceName ?? group.sourceNumber,
         carrierId: carrier.id,
         carrierLabel: carrier.name ?? carrier.source,
+        carrierSource: carrier.sourceKind,
         lineOfBusinessId: line.id,
         lineOfBusinessLabel: line.name ?? line.source,
         agentId: resolvedAgentId,

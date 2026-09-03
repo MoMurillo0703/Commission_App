@@ -1,14 +1,15 @@
 import { desc, eq, sql } from "drizzle-orm";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
-import { importStatements, type ImportStatement } from "@/db/schema";
+import { commissionRecords, importStatements, type ImportStatement } from "@/db/schema";
 import { paidMonthPattern } from "@/domain/dates";
 import type { ColumnMapping } from "@/domain/columnMapping";
 import type { GroupImportResolution } from "@/domain/groupMatch";
+import { statementCanBeDeleted, statementDeleteBlockedReason } from "@/domain/statementWorkflow";
 import type { StatementPreview } from "@/domain/workbook";
 import { getCarrier } from "./carriers";
 import { ConflictError, isUniqueConstraintError, NotFoundError, ValidationError } from "@/lib/errors";
-import { storeStatementFile } from "@/lib/storage";
+import { deleteStatementFile, storeStatementFile, statementStoredPathBelongsTo } from "@/lib/storage";
 
 export type ImportStatementView = Omit<ImportStatement, "previewJson" | "columnMappingJson"> & {
   preview: StatementPreview | null;
@@ -215,4 +216,45 @@ export async function renameImportStatement(db: AppDatabase | undefined, id: num
   if (!name) throw new ValidationError("Display name is required.");
   const [row] = await database.update(importStatements).set({ displayName: name, updatedAt: new Date().toISOString() }).where(eq(importStatements.id, id)).returning();
   return toViewWithCarrier(database, row);
+}
+
+async function postedCommissionCount(db: AppDatabase, statementId: number) {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(commissionRecords)
+    .where(eq(commissionRecords.importStatementId, statementId));
+  return Number(row?.count ?? 0);
+}
+
+export async function deleteImportStatement(db: AppDatabase | undefined, id: number) {
+  const database = await resolveDb(db);
+  const existing = await getImportStatement(database, id);
+  if (!existing) throw new NotFoundError("Statement not found.");
+  if (!statementCanBeDeleted(existing) || await postedCommissionCount(database, id) > 0) {
+    throw new ValidationError(statementDeleteBlockedReason());
+  }
+
+  const [removed] = await database.delete(importStatements).where(eq(importStatements.id, id)).returning();
+  if (!removed) throw new Error("The statement record could not be removed.");
+
+  let storageCleanupFailed = false;
+  if (existing.storedPath) {
+    try {
+      if (!statementStoredPathBelongsTo(existing.id, existing.originalFilename, existing.storedPath)) {
+        throw new Error("The stored file path does not belong to this statement.");
+      }
+      await deleteStatementFile(existing.id, existing.originalFilename, existing.storedPath);
+    } catch (error) {
+      storageCleanupFailed = true;
+      console.error(`Statement ${id} was deleted from the database, but its stored file could not be removed.`, error);
+    }
+  }
+
+  return {
+    ...toView(removed, existing.carrierName),
+    storageCleanupFailed,
+    message: storageCleanupFailed
+      ? "The statement was deleted, but its private stored file could not be removed. An orphaned storage object may remain."
+      : "Statement deleted.",
+  };
 }

@@ -115,6 +115,7 @@ export function StatementPosting({
   }
 
   const unmatched = review?.unmatchedGroups ?? [];
+  const mappingFieldsToShow = mappingFields.filter((field) => !(field === "carrier" && statement.carrierName));
 
   return (
     <div className="result">
@@ -130,8 +131,25 @@ export function StatementPosting({
           ? " Map a Carrier column only if this file contains more than one carrier."
           : " Map a Carrier column for each row."}
       </p>
+      {statement.carrierName && (
+        <div className="related-block">
+          <p><strong>Carrier: {statement.carrierName}</strong></p>
+          <p>Source: Statement carrier. Imported rows use this carrier unless a row-level Carrier column is mapped.</p>
+          <label>
+            Carrier column (optional)
+            <select value={mapping.carrier ?? ""} onChange={(event) => setField("carrier", event.target.value)}>
+              <option value="">Use statement carrier</option>
+              {headers.map((header) => (
+                <option key={header} value={header}>
+                  {header}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
       <div className="form-grid form-grid-wide">
-        {mappingFields.map((field) => (
+        {mappingFieldsToShow.map((field) => (
           <label key={field}>
             {mappingFieldLabels[field]}
             <select value={mapping[field] ?? ""} onChange={(event) => setField(field, event.target.value)}>
@@ -240,7 +258,10 @@ export function StatementPosting({
                 <tr key={row.sourceRowKey}>
                   <td>{row.rowNumber}</td>
                   <td>{row.groupLabel || "—"}</td>
-                  <td>{row.carrierLabel || "—"}</td>
+                  <td>
+                    {row.carrierLabel || "—"}
+                    {row.carrierSource === "statement" ? <small> · statement carrier</small> : null}
+                  </td>
                   <td>{row.lineOfBusinessLabel || "—"}</td>
                   <td>{row.agentLabel || "Unassigned"}</td>
                   <td>{row.grossCommissionCents == null ? "—" : formatCents(row.grossCommissionCents)}</td>
