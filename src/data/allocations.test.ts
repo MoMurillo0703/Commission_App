@@ -76,6 +76,40 @@ describe("compensation allocations", () => {
     expect((await listPayoutsForCommission(db, posted.id)).find((row) => row.personName === "John Elizando")?.allocationBps).toBe(7000);
   });
 
+  it("saves Agency plus five people and rejects a sixth person", async () => {
+    const { db, john, nancy, laura, group, medical } = await seed();
+    const extra = await createAgent(db, { name: "Mo" });
+    const fifth = await createAccountManager(db, { name: "Additional AM" });
+    const allocation = await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: medical.id,
+      effectiveStart: "2026-09",
+      entries: [
+        { recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 2000 },
+        { recipientType: "person", personKind: "agent", personId: nancy.id, compensationBps: 2000 },
+        { recipientType: "person", personKind: "agent", personId: extra.id, compensationBps: 2000 },
+        { recipientType: "person", personKind: "account_manager", personId: laura.id, compensationBps: 1500 },
+        { recipientType: "person", personKind: "account_manager", personId: fifth.id, compensationBps: 1500 },
+        { recipientType: "agency", compensationBps: 1000 },
+      ],
+    });
+    expect(allocation.entries.filter((entry) => entry.recipientType === "person")).toHaveLength(5);
+    const sixth = await createAgent(db, { name: "Sixth Person" });
+    await expect(createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: medical.id,
+      effectiveStart: "2027-01",
+      entries: [
+        { recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 2000 },
+        { recipientType: "person", personKind: "agent", personId: nancy.id, compensationBps: 2000 },
+        { recipientType: "person", personKind: "agent", personId: extra.id, compensationBps: 2000 },
+        { recipientType: "person", personKind: "account_manager", personId: laura.id, compensationBps: 1500 },
+        { recipientType: "person", personKind: "account_manager", personId: fifth.id, compensationBps: 1500 },
+        { recipientType: "person", personKind: "agent", personId: sixth.id, compensationBps: 1000 },
+      ],
+    })).rejects.toThrow(/at most 5 individual people/);
+  });
+
   it("blocks incomplete allocations and distributes a team without rewriting later team membership", async () => {
     const { db, john, nancy, laura, group, carrier, medical } = await seed();
     await expect(createAllocation(db, {

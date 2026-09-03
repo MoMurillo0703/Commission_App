@@ -31,6 +31,15 @@ export type UnmatchedGroup = {
   rowCount: number;
 };
 
+export type PdfConfirmedLayout = {
+  headerPageNumber: number;
+  headerLineNumber: number;
+  dataStartPageNumber: number;
+  dataStartLineNumber: number;
+  dataEndPageNumber: number;
+  dataEndLineNumber: number;
+};
+
 export type PdfPreviewMeta = {
   classification: "readable" | "needs_layout" | "unreadable" | "failed";
   pageCount: number;
@@ -38,6 +47,8 @@ export type PdfPreviewMeta = {
   layoutVersion?: number | null;
   layoutName?: string | null;
   extractionPath?: string | null;
+  layoutConfirmed?: boolean;
+  confirmedLayout?: PdfConfirmedLayout;
 };
 
 export type StatementPreview = {

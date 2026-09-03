@@ -51,7 +51,7 @@ The application uses Postgres through Drizzle ORM. Numbered SQL files in `migrat
 ### `compensation_allocations`
 
 - Complete compensation terms for one group, one line of business, and an effective period.
-- Contains multiple `compensation_allocation_entries`: Agency (first-class), up to 3 people, and/or teams.
+- Contains multiple `compensation_allocation_entries`: Agency (first-class), up to 5 people, and/or teams. Agency and Team do not count toward the five-person limit.
 - Active allocations must total exactly 100% and cannot overlap for the same group and line.
 - Changing terms closes the prior period and inserts a new allocation. Historical rows are not overwritten.
 - Migration `0004` preserves every legacy agreement as its source and copies only the known Person share. A legacy 100% active agreement can be activated deterministically; every partial legacy agreement remains inactive and requires explicit review/completion. No Agency remainder is inferred.

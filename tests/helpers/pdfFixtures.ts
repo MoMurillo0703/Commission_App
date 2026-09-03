@@ -26,6 +26,32 @@ export async function textCommissionPdf(pages = 1) {
   return new Uint8Array(await pdf.save());
 }
 
+export async function readableHiddenTablePdf() {
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([720, 500]);
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  page.drawText("Choice Builder commission statement for the paid month with readable embedded text.", {
+    x: 36,
+    y: 440,
+    size: 11,
+    font,
+    color: rgb(0, 0, 0),
+    maxWidth: 640,
+  });
+  const headers = ["Member", "Plan", "Paid", "Fee"];
+  const first = ["Acme Benefits", "Dental", "1000.00", "80.00"];
+  const second = ["Gamma Group", "Dental", "250.00", "20.00"];
+  const xs = [36, 220, 360, 480];
+  headers.forEach((header, column) => page.drawText(header, { x: xs[column]!, y: 380, size: 9, font }));
+  first.forEach((value, column) => page.drawText(value, { x: xs[column]!, y: 360, size: 9, font }));
+  headers.forEach((header, column) => page.drawText(header, { x: xs[column]!, y: 340, size: 9, font }));
+  second.forEach((value, column) => page.drawText(value, { x: xs[column]!, y: 320, size: 9, font }));
+  page.drawText("Subtotal    100.00", { x: 36, y: 292, size: 9, font });
+  page.drawText("Total    100.00", { x: 36, y: 274, size: 9, font });
+  page.drawText("Page 1 of 1", { x: 36, y: 256, size: 9, font });
+  return new Uint8Array(await pdf.save());
+}
+
 export async function imageOnlyPdf() {
   const pdf = await PDFDocument.create();
   const page = pdf.addPage([300, 300]);

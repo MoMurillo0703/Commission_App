@@ -2,7 +2,7 @@ import { paidMonthInRange, paidMonthRangesOverlap, previousPaidMonth } from "./d
 import { calculateAgentCompensationCents } from "./compensation";
 
 export const FULL_ALLOCATION_BPS = 10000;
-export const MAX_DIRECT_PERSONS = 3;
+export const MAX_DIRECT_PERSONS = 5;
 
 export type PersonKind = "agent" | "account_manager";
 export type RecipientType = "agency" | "person" | "team";
@@ -116,7 +116,7 @@ export function validateAllocationEntries(
       if (entry.personId == null) throw new Error("Choose a person from People.");
       personCount += 1;
       if (personCount > MAX_DIRECT_PERSONS) {
-        throw new Error("A direct allocation can include at most 3 individual people in addition to Agency.");
+        throw new Error("A direct allocation can include at most 5 individual people in addition to Agency and Team.");
       }
     } else if (entry.recipientType === "team") {
       if (entry.teamId == null) throw new Error("Choose a team.");

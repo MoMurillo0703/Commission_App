@@ -1,0 +1,42 @@
+:root {
+  --color-brand-navy: #15233B;
+  --color-brand-navy-deep: #0E1728;
+  --color-brand-accent: #C07A3A;
+  --color-brand-accent-text: #8F4F1C;
+  --color-page: #F4F5F7;
+  --color-surface: #FFFFFF;
+  --color-border: #E3E6EB;
+  --color-border-subtle: #ECEEF2;
+  --color-text: #15233B;
+  --color-text-muted: #5B6573;
+  --color-action-primary: #15233B;
+  --color-action-primary-text: #FFFFFF;
+  --color-action-secondary: #EEF1F5;
+  --color-action-secondary-text: #15233B;
+  --color-success: #1B6B4A;
+  --color-success-bg: #E6F4EC;
+  --color-success-text: #14553A;
+  --color-warning: #A86830;
+  --color-warning-bg: #F8EFE4;
+  --color-warning-text: #7A4A1E;
+  --color-error: #8B3030;
+  --color-error-bg: #F8E8E8;
+  --color-error-text: #8B3030;
+  --color-nav-active: #243552;
+  --color-nav-active-text: #FFFFFF;
+  --color-table-header: #3E4A5A;
+  --color-row-alt: #F7F8FA;
+  --color-sidebar: #0E1728;
+  --color-sidebar-text: #D0D6E0;
+  --color-sidebar-muted: #97A1B0;
+  --color-sidebar-border: #2A3548;
+
+  --ink: var(--color-text);
+  --muted: var(--color-text-muted);
+  --green: var(--color-action-primary);
+  --mint: var(--color-action-secondary);
+  --paper: var(--color-page);
+  --line: var(--color-border);
+  --white: var(--color-surface);
+  --amber: var(--color-warning);
+}

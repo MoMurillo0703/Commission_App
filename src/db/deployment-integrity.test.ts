@@ -73,5 +73,25 @@ describe("deployment database integrity", () => {
       (allocation_id, recipient_type, compensation_bps) VALUES (${complete}, 'agency', 10000)`);
     await expect(db.execute(sql`UPDATE compensation_allocations SET status = 'active' WHERE id = ${complete}`)).resolves.toBeDefined();
     await expect(db.execute(sql`UPDATE compensation_allocation_entries SET compensation_bps = 9999 WHERE allocation_id = ${complete}`)).rejects.toThrow();
+
+    await db.execute(sql`UPDATE compensation_allocations SET status = 'inactive' WHERE id = ${complete}`);
+    const five = await makePlan("7");
+    for (const personId of [1, 2, 3, 4, 5]) {
+      await db.execute(sql`INSERT INTO compensation_allocation_entries
+        (allocation_id, recipient_type, person_kind, person_id, compensation_bps)
+        VALUES (${five}, 'person', 'agent', ${personId}, 2000)`);
+    }
+    await expect(db.execute(sql`UPDATE compensation_allocations SET status = 'active' WHERE id = ${five}`)).resolves.toBeDefined();
+    await db.execute(sql`UPDATE compensation_allocations SET status = 'inactive' WHERE id = ${five}`);
+
+    const six = await makePlan("8");
+    for (const personId of [1, 2, 3, 4, 5, 6]) {
+      await db.execute(sql`INSERT INTO compensation_allocation_entries
+        (allocation_id, recipient_type, person_kind, person_id, compensation_bps)
+        VALUES (${six}, 'person', 'agent', ${personId}, 1000)`);
+    }
+    await db.execute(sql`INSERT INTO compensation_allocation_entries
+      (allocation_id, recipient_type, compensation_bps) VALUES (${six}, 'agency', 4000)`);
+    await expect(db.execute(sql`UPDATE compensation_allocations SET status = 'active' WHERE id = ${six}`)).rejects.toThrow();
   });
 });

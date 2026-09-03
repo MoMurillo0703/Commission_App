@@ -94,7 +94,12 @@ describe("report documents", () => {
     expect(html).toMatch(/@page/);
     expect(html).toMatch(/Generated/);
     expect(html).toMatch(/Total Gross Commission/);
+    expect(html).toMatch(/table-header-group/);
+    expect(html).toMatch(/\$100\.00/);
+    expect(html).toMatch(/\$20\.00/);
+    expect(document.totals[3]?.value).toBe("$20.00");
     expect(toCsv(["A"], [["B,C"]])).toBe("A\n\"B,C\"");
+    expect(toCsv(["Amount"], [["=1+1"]])).toMatch(/'=1\+1/);
   });
 
   it("builds individual and team documents from snapshot percentages", () => {

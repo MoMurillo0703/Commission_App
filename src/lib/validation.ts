@@ -20,9 +20,14 @@ export const bulkGroupAssignmentSchema = z.object({
   primaryAgentId: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
 });
 
+export const personKindSchema = z.preprocess(
+  (value) => (value === "" || value === undefined ? null : value),
+  z.enum(["agent", "account_manager"], { error: "Choose Agent or Account Manager." }).nullable(),
+);
+
 export const allocationEntrySchema = z.object({
   recipientType: z.enum(["agency", "person", "team"]),
-  personKind: z.enum(["agent", "account_manager"]).nullable().optional(),
+  personKind: personKindSchema.optional(),
   personId: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
   teamId: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
   compensationPercent: z.string().min(1, "Compensation split is required."),
@@ -51,7 +56,10 @@ export const allocationPatchSchema = z.object({
 });
 
 export const teamMemberInputSchema = z.object({
-  personKind: z.enum(["agent", "account_manager"]),
+  personKind: z.preprocess(
+    (value) => (value === "" || value === undefined ? null : value),
+    z.enum(["agent", "account_manager"], { error: "Choose Agent or Account Manager." }),
+  ),
   personId: z.coerce.number().int().positive(),
   compensationPercent: z.string().min(1, "Team member split is required."),
   effectiveStart: z.string().regex(paidMonthPattern, "Enter an effective start month as YYYY-MM."),
@@ -168,6 +176,15 @@ export const importNamedConfirmSchema = z.object({
 
 export const statementLayoutSaveSchema = z.object({
   name: z.string().trim().min(1).optional(),
+});
+
+export const pdfLayoutSelectionSchema = z.object({
+  headerPageNumber: z.coerce.number().int().positive(),
+  headerLineNumber: z.coerce.number().int().positive(),
+  dataStartPageNumber: z.coerce.number().int().positive(),
+  dataStartLineNumber: z.coerce.number().int().positive(),
+  dataEndPageNumber: z.coerce.number().int().positive(),
+  dataEndLineNumber: z.coerce.number().int().positive(),
 });
 
 export function emptyToNull(value: string | null | undefined) {

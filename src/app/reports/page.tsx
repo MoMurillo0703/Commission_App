@@ -7,10 +7,15 @@ import { countUnassignedCommissions } from "@/data/commissions";
 import { listGroups } from "@/data/groups";
 import { listLinesOfBusiness } from "@/data/linesOfBusiness";
 import { listTeams } from "@/data/teams";
+import { buildAgencyReport } from "@/data/reports";
+import { agencyReportDocument } from "@/domain/reportDocuments";
+import { reportEmptyMessage } from "@/domain/reportDiscovery";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReportsPage() {
+  const initial = await buildAgencyReport(undefined, { kind: "agency" });
+  const document = agencyReportDocument(initial.rows, initial.totals, initial.filters, initial.names);
   return (
     <AppShell active="reports" reviewCount={await countUnassignedCommissions()}>
       <header>
@@ -27,6 +32,11 @@ export default async function ReportsPage() {
         agents={await listAgents()}
         accountManagers={await listAccountManagers()}
         teams={await listTeams()}
+        initialReport={{
+          ...initial,
+          document,
+          emptyMessage: reportEmptyMessage(initial.filters, initial.availability),
+        }}
       />
     </AppShell>
   );

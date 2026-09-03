@@ -226,6 +226,23 @@ export async function saveImportPreview(db: AppDatabase | undefined, id: number,
   return toViewWithCarrier(database, row);
 }
 
+export async function saveConfirmedPdfPreview(db: AppDatabase | undefined, id: number, preview: StatementPreview) {
+  const database = await resolveDb(db);
+  const existing = await getImportStatement(database, id);
+  if (!existing) throw new NotFoundError("Statement not found.");
+  if (existing.status === "posted" || existing.status === "partially_posted") {
+    throw new ValidationError("This statement has already been posted.");
+  }
+  const [row] = await database.update(importStatements).set({
+    previewJson: JSON.stringify(preview),
+    rowCount: preview.rowCount,
+    newGroupCount: preview.newGroupCount,
+    status: "ready_to_map",
+    updatedAt: new Date().toISOString(),
+  }).where(eq(importStatements.id, id)).returning();
+  return toViewWithCarrier(database, row);
+}
+
 export async function saveImportExtractionPath(db: AppDatabase | undefined, id: number, extractionPath: string) {
   const database = await resolveDb(db);
   const existing = await getImportStatement(database, id);

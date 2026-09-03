@@ -41,14 +41,19 @@ describe("compensation allocations", () => {
     expect(allocationProgressLabel(complete)).toMatch(/Complete/);
   });
 
-  it("allows Agency plus up to three people and rejects a fourth person or a duplicate recipient", () => {
-    const fourPeople = [
-      { recipientType: "person" as const, personKind: "agent" as const, personId: 1, compensationBps: 2500 },
-      { recipientType: "person" as const, personKind: "agent" as const, personId: 2, compensationBps: 2500 },
-      { recipientType: "person" as const, personKind: "agent" as const, personId: 3, compensationBps: 2500 },
-      { recipientType: "person" as const, personKind: "agent" as const, personId: 4, compensationBps: 2500 },
-    ];
-    expect(() => validateAllocationEntries(fourPeople)).toThrow(/at most 3 individual people/);
+  it("allows Agency plus up to five people and rejects a sixth person or a duplicate recipient", () => {
+    const fivePeople = [1, 2, 3, 4, 5].map((personId) => ({
+      recipientType: "person" as const,
+      personKind: "agent" as const,
+      personId,
+      compensationBps: 1600,
+    }));
+    const withAgency = [...fivePeople, { recipientType: "agency" as const, compensationBps: 2000 }];
+    expect(validateAllocationEntries(withAgency).complete).toBe(true);
+    expect(() => validateAllocationEntries([
+      ...withAgency,
+      { recipientType: "person" as const, personKind: "agent" as const, personId: 6, compensationBps: 1000 },
+    ])).toThrow(/at most 5 individual people/);
     expect(() => validateAllocationEntries([
       { recipientType: "agency" as const, compensationBps: 5000 },
       { recipientType: "agency" as const, compensationBps: 5000 },
@@ -57,6 +62,19 @@ describe("compensation allocations", () => {
       { recipientType: "person" as const, personKind: "agent" as const, personId: 1, compensationBps: 5000 },
       { recipientType: "person" as const, personKind: "agent" as const, personId: 1, compensationBps: 5000 },
     ])).toThrow(/only once/);
+  });
+
+  it("accepts Team plus Agency plus permitted people at exactly 100 percent", () => {
+    expect(validateAllocationEntries([
+      { recipientType: "agency", compensationBps: 2000 },
+      { recipientType: "team", teamId: 10, compensationBps: 2000 },
+      { recipientType: "person", personKind: "agent", personId: 1, compensationBps: 4000 },
+      { recipientType: "person", personKind: "account_manager", personId: 2, compensationBps: 2000 },
+    ]).complete).toBe(true);
+    expect(() => validateAllocationEntries([
+      { recipientType: "person", personKind: "agent", personId: 1, compensationBps: 5000 },
+      { recipientType: "agency", compensationBps: 2000 },
+    ])).toThrow(/exactly 100 percent/);
   });
 
   it("settles Agency plus multiple people without double-counting Agency net", () => {

@@ -1,3 +1,4 @@
+import { printableSuiteStyles } from "@/theme/tokens";
 import { formatCents } from "./money";
 import { formatStatementMonth } from "./dates";
 import {
@@ -160,48 +161,77 @@ export function reportDocumentCsv(document: ReportDocument) {
   return `${meta.map((row) => toCsv([], [row]).replace(/^\n/, "")).join("\n")}\n${table}\n`;
 }
 
-export function printableReportHtml(document: ReportDocument) {
-  const generated = new Date(document.generatedAt).toLocaleString("en-US");
-  const escapeHtml = (value: string) => value
+function escapeHtml(value: string) {
+  return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+export function isNumericReportHeader(header: string) {
+  return /premium|gross|compensation|agency net|applicable %|team %|earned/i.test(header);
+}
+
+export function isNegativeReportCell(value: string) {
+  return /^-\$|^-\d|\(\$/.test(value.trim());
+}
+
+export function groupedReportRows(document: ReportDocument) {
+  const groups: Array<{ label: string; rows: string[][] }> = [];
+  for (const row of document.rows) {
+    const label = row[0] ?? "";
+    const current = groups[groups.length - 1];
+    if (!current || current.label !== label) groups.push({ label, rows: [row] });
+    else current.rows.push(row);
+  }
+  return groups;
+}
+
+export function printableReportHtml(document: ReportDocument) {
+  const generated = new Date(document.generatedAt).toLocaleString("en-US");
+  const numeric = document.headers.map((header) => isNumericReportHeader(header));
+  const groups = groupedReportRows(document);
+  const bodyRows = groups.flatMap((group) => {
+    const dataRows = group.rows.map((row) => `<tr>${row.map((cell, index) => {
+      const classes = [
+        numeric[index] ? "num" : "",
+        numeric[index] && isNegativeReportCell(cell) ? "neg" : "",
+      ].filter(Boolean).join(" ");
+      return `<td${classes ? ` class="${classes}"` : ""}>${escapeHtml(cell)}</td>`;
+    }).join("")}</tr>`);
+    if (groups.length < 2) return dataRows;
+    return [`<tr class="group-label"><td colspan="${document.headers.length}">${escapeHtml(group.label)}</td></tr>`, ...dataRows];
+  });
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>${escapeHtml(document.agencyName)} · ${escapeHtml(document.title)}</title>
   <style>
-    @page { margin: 0.75in; }
-    body { font-family: Georgia, "Times New Roman", serif; color: #17352f; margin: 0; }
-    header { border-bottom: 2px solid #1e6657; padding-bottom: 12px; margin-bottom: 18px; }
-    h1 { font-size: 22px; margin: 0 0 4px; font-weight: 500; }
-    .agency { text-transform: uppercase; letter-spacing: .12em; font-size: 11px; font-weight: 700; color: #1e6657; }
-    .meta, .filters, .totals { font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #4d5f5a; }
-    .filters { margin: 10px 0 16px; }
-    .totals { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 24px; margin-bottom: 18px; }
-    .totals strong { color: #17352f; }
-    table { width: 100%; border-collapse: collapse; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
-    th { text-align: left; border-bottom: 1px solid #1e6657; padding: 8px 6px; }
-    td { border-bottom: 1px solid #e4ebe8; padding: 8px 6px; }
-    footer { margin-top: 24px; font-size: 10px; color: #6d7e79; }
+    @page { margin: 0.6in 0.65in; }
+    ${printableSuiteStyles()}
+    @media print {
+      thead { display: table-header-group; }
+      tr { break-inside: avoid; }
+      .summary { break-inside: avoid; }
+    }
   </style>
 </head>
 <body>
-  <header>
-    <div class="agency">${escapeHtml(document.agencyName)}</div>
+  <header class="letterhead">
+    <div class="agency"><span class="brand-mark">M</span>${escapeHtml(document.agencyName)}</div>
     <h1>${escapeHtml(document.title)}</h1>
     <p class="meta">${escapeHtml(document.period)} · Generated ${escapeHtml(generated)}</p>
   </header>
   <div class="filters">${document.filtersUsed.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}</div>
-  <div class="totals">${document.totals.map((total) => `<div>${escapeHtml(total.label)}: <strong>${escapeHtml(total.value)}</strong></div>`).join("")}</div>
+  <div class="summary">${document.totals.map((total) => `<div><span>${escapeHtml(total.label)}</span><strong>${escapeHtml(total.value)}</strong></div>`).join("")}</div>
   <table>
-    <thead><tr>${document.headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
-    <tbody>${document.rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
+    <thead><tr>${document.headers.map((header, index) => `<th${numeric[index] ? ' class="num"' : ""}>${escapeHtml(header)}</th>`).join("")}</tr></thead>
+    <tbody>${bodyRows.join("")}</tbody>
   </table>
-  <footer>Confidential · ${escapeHtml(document.agencyName)} commission report</footer>
+  <footer>Confidential · ${escapeHtml(document.agencyName)} commission report · Totals use posted snapshots</footer>
 </body>
 </html>`;
 }

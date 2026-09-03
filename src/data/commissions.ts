@@ -339,6 +339,17 @@ export async function countUnassignedCommissions(db?: AppDatabase) {
   return Number(row?.count ?? 0);
 }
 
+export async function listPostedGroupLobMonths(db?: AppDatabase) {
+  const database = await resolveDb(db);
+  return database
+    .select({
+      groupId: commissionRecords.groupId,
+      lineOfBusinessId: commissionRecords.lineOfBusinessId,
+      paidMonth: commissionRecords.statementMonth,
+    })
+    .from(commissionRecords);
+}
+
 export async function listPostedSourceRowKeys(db: AppDatabase, importStatementId: number) {
   const rows = await db
     .select({ sourceRowKey: commissionRecords.sourceRowKey })

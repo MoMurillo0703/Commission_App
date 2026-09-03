@@ -61,6 +61,8 @@ describe("posted commission reports", () => {
   it("totals the agency report and filters by paid month, group, carrier, and LOB", async () => {
     const { db, group, carrier, medical } = await seed();
     const all = await buildAgencyReport(db, { kind: "agency" });
+    expect(all.availability.postedCommissionCount).toBe(2);
+    expect(all.availability.availablePaidMonths).toEqual(["2026-09", "2026-10"]);
     expect(all.totals.grossCommissionCents).toBe(15000);
     expect(all.totals.agencyNetCents).toBe(7000);
     expect(all.totals.compensationDistributedCents).toBe(8000);
@@ -78,6 +80,11 @@ describe("posted commission reports", () => {
     });
     expect(filtered.rows.every((row) => row.lineOfBusinessName === "Group Medical")).toBe(true);
     expect(filtered.totals.grossCommissionCents).toBe(10000);
+
+    const emptyMonth = await buildAgencyReport(db, { kind: "agency", paidMonth: "2025-01" });
+    expect(emptyMonth.rows).toHaveLength(0);
+    expect(emptyMonth.availability.postedCommissionCount).toBe(2);
+    expect(emptyMonth.availability.availablePaidMonths).toContain("2026-09");
   });
 
   it("uses posted allocation snapshots for individual and team reports", async () => {
@@ -117,5 +124,8 @@ describe("posted commission reports", () => {
     expect(String(printable.body)).toBe(printableReportHtml(document));
     expect(String(printable.body)).toMatch(/Murillo Insurance/);
     expect(String(printable.body)).toMatch(/Generated/);
+    expect(document.totals.map((total) => total.value)).toEqual([
+      ...agencyReportDocument(report.rows, report.totals, report.filters, report.names).totals.map((total) => total.value),
+    ]);
   });
 });

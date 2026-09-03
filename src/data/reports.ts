@@ -1,4 +1,5 @@
 import { and, eq, gte, lte } from "drizzle-orm";
+import { reportAvailabilityFromMonths } from "@/domain/reportDiscovery";
 import {
   monthInReportRange,
   normalizeReportFilters,
@@ -88,6 +89,12 @@ export async function reportNameLookup(db: AppDatabase | undefined, filters: Rep
   };
 }
 
+export async function reportAvailability(db: AppDatabase | undefined, matchingRowCount = 0) {
+  const database = await resolveDb(db);
+  const rows = await database.select({ paidMonth: commissionRecords.statementMonth }).from(commissionRecords);
+  return reportAvailabilityFromMonths(rows.map((row) => row.paidMonth), matchingRowCount);
+}
+
 export async function buildAgencyReport(db: AppDatabase | undefined, input: ReportFilters) {
   const database = await resolveDb(db);
   const filters = normalizeReportFilters(input);
@@ -104,7 +111,13 @@ export async function buildAgencyReport(db: AppDatabase | undefined, input: Repo
     compensationDistributedCents: row.compensationDistributedCents,
     agencyNetCents: row.agencyNetCents,
   }));
-  return { filters, names: await reportNameLookup(database, filters), rows, totals: sumAgencyReport(rows) };
+  return {
+    filters,
+    names: await reportNameLookup(database, filters),
+    rows,
+    totals: sumAgencyReport(rows),
+    availability: await reportAvailability(database, rows.length),
+  };
 }
 
 export async function buildIndividualReport(db: AppDatabase | undefined, input: ReportFilters) {
@@ -143,6 +156,7 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
     names: await reportNameLookup(database, filters),
     rows,
     totals: sumIndividualReport(rows),
+    availability: await reportAvailability(database, rows.length),
   };
 }
 
@@ -201,5 +215,6 @@ export async function buildTeamReport(db: AppDatabase | undefined, input: Report
     names: await reportNameLookup(database, filters),
     rows,
     totals: sumTeamReport(rows),
+    availability: await reportAvailability(database, rows.length),
   };
 }

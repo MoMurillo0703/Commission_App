@@ -6,6 +6,8 @@ import {
   statementDeleteBlockedReason,
   statementGuidance,
   statementHasReadableRows,
+  statementCanOpenReview,
+  statementKeepViewOriginal,
   statementNextAction,
   statementStatusLabel,
 } from "./statementWorkflow";
@@ -21,7 +23,10 @@ describe("statement workflow language", () => {
     expect(statementStatusLabel("ready_to_map", "pdf", true)).toBe("Text-based PDF successfully read");
     expect(statementNextAction("unreadable", false, "pdf")).toBe("View original");
     expect(statementNextAction("ready_to_map", true, "pdf")).toBe("Review Statement");
+    expect(statementNextAction("needs_layout", false, "pdf")).toBe("Review Statement");
     expect(statementNextAction("mapped", true)).toBe("Continue Import");
+    expect(statementCanOpenReview("needs_layout", false, "pdf")).toBe(true);
+    expect(statementKeepViewOriginal("needs_layout", false, "pdf")).toBe(true);
   });
 
   it("lets readable PDFs enter review and keeps scanned PDFs unparsed", () => {
@@ -40,7 +45,14 @@ describe("statement workflow language", () => {
     expect(`${scanned.title} ${scanned.why} ${scanned.next}`).not.toMatch(/profile/i);
     const layout = statementGuidance({ status: "needs_layout", sourceType: "pdf", hasReadableRows: true });
     expect(layout.title).toMatch(/found a table/i);
+    expect(layout.next).toMatch(/Review Statement/i);
     expect(`${layout.title} ${layout.why} ${layout.next}`).not.toMatch(/profile/i);
+    const noTable = statementGuidance({ status: "needs_layout", sourceType: "pdf", hasReadableRows: false });
+    expect(noTable.title).toMatch(/need your help identifying the commission table/i);
+    expect(noTable.next).toMatch(/header row|begin and end/i);
+    expect(noTable.next).toMatch(/CSV or XLSX/i);
+    expect(noTable.next).not.toMatch(/Open the statement to see what still needs attention/i);
+    expect(isUnparsedStatement({ status: "needs_layout", sourceType: "pdf" })).toBe(false);
     const xls = statementGuidance({ status: "needs_conversion", sourceType: "xls" });
     expect(xls.next).toMatch(/xlsx|csv/i);
   });

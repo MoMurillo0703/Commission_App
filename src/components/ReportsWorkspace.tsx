@@ -12,7 +12,9 @@ type ReportResponse = {
   names: Record<string, string | null | undefined>;
   rows: AgencyReportRow[] | IndividualReportRow[] | TeamReportRow[];
   totals: Record<string, number>;
-  document?: { title: string; period: string; totals: Array<{ label: string; value: string }> };
+  document?: { title: string; period: string; totals: Array<{ label: string; value: string }>; filtersUsed?: string[]; generatedAt?: string };
+  emptyMessage?: string | null;
+  availability?: { postedCommissionCount: number; availablePaidMonths: string[] };
 };
 
 export function ReportsWorkspace({
@@ -22,6 +24,7 @@ export function ReportsWorkspace({
   agents,
   accountManagers,
   teams,
+  initialReport = null,
 }: {
   groups: Group[];
   carriers: Carrier[];
@@ -29,6 +32,7 @@ export function ReportsWorkspace({
   agents: Agent[];
   accountManagers: AccountManager[];
   teams: TeamView[];
+  initialReport?: ReportResponse | null;
 }) {
   const [kind, setKind] = useState<ReportKind>("agency");
   const [paidMonth, setPaidMonth] = useState("");
@@ -42,7 +46,7 @@ export function ReportsWorkspace({
   const [teamId, setTeamId] = useState("");
   const [accountManagerId, setAccountManagerId] = useState("");
   const [primaryAgentId, setPrimaryAgentId] = useState("");
-  const [report, setReport] = useState<ReportResponse | null>(null);
+  const [report, setReport] = useState<ReportResponse | null>(initialReport);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -178,15 +182,19 @@ export function ReportsWorkspace({
       </section>
 
       {report && (
-        <section className="panel recent">
-          <div className="panel-head">
-            <div>
-              <p className="eyebrow">Murillo Insurance</p>
-              <h2>{report.document?.title ?? "Report"}</h2>
-              <p>{report.document?.period}</p>
-            </div>
+        <section className="panel recent report-doc">
+          <div className="report-letterhead">
+            <p className="eyebrow">Murillo Insurance</p>
+            <h2>{report.document?.title ?? "Report"}</h2>
+            <p className="report-period">{report.document?.period}</p>
+            {report.document?.generatedAt && (
+              <p className="report-generated">Generated {new Date(report.document.generatedAt).toLocaleString("en-US")}</p>
+            )}
+            {report.document?.filtersUsed && (
+              <p className="report-filters">{report.document.filtersUsed.join(" · ")}</p>
+            )}
           </div>
-          <div className="stats">
+          <div className="stats report-summary">
             {(report.document?.totals ?? []).map((total) => (
               <article key={total.label} className="card">
                 <p>{total.label}</p>
@@ -194,29 +202,35 @@ export function ReportsWorkspace({
               </article>
             ))}
           </div>
-          {kind === "agency" && <AgencyTable rows={report.rows as AgencyReportRow[]} />}
-          {kind === "individual" && <IndividualTable rows={report.rows as IndividualReportRow[]} />}
-          {kind === "team" && <TeamTable rows={report.rows as TeamReportRow[]} />}
+          {report.emptyMessage && <p className="empty">{report.emptyMessage}</p>}
+          {!report.emptyMessage && kind === "agency" && <AgencyTable rows={report.rows as AgencyReportRow[]} />}
+          {!report.emptyMessage && kind === "individual" && <IndividualTable rows={report.rows as IndividualReportRow[]} />}
+          {!report.emptyMessage && kind === "team" && <TeamTable rows={report.rows as TeamReportRow[]} />}
         </section>
       )}
     </>
   );
 }
 
+function moneyCell(cents: number | null) {
+  if (cents == null) return <td className="num">—</td>;
+  return <td className={`num${cents < 0 ? " neg" : ""}`}>{formatCents(cents)}</td>;
+}
+
 function AgencyTable({ rows }: { rows: AgencyReportRow[] }) {
-  if (rows.length === 0) return <p className="empty">No posted commission rows match these filters.</p>;
+  if (rows.length === 0) return <p className="empty">No posted commissions match the current filters.</p>;
   return (
-    <table>
+    <table className="report-table">
       <thead>
         <tr>
           <th>Paid Month</th>
           <th>Group</th>
           <th>Carrier</th>
           <th>LOB</th>
-          <th>Premium</th>
-          <th>Gross Commission</th>
-          <th>Compensation Distributed</th>
-          <th>Agency Net</th>
+          <th className="num">Premium</th>
+          <th className="num">Gross Commission</th>
+          <th className="num">Compensation Distributed</th>
+          <th className="num">Agency Net</th>
         </tr>
       </thead>
       <tbody>
@@ -226,10 +240,10 @@ function AgencyTable({ rows }: { rows: AgencyReportRow[] }) {
             <td>{row.groupName}</td>
             <td>{row.carrierName}</td>
             <td>{row.lineOfBusinessName}</td>
-            <td>{row.premiumCents == null ? "—" : formatCents(row.premiumCents)}</td>
-            <td>{formatCents(row.grossCommissionCents)}</td>
-            <td>{formatCents(row.compensationDistributedCents)}</td>
-            <td>{formatCents(row.agencyNetCents)}</td>
+            {moneyCell(row.premiumCents)}
+            {moneyCell(row.grossCommissionCents)}
+            {moneyCell(row.compensationDistributedCents)}
+            {moneyCell(row.agencyNetCents)}
           </tr>
         ))}
       </tbody>
@@ -238,9 +252,9 @@ function AgencyTable({ rows }: { rows: AgencyReportRow[] }) {
 }
 
 function IndividualTable({ rows }: { rows: IndividualReportRow[] }) {
-  if (rows.length === 0) return <p className="empty">No posted recipient compensation matches these filters.</p>;
+  if (rows.length === 0) return <p className="empty">No posted commissions match the current filters.</p>;
   return (
-    <table>
+    <table className="report-table">
       <thead>
         <tr>
           <th>Paid Month</th>
@@ -261,9 +275,9 @@ function IndividualTable({ rows }: { rows: IndividualReportRow[] }) {
             <td>{row.groupName}</td>
             <td>{row.carrierName}</td>
             <td>{row.lineOfBusinessName}</td>
-            <td>{formatCents(row.grossCommissionCents)}</td>
-            <td>{`${(row.allocationBps / 100).toFixed(row.allocationBps % 100 === 0 ? 0 : 2)}%`}</td>
-            <td>{formatCents(row.compensationCents)}</td>
+            {moneyCell(row.grossCommissionCents)}
+            <td className="num">{`${(row.allocationBps / 100).toFixed(row.allocationBps % 100 === 0 ? 0 : 2)}%`}</td>
+            {moneyCell(row.compensationCents)}
           </tr>
         ))}
       </tbody>
@@ -272,9 +286,9 @@ function IndividualTable({ rows }: { rows: IndividualReportRow[] }) {
 }
 
 function TeamTable({ rows }: { rows: TeamReportRow[] }) {
-  if (rows.length === 0) return <p className="empty">No posted team compensation matches these filters.</p>;
+  if (rows.length === 0) return <p className="empty">No posted commissions match the current filters.</p>;
   return (
-    <table>
+    <table className="report-table">
       <thead>
         <tr>
           <th>Paid Month</th>
@@ -295,11 +309,11 @@ function TeamTable({ rows }: { rows: TeamReportRow[] }) {
             <td>{row.teamName}</td>
             <td>{row.groupName}</td>
             <td>{row.lineOfBusinessName}</td>
-            <td>{formatCents(row.grossCommissionCents)}</td>
-            <td>{`${(row.teamAllocationBps / 100).toFixed(row.teamAllocationBps % 100 === 0 ? 0 : 2)}%`}</td>
-            <td>{formatCents(row.teamCompensationCents)}</td>
+            {moneyCell(row.grossCommissionCents)}
+            <td className="num">{`${(row.teamAllocationBps / 100).toFixed(row.teamAllocationBps % 100 === 0 ? 0 : 2)}%`}</td>
+            {moneyCell(row.teamCompensationCents)}
             <td>{row.memberName}</td>
-            <td>{formatCents(row.memberCompensationCents)}</td>
+            {moneyCell(row.memberCompensationCents)}
           </tr>
         ))}
       </tbody>

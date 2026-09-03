@@ -6,6 +6,7 @@ import {
   individualReportDocument,
   teamReportDocument,
 } from "@/domain/reportDocuments";
+import { reportEmptyMessage } from "@/domain/reportDiscovery";
 import { getDb } from "@/db";
 import { parseId, toErrorResponse } from "@/lib/http";
 import type { ReportKind } from "@/domain/reports";
@@ -37,16 +38,16 @@ async function reportPayload(url: URL) {
   if (filters.kind === "individual") {
     const report = await buildIndividualReport(db, filters);
     const document = individualReportDocument(report.rows, report.totals, report.filters, report.names, report.names.personName || "Recipient");
-    return { ...report, document };
+    return { ...report, document, emptyMessage: reportEmptyMessage(report.filters, report.availability) };
   }
   if (filters.kind === "team") {
     const report = await buildTeamReport(db, filters);
     const document = teamReportDocument(report.rows, report.totals, report.filters, report.names);
-    return { ...report, document };
+    return { ...report, document, emptyMessage: reportEmptyMessage(report.filters, report.availability) };
   }
   const report = await buildAgencyReport(db, filters);
   const document = agencyReportDocument(report.rows, report.totals, report.filters, report.names);
-  return { ...report, document };
+  return { ...report, document, emptyMessage: reportEmptyMessage(report.filters, report.availability) };
 }
 
 export async function GET(request: Request) {

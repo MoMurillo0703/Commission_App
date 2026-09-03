@@ -16,8 +16,8 @@ Status reflects code verified on September 3, 2026 after the Demo Review allocat
 - Posted commissions write `commission_payouts` snapshots. Later team, percentage, or assignment changes do not rewrite those rows.
 - Groups support bulk Account Manager and Primary Agent assignment on the current filtered list. Bulk assignment does not create or change compensation.
 - Group Edit opens an explicit “Editing: {name}” panel with Save Changes and Cancel. It does not silently reuse the add form.
-- Compensation is managed as complete 100% allocations (Agency, up to 3 people, reusable teams) on the Compensation page. Statements display calculated compensation and do not configure terms.
-- Reports include Agency, Individual, and Team views from posted data, with paid-month / range / YTD and Group, Carrier, LOB, recipient, team, Account Manager, and Primary Agent filters. CSV, XLSX, and printable/PDF HTML export are available.
+- Compensation is managed as complete 100% allocations (Agency, up to 5 people, reusable teams) on the Compensation page. Statements display calculated compensation and do not configure terms. A work queue lists Group + LOB combinations that are missing, incomplete, or inactive.
+- Reports include Agency, Individual, and Team views from posted data, with paid-month / range / YTD and Group, Carrier, LOB, recipient, team, Account Manager, and Primary Agent filters. The default Agency report loads all posted months. CSV, XLSX, and printable/PDF HTML export use the same canonical dataset.
 - Original uploaded statement files are stored and can be downloaded. Local development can use the filesystem. Vercel requires private Supabase Storage and does not fall back to ephemeral disk.
 - Hosted demo authentication uses Supabase email/password. Unsigned visitors cannot read commission pages or APIs. On Vercel, Auth env vars and `DEMO_ALLOWED_EMAILS` are required.
 - Navigation has focused Overview, Statements, Groups, Carriers, People, Compensation, and Reports pages.
@@ -27,7 +27,7 @@ Status reflects code verified on September 3, 2026 after the Demo Review allocat
 
 - Statement intake: CSV/XLSX and text-based PDF mapping, resolve, review, and posting exist; OCR for scanned PDFs and legacy XLS parsing do not.
 - Exception handling: unmatched import rows are blocked in preview; unassigned posted records are counted as needing review, but there is no broader correction workflow.
-- Hosted demo: migration `0004` is additive and has not been applied to production in this round. Deployment remains subject to the final integrity gate.
+- Hosted demo: this implementation round is not deployed. Additive migration `0005` raises the direct-person activation limit to 5.
 
 ## NOT STARTED
 
@@ -46,7 +46,7 @@ Status reflects code verified on September 3, 2026 after the Demo Review allocat
 - ExcelJS 4.4.0 currently brings a moderate-severity transitive `uuid` advisory; `npm audit --omit=dev` exits nonzero.
 - `groups.default_compensation_bps` leftover values are not migrated into allocations. Existing local SQLite files are not converted automatically.
 - Printable/PDF reports are formal HTML suitable for browser Print / Save as PDF, not a slide deck or binary PDF writer.
-- Production migration `0004` has not been applied. Do not deploy until ChatGPT and the Product Owner approve.
+- This Product Owner acceptance-review implementation has not been deployed. Do not deploy until ChatGPT and the Product Owner approve.
 
 ## NEXT RECOMMENDED BUILD TASKS
 

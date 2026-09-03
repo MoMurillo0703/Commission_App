@@ -6,7 +6,8 @@ import { currentPaidMonth, formatPaidMonthTitle, formatStatementMonth } from "@/
 import type { ImportStatementView } from "@/data/statements";
 import type { Carrier } from "@/db/schema";
 import type { StatementPreview } from "@/domain/workbook";
-import { canReviewRows, isUnparsedStatement, statementCanBeDeleted, statementDeleteBlockedReason, statementGuidance, statementHasReadableRows, statementNextAction, statementStatusLabel } from "@/domain/statementWorkflow";
+import { canReviewRows, isUnparsedStatement, statementCanBeDeleted, statementCanOpenReview, statementDeleteBlockedReason, statementGuidance, statementHasReadableRows, statementKeepViewOriginal, statementNextAction, statementStatusLabel } from "@/domain/statementWorkflow";
+import { PdfLayoutReview } from "./PdfLayoutReview";
 import { StatementPosting } from "./StatementPosting";
 
 type IntakeResult = {
@@ -104,7 +105,9 @@ export function StatementIntake({
       const statement = body.statement ?? body.existing ?? null;
       const normalized = { ...body, fileName: body.fileName ?? file.name, status: body.status ?? statement?.status ?? "review", statement };
       results.push(normalized);
-      if (statement && canReviewRows(statement.preview ?? body.preview)) lastReviewable = normalized;
+      if (statement && (canReviewRows(statement.preview ?? body.preview) || statement.status === "needs_layout")) {
+        lastReviewable = normalized;
+      }
     }
     setBatchResults(results);
     setResult(results.length === 1 ? results[0] : null);
@@ -308,7 +311,35 @@ export function StatementIntake({
           {preview.pdf?.layoutName && <p>Recognized carrier layout: {preview.pdf.layoutName}</p>}
         </div>
       )}
-      {activeStatement && preview && canReviewRows(preview) && !isUnparsedStatement(activeStatement, true) && (
+      {activeStatement && preview && activeStatement.status === "needs_layout" && !canReviewRows(preview) && (
+        <PdfLayoutReview
+          statement={activeStatement}
+          onConfirmed={(next) => {
+            setActiveStatement(next);
+            setPreview(next.preview);
+            setResult({
+              fileName: next.originalFilename,
+              fileType: next.sourceType,
+              status: next.status,
+              preview: next.preview,
+              statement: next,
+              message: statementGuidance({
+                status: next.status,
+                sourceType: next.sourceType,
+                unmatchedGroupCount: next.preview?.newGroupCount,
+                hasReadableRows: canReviewRows(next.preview),
+                pdfClassification: next.preview?.pdf?.classification,
+              }).next,
+            });
+            void loadStatements(paidMonth);
+          }}
+          onCancel={() => {
+            setActiveStatement(null);
+            setPreview(null);
+          }}
+        />
+      )}
+      {activeStatement && preview && canReviewRows(preview) && statementCanOpenReview(activeStatement.status, true, activeStatement.sourceType) && (
         <StatementPosting statement={activeStatement} preview={preview} />
       )}
       {availablePaidMonths.length > 0 && (
@@ -365,9 +396,18 @@ export function StatementIntake({
                 </td>
                 <td>
                   <div className="form-actions">
-                    <button type="button" className="secondary" onClick={() => inspectSaved(statement.id)}>
+                    <button
+                      type="button"
+                      className={statementCanOpenReview(statement.status, statementHasReadableRows(statement), statement.sourceType) ? "" : "secondary"}
+                      onClick={() => inspectSaved(statement.id)}
+                    >
                       {statementNextAction(statement.status, statementHasReadableRows(statement), statement.sourceType)}
                     </button>
+                    {statementKeepViewOriginal(statement.status, statementHasReadableRows(statement), statement.sourceType) && statement.storedPath && (
+                      <a className="secondary" href={`/api/imports/statements/${statement.id}/file`} style={{ display: "inline-block", textDecoration: "none" }}>
+                        View original
+                      </a>
+                    )}
                     {statement.storedPath && (
                       <a className="secondary" href={`/api/imports/statements/${statement.id}/file`} style={{ display: "inline-block", textDecoration: "none" }}>
                         Download

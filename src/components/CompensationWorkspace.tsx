@@ -1,22 +1,27 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
+import { AllocationRecipientEditor } from "@/components/AllocationRecipientEditor";
 import type { AllocationView } from "@/data/allocations";
+import type { CompensationQueueItem } from "@/domain/compensationQueue";
 import type { TeamView } from "@/data/teams";
 import type { AccountManager, Agent, Group, LineOfBusiness } from "@/db/schema";
+import {
+  allocationEntryPayload,
+  cancelAllocationDraft,
+  defaultAllocationDraft,
+  draftFromAllocationEntries,
+  personRoleLabel,
+} from "@/domain/allocationEditor";
 import { allocationProgressLabel, allocationTotals } from "@/domain/allocations";
+import {
+  afterSaveQueue,
+  closeQueue,
+  queueBannerLabel,
+  skipQueueIndex,
+} from "@/domain/compensationQueue";
 import { formatStatementMonth } from "@/domain/dates";
 import { bpsToPercentString, parsePercentToBps } from "@/domain/money";
-
-type DraftEntry = {
-  recipientType: "agency" | "person" | "team";
-  personKind: "agent" | "account_manager" | "";
-  personId: string;
-  teamId: string;
-  percent: string;
-};
-
-const emptyEntry = (): DraftEntry => ({ recipientType: "person", personKind: "agent", personId: "", teamId: "", percent: "" });
 
 export function CompensationWorkspace({
   groups,
@@ -25,6 +30,7 @@ export function CompensationWorkspace({
   linesOfBusiness,
   initialAllocations,
   initialTeams,
+  initialQueue = [],
 }: {
   groups: Group[];
   agents: Agent[];
@@ -32,26 +38,24 @@ export function CompensationWorkspace({
   linesOfBusiness: LineOfBusiness[];
   initialAllocations: AllocationView[];
   initialTeams: TeamView[];
+  initialQueue?: CompensationQueueItem[];
 }) {
   const [allocations, setAllocations] = useState(initialAllocations);
   const [teams, setTeams] = useState(initialTeams);
-  const [groupId, setGroupId] = useState("");
-  const [lineOfBusinessId, setLineOfBusinessId] = useState("");
-  const [effectiveStart, setEffectiveStart] = useState("");
-  const [effectiveEnd, setEffectiveEnd] = useState("");
-  const [entries, setEntries] = useState<DraftEntry[]>([emptyEntry()]);
+  const [draft, setDraft] = useState(defaultAllocationDraft());
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [teamName, setTeamName] = useState("");
-  const [teamMembers, setTeamMembers] = useState([{ personKind: "agent", personId: "", percent: "" }]);
+  const [teamMembers, setTeamMembers] = useState<Array<{ personKind: "agent" | "account_manager"; personId: string; percent: string }>>([{ personKind: "agent", personId: "", percent: "" }]);
+  const [queueOpen, setQueueOpen] = useState(false);
+  const [queueIndex, setQueueIndex] = useState(0);
+  const [queueDone, setQueueDone] = useState(false);
+  const [queue, setQueue] = useState(initialQueue);
 
-  const people = useMemo(() => [
-    ...agents.map((agent) => ({ key: `agent:${agent.id}`, personKind: "agent" as const, personId: agent.id, name: agent.name, type: "Person" })),
-    ...accountManagers.map((manager) => ({ key: `account_manager:${manager.id}`, personKind: "account_manager" as const, personId: manager.id, name: manager.name, type: "Person" })),
-  ].sort((left, right) => left.name.localeCompare(right.name)), [accountManagers, agents]);
+  const currentQueueItem = queue[queueIndex] ?? null;
 
-  const totals = allocationTotals(entries.flatMap((entry) => {
+  const totals = allocationTotals(draft.entries.flatMap((entry) => {
     try {
       return [{ compensationBps: parsePercentToBps(entry.percent || "0") }];
     } catch {
@@ -60,63 +64,112 @@ export function CompensationWorkspace({
   }));
 
   async function refresh() {
-    const [nextAllocations, nextTeams] = await Promise.all([
+    const [nextAllocations, nextTeams, nextQueue] = await Promise.all([
       fetch("/api/allocations").then((response) => response.json()),
       fetch("/api/teams").then((response) => response.json()),
+      fetch("/api/allocations/queue").then((response) => response.json()),
     ]);
     setAllocations(nextAllocations);
     setTeams(nextTeams);
+    setQueue(nextQueue);
+    return { allocations: nextAllocations as AllocationView[], queue: nextQueue as CompensationQueueItem[] };
   }
 
-  function addEntry(type: DraftEntry["recipientType"]) {
-    setEntries((current) => [...current, { ...emptyEntry(), recipientType: type, personKind: type === "person" ? "agent" : "" }]);
+  function resetDraft() {
+    setDraft(cancelAllocationDraft());
+    setError("");
   }
 
-  async function saveAllocation(event: FormEvent) {
-    event.preventDefault();
+  async function saveAllocation(event?: FormEvent, advanceQueue = false) {
+    event?.preventDefault();
     setBusy(true);
     setError("");
     const response = await fetch("/api/allocations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        groupId: Number(groupId),
-        lineOfBusinessId: Number(lineOfBusinessId),
-        effectiveStart,
-        effectiveEnd,
+        groupId: Number(draft.groupId),
+        lineOfBusinessId: Number(draft.lineOfBusinessId),
+        effectiveStart: draft.effectiveStart,
+        effectiveEnd: draft.effectiveEnd,
         status: "active",
-        entries: entries.map((entry) => ({
-          recipientType: entry.recipientType,
-          personKind: entry.recipientType === "person" ? entry.personKind : null,
-          personId: entry.recipientType === "person" && entry.personId ? Number(entry.personId) : null,
-          teamId: entry.recipientType === "team" && entry.teamId ? Number(entry.teamId) : null,
-          compensationPercent: entry.percent,
-        })),
+        entries: allocationEntryPayload(draft.entries),
       }),
     });
     const body = await response.json();
     setBusy(false);
     if (!response.ok) {
       setError(body.message ?? "Unable to save allocation.");
+      return false;
+    }
+    const refreshed = await refresh();
+    if (advanceQueue && currentQueueItem) {
+      const remaining = refreshed.queue;
+      const advanced = afterSaveQueue(remaining, Math.min(queueIndex, remaining.length), currentQueueItem.key);
+      setQueueIndex(advanced.index);
+      setQueueDone(advanced.done);
+      if (advanced.done) {
+        setQueueOpen(false);
+        resetDraft();
+      } else {
+        loadQueueItem(advanced.items[advanced.index] ?? remaining[advanced.index] ?? null);
+      }
+    } else {
+      resetDraft();
+    }
+    return true;
+  }
+
+  function loadQueueItem(item: typeof currentQueueItem) {
+    if (!item) return;
+    setDraft({
+      groupId: String(item.groupId),
+      lineOfBusinessId: String(item.lineOfBusinessId),
+      effectiveStart: item.suggestedEffectiveStart,
+      effectiveEnd: "",
+      entries: draftFromAllocationEntries([{
+        recipientType: "person",
+        personKind: "agent",
+        personId: null,
+        compensationPercent: "",
+      }]),
+    });
+    setError("");
+  }
+
+  function openQueue() {
+    setQueueOpen(true);
+    setQueueDone(false);
+    setQueueIndex(0);
+    loadQueueItem(queue[0] ?? null);
+  }
+
+  function skipCurrent() {
+    const next = skipQueueIndex(queueIndex, queue.length);
+    setQueueIndex(next.index);
+    setQueueDone(next.done);
+    if (next.done) {
+      setQueueOpen(false);
+      resetDraft();
       return;
     }
-    await refresh();
-    setEntries([emptyEntry()]);
-    setEffectiveEnd("");
+    loadQueueItem(queue[next.index] ?? null);
   }
 
   async function changeAllocation(row: AllocationView) {
-    setGroupId(String(row.groupId));
-    setLineOfBusinessId(String(row.lineOfBusinessId));
-    setEffectiveStart("");
-    setEffectiveEnd("");
-    setEntries(row.entries.map((entry) => ({
-      recipientType: entry.recipientType,
-      personKind: entry.personKind ?? "agent",
-      personId: entry.personId == null ? "" : String(entry.personId),
-      teamId: entry.teamId == null ? "" : String(entry.teamId),
-      percent: bpsToPercentString(entry.compensationBps),
-    })));
+    setDraft({
+      groupId: String(row.groupId),
+      lineOfBusinessId: String(row.lineOfBusinessId),
+      effectiveStart: "",
+      effectiveEnd: "",
+      entries: draftFromAllocationEntries(row.entries.map((entry) => ({
+        recipientType: entry.recipientType,
+        personKind: entry.personKind,
+        personId: entry.personId,
+        teamId: entry.teamId,
+        compensationPercent: bpsToPercentString(entry.compensationBps),
+      }))),
+    });
     setError("Enter a new effective start month, then save. The prior allocation will close the month before.");
   }
 
@@ -140,7 +193,7 @@ export function CompensationWorkspace({
     event.preventDefault();
     setBusy(true);
     setError("");
-    const start = effectiveStart || new Date().toISOString().slice(0, 7);
+    const start = draft.effectiveStart || new Date().toISOString().slice(0, 7);
     const response = await fetch("/api/teams", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -168,7 +221,7 @@ export function CompensationWorkspace({
 
   const visible = allocations.filter((row) => {
     const needle = query.trim().toLowerCase();
-    if (groupId && row.groupId !== Number(groupId)) return false;
+    if (draft.groupId && row.groupId !== Number(draft.groupId)) return false;
     if (!needle) return true;
     return [row.groupName, row.lineOfBusinessName, ...row.entries.map((entry) => entry.personName ?? entry.teamName ?? "Agency")]
       .join(" ")
@@ -176,8 +229,29 @@ export function CompensationWorkspace({
       .includes(needle);
   });
 
+  const editor = (
+    <AllocationRecipientEditor
+      entries={draft.entries}
+      agents={agents}
+      accountManagers={accountManagers}
+      teams={teams}
+      onChange={(entries) => setDraft((current) => ({ ...current, entries }))}
+    />
+  );
+
   return (
     <>
+      {queue.length > 0 && (
+        <section className="panel queue-banner">
+          <div>
+            <p className="eyebrow">Needs attention</p>
+            <h2>{queueBannerLabel(queue)}</h2>
+            <p>{queue.length} group + line combination{queue.length === 1 ? "" : "s"} {queue.length === 1 ? "is" : "are"} missing a valid active 100% allocation.</p>
+          </div>
+          <button type="button" onClick={openQueue}>Review groups needing allocation</button>
+        </section>
+      )}
+
       <section className="panel">
         <div className="panel-head">
           <div>
@@ -186,87 +260,37 @@ export function CompensationWorkspace({
             <p>Every active allocation must total exactly 100%. Agency is a first-class recipient. Posted commissions keep the snapshot used at posting.</p>
           </div>
         </div>
-        <form className="form-grid form-grid-wide" onSubmit={saveAllocation}>
+        <form className="form-grid form-grid-wide" onSubmit={(event) => void saveAllocation(event)}>
           <label>
             Group
-            <select value={groupId} onChange={(event) => setGroupId(event.target.value)} required>
+            <select value={draft.groupId} onChange={(event) => setDraft((current) => ({ ...current, groupId: event.target.value }))} required>
               <option value="">Select group</option>
               {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
             </select>
           </label>
           <label>
             Line of business
-            <select value={lineOfBusinessId} onChange={(event) => setLineOfBusinessId(event.target.value)} required>
+            <select value={draft.lineOfBusinessId} onChange={(event) => setDraft((current) => ({ ...current, lineOfBusinessId: event.target.value }))} required>
               <option value="">Select line</option>
               {linesOfBusiness.map((line) => <option key={line.id} value={line.id}>{line.name}</option>)}
             </select>
           </label>
           <label>
             Effective start
-            <input type="month" value={effectiveStart} onChange={(event) => setEffectiveStart(event.target.value)} required />
+            <input type="month" value={draft.effectiveStart} onChange={(event) => setDraft((current) => ({ ...current, effectiveStart: event.target.value }))} required />
           </label>
           <label>
             Effective end
-            <input type="month" value={effectiveEnd} onChange={(event) => setEffectiveEnd(event.target.value)} />
+            <input type="month" value={draft.effectiveEnd} onChange={(event) => setDraft((current) => ({ ...current, effectiveEnd: event.target.value }))} />
           </label>
-          <div className="full">
-            <table>
-              <thead>
-                <tr>
-                  <th>Recipient</th>
-                  <th>Type</th>
-                  <th>Split</th>
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map((entry, index) => (
-                  <tr key={index}>
-                    <td>
-                      {entry.recipientType === "agency" && "Murillo Insurance"}
-                      {entry.recipientType === "person" && (
-                        <select value={entry.personId ? `${entry.personKind}:${entry.personId}` : ""} onChange={(event) => {
-                          const [personKind, personId] = event.target.value.split(":");
-                          setEntries((current) => current.map((item, itemIndex) => itemIndex === index ? {
-                            ...item,
-                            personKind: personKind as "agent" | "account_manager",
-                            personId,
-                          } : item));
-                        }}>
-                          <option value="">Select person</option>
-                          {people.map((person) => (
-                            <option key={person.key} value={person.key}>{person.name} · {person.personKind === "agent" ? "Agent" : "Account manager"}</option>
-                          ))}
-                        </select>
-                      )}
-                      {entry.recipientType === "team" && (
-                        <select value={entry.teamId} onChange={(event) => setEntries((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, teamId: event.target.value } : item))}>
-                          <option value="">Select team</option>
-                          {teams.filter((team) => team.status === "active").map((team) => (
-                            <option key={team.id} value={team.id}>{team.name}</option>
-                          ))}
-                        </select>
-                      )}
-                    </td>
-                    <td>{entry.recipientType === "agency" ? "Agency" : entry.recipientType === "team" ? "Team" : "Person"}</td>
-                    <td>
-                      <input value={entry.percent} onChange={(event) => setEntries((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, percent: event.target.value } : item))} placeholder="70" required />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className={totals.complete ? "form-success" : "allocation-progress"}>{allocationProgressLabel(entries.flatMap((entry) => {
-              try { return [{ compensationBps: parsePercentToBps(entry.percent || "0") }]; } catch { return []; }
-            }))}</p>
-            <div className="form-actions">
-              <button type="button" className="secondary" onClick={() => addEntry("person")}>Add Person</button>
-              <button type="button" className="secondary" onClick={() => addEntry("team")}>Add Team</button>
-              <button type="button" className="secondary" onClick={() => addEntry("agency")} disabled={entries.some((entry) => entry.recipientType === "agency")}>Add Agency Share</button>
-            </div>
-          </div>
-          {error && <p className="form-error">{error}</p>}
+          {editor}
+          <p className={totals.complete ? "form-success full" : "allocation-progress full"}>{allocationProgressLabel(draft.entries.flatMap((entry) => {
+            try { return [{ compensationBps: parsePercentToBps(entry.percent || "0") }]; } catch { return []; }
+          }))}</p>
+          {error && !queueOpen && <p className="form-error">{error}</p>}
           <div className="form-actions full">
             <button disabled={busy || !totals.complete}>{busy ? "Saving…" : "Save allocation"}</button>
+            <button type="button" className="secondary" onClick={resetDraft}>Cancel</button>
           </div>
         </form>
         <label className="directory-controls">
@@ -282,7 +306,7 @@ export function CompensationWorkspace({
               <thead>
                 <tr>
                   <th>Recipient</th>
-                  <th>Type</th>
+                  <th>Role</th>
                   <th>Split</th>
                 </tr>
               </thead>
@@ -290,7 +314,7 @@ export function CompensationWorkspace({
                 {row.entries.map((entry) => (
                   <tr key={entry.id}>
                     <td>{entry.personName ?? entry.teamName ?? "Agency"}</td>
-                    <td>{entry.recipientType === "agency" ? "Agency" : entry.recipientType === "team" ? "Team" : "Person"}</td>
+                    <td>{entry.recipientType === "agency" ? "Agency" : entry.recipientType === "team" ? "Team" : personRoleLabel(entry.personKind)}</td>
                     <td>{bpsToPercentString(entry.compensationBps)}%</td>
                   </tr>
                 ))}
@@ -320,14 +344,18 @@ export function CompensationWorkspace({
           </label>
           {teamMembers.map((member, index) => (
             <label key={index}>
-              Member {index + 1}
-              <select value={`${member.personKind}:${member.personId}`} onChange={(event) => {
-                const [personKind, personId] = event.target.value.split(":");
-                setTeamMembers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, personKind, personId } : item));
+              Member {index + 1} role
+              <select value={member.personKind} onChange={(event) => {
+                const personKind = event.target.value === "account_manager" ? "account_manager" as const : "agent" as const;
+                setTeamMembers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, personKind, personId: "" } : item));
               }}>
-                <option value="agent:">Select person</option>
-                {people.map((person) => (
-                  <option key={person.key} value={`${person.personKind}:${person.personId}`}>{person.name}</option>
+                <option value="agent">Agent</option>
+                <option value="account_manager">Account manager</option>
+              </select>
+              <select value={member.personId} onChange={(event) => setTeamMembers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, personId: event.target.value } : item))}>
+                <option value="">Select {personRoleLabel(member.personKind).toLowerCase()}</option>
+                {(member.personKind === "account_manager" ? accountManagers : agents).map((person) => (
+                  <option key={person.id} value={person.id}>{person.name} · {personRoleLabel(member.personKind)}</option>
                 ))}
               </select>
               <input value={member.percent} onChange={(event) => setTeamMembers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, percent: event.target.value } : item))} placeholder="50" />
@@ -346,6 +374,7 @@ export function CompensationWorkspace({
               <thead>
                 <tr>
                   <th>Member</th>
+                  <th>Role</th>
                   <th>Team %</th>
                   <th>Effective</th>
                 </tr>
@@ -354,6 +383,7 @@ export function CompensationWorkspace({
                 {team.members.map((member) => (
                   <tr key={member.id}>
                     <td>{member.personName}</td>
+                    <td>{personRoleLabel(member.personKind)}</td>
                     <td>{bpsToPercentString(member.shareBps)}%</td>
                     <td>{formatStatementMonth(member.effectiveStart)} – {member.effectiveEnd ? formatStatementMonth(member.effectiveEnd) : "Present"}</td>
                   </tr>
@@ -363,6 +393,44 @@ export function CompensationWorkspace({
           </article>
         ))}
       </section>
+
+      {queueOpen && currentQueueItem && !queueDone && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="queue-title">
+          <div className="modal">
+            <p className="eyebrow">Compensation work queue</p>
+            <h2 id="queue-title">{currentQueueItem.groupName}</h2>
+            <p>{currentQueueItem.lineOfBusinessName} · {currentQueueItem.reasonLabel} · {queueIndex + 1} of {queue.length}</p>
+            <form className="form-grid form-grid-wide" onSubmit={(event) => void saveAllocation(event, true)}>
+              <label>
+                Group
+                <input value={currentQueueItem.groupName} readOnly />
+              </label>
+              <label>
+                Line of business
+                <input value={currentQueueItem.lineOfBusinessName} readOnly />
+              </label>
+              <label>
+                Effective start
+                <input type="month" value={draft.effectiveStart} onChange={(event) => setDraft((current) => ({ ...current, effectiveStart: event.target.value }))} required />
+              </label>
+              <label>
+                Effective end
+                <input type="month" value={draft.effectiveEnd} onChange={(event) => setDraft((current) => ({ ...current, effectiveEnd: event.target.value }))} />
+              </label>
+              {editor}
+              <p className={totals.complete ? "form-success full" : "allocation-progress full"}>{allocationProgressLabel(draft.entries.flatMap((entry) => {
+                try { return [{ compensationBps: parsePercentToBps(entry.percent || "0") }]; } catch { return []; }
+              }))}</p>
+              {error && <p className="form-error">{error}</p>}
+              <div className="form-actions full">
+                <button disabled={busy || !totals.complete}>{busy ? "Saving…" : "Save & Next"}</button>
+                <button type="button" className="secondary" onClick={skipCurrent}>Skip for now</button>
+                <button type="button" className="secondary" onClick={() => { setQueueOpen(closeQueue().open); resetDraft(); }}>Close</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }

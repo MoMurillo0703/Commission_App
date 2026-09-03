@@ -36,12 +36,23 @@ export function statementStatusLabel(status: string, sourceType?: string | null,
   }
 }
 
+export function statementCanOpenReview(status: string, hasReadableRows: boolean, sourceType?: string | null) {
+  if (isUnparsedStatement({ status, sourceType }, hasReadableRows)) return false;
+  return hasReadableRows || status === "needs_layout" || (sourceType === "pdf" && status === "needs_profile" && hasReadableRows);
+}
+
 export function statementNextAction(status: string, hasReadableRows: boolean, sourceType?: string | null) {
   if (isUnparsedStatement({ status, sourceType }, hasReadableRows)) return "View original";
   if (hasReadableRows && (status === "mapped" || status === "partially_posted")) return "Continue Import";
+  if (status === "needs_layout" || (hasReadableRows && sourceType === "pdf")) return "Review Statement";
   if (hasReadableRows) return "Review Statement";
   if (status === "posted") return "View statement";
   return "Open statement";
+}
+
+export function statementKeepViewOriginal(status: string, hasReadableRows: boolean, sourceType?: string | null) {
+  const action = statementNextAction(status, hasReadableRows, sourceType);
+  return action === "Review Statement" || action === "Continue Import";
 }
 
 export function statementNeedsUserInput(status: string) {
@@ -81,7 +92,14 @@ export function statementGuidance(input: {
     return {
       title: "We found a table in this statement",
       why: "Confirm which columns contain Group, Group number, line of business, Agent, Premium, Gross commission, coverage month, and Notes.",
-      next: "Confirm the columns, then review unmatched Groups, lines of business, and Agents before posting.",
+      next: "Use Review Statement to confirm the columns, then review unmatched Groups, lines of business, and Agents before posting.",
+    };
+  }
+  if (input.status === "needs_layout" || input.pdfClassification === "needs_layout") {
+    return {
+      title: "We could read this PDF, but we need your help identifying the commission table.",
+      why: "The words on the page were read, but the app could not find the commission table on its own.",
+      next: "Use Review Statement to mark the header row and where the commission rows begin and end. If this file has no commission table, download the original and upload a CSV or XLSX for this paid month.",
     };
   }
   if (input.status === "needs_profile" && input.sourceType === "pdf" && !input.hasReadableRows) {
@@ -112,7 +130,9 @@ export function statementGuidance(input: {
       : "Confirm the columns and any unmatched values before posting.",
     next: input.hasReadableRows
       ? "Resolve unmatched items, review the financial rows, then continue the import."
-      : "Open the statement to see what still needs attention.",
+      : input.status === "needs_layout"
+        ? "Use Review Statement to mark the header row and where the commission rows begin and end."
+        : "Use Review Statement to continue the extracted statement review.",
   };
 }
 
@@ -123,7 +143,8 @@ export function isUnparsedStatement(
   if (statement.sourceType === "xls" || statement.status === "needs_conversion") return true;
   if (statement.status === "unreadable" || statement.status === "extraction_failed") return true;
   if (hasReadableRows) return false;
-  return statement.status === "needs_profile" || statement.status === "needs_layout";
+  if (statement.status === "needs_layout") return false;
+  return statement.status === "needs_profile";
 }
 
 export function canReviewRows(preview: { sheets?: Array<{ rows?: unknown[] }> } | null | undefined) {
