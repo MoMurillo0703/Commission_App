@@ -27,7 +27,7 @@ describe("CSV statement inspection", () => {
     expect(mapping.grossCommission).toBe("CURRENT COMMISSION");
     expect(mapping.premium).toBe("PREMIUM RECEIVED");
     expect(mapping.premiumMonth).toBe("DUE DATE");
-    expect(mapping.compensationPercent).toBeNull();
+    expect(mapping.compensationPercent).toBeUndefined();
   });
 
   it("reads the sanitized Anthem August 2026 acceptance fixture", () => {

@@ -3,7 +3,7 @@ import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import { commissionRecords, importStatements, type ImportStatement } from "@/db/schema";
 import { paidMonthPattern } from "@/domain/dates";
-import type { ColumnMapping } from "@/domain/columnMapping";
+import { normalizeColumnMapping, type ColumnMapping } from "@/domain/columnMapping";
 import type { GroupImportResolution } from "@/domain/groupMatch";
 import { statementCanBeDeleted, statementDeleteBlockedReason } from "@/domain/statementWorkflow";
 import type { StatementPreview } from "@/domain/workbook";
@@ -36,7 +36,7 @@ function parsePreview(json: string | null): StatementPreview | null {
 
 function parseMapping(json: string | null): ColumnMapping | null {
   if (!json) return null;
-  return JSON.parse(json) as ColumnMapping;
+  return normalizeColumnMapping(JSON.parse(json) as ColumnMapping);
 }
 
 function toView(row: ImportStatement, carrierName: string | null = null): ImportStatementView {
@@ -191,7 +191,7 @@ export async function saveImportColumnMapping(db: AppDatabase | undefined, id: n
   const existing = await getImportStatement(database, id);
   if (!existing) throw new NotFoundError("Statement not found.");
   const [row] = await database.update(importStatements).set({
-    columnMappingJson: JSON.stringify(columnMapping),
+    columnMappingJson: JSON.stringify(normalizeColumnMapping(columnMapping)),
     status: existing.status === "ready_to_map" ? "mapped" : existing.status,
     updatedAt: new Date().toISOString(),
   }).where(eq(importStatements.id, id)).returning();

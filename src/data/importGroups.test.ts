@@ -24,7 +24,6 @@ const mapping: ColumnMapping = {
   agent: "Agent",
   premium: "Premium",
   grossCommission: "Commission",
-  compensationPercent: "Split",
   premiumMonth: "Premium Month",
 };
 

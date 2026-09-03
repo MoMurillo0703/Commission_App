@@ -1,7 +1,7 @@
 import { resolveCompensationAgreement, type CompensationAgreementCandidate } from "./agreements";
 import { mappingValue, type ColumnMapping } from "./columnMapping";
 import { applyGroupResolutions, matchImportedGroup, type GroupCandidate, type GroupImportResolution } from "./groupMatch";
-import { parseDollarsToCents, parsePercentToBps } from "./money";
+import { parseDollarsToCents } from "./money";
 import { matchNamedRecord, type NamedRecord } from "./nameMatch";
 import type { PreviewSheet } from "./workbook";
 
@@ -109,7 +109,6 @@ export function validateMappedRows(
       const line = matchNamedRecord(references.linesOfBusiness, mappingValue(row.values, mapping.lineOfBusiness));
       const matchedGroup = references.groups.find((candidate) => candidate.id === group.groupId);
       const agent = matchNamedRecord(references.agents, mappingValue(row.values, mapping.agent));
-      const compensationText = mappingValue(row.values, mapping.compensationPercent);
       const grossText = mappingValue(row.values, mapping.grossCommission);
       const premiumMonth = normalizeImportedMonth(mappingValue(row.values, mapping.premiumMonth) ?? row.premiumMonth, exceptions);
       const notes = mappingValue(row.values, mapping.notes);
@@ -149,23 +148,14 @@ export function validateMappedRows(
         exceptions.push("Gross commission is missing.");
       }
 
-      let compensationBps: number | null = null;
-      if (compensationText) {
-        try {
-          compensationBps = parsePercentToBps(compensationText);
-        } catch {
-          exceptions.push("Agent split % is not a valid percent.");
-        }
-      }
-
       const primaryAgent = matchedGroup?.primaryAgentId
         ? references.agents.find((candidate) => candidate.id === matchedGroup.primaryAgentId)
         : undefined;
       const resolvedAgentId = agent.id ?? (agent.status === "missing" ? primaryAgent?.id ?? null : null);
       const resolvedAgentLabel = agent.name ?? agent.source ?? primaryAgent?.name ?? null;
+      let compensationBps = 0;
       if (
-        compensationBps == null
-        && resolvedAgentId != null
+        resolvedAgentId != null
         && group.groupId != null
         && line.id != null
       ) {
@@ -176,9 +166,6 @@ export function validateMappedRows(
           paidMonth,
         });
         compensationBps = agreement?.compensationBps ?? 0;
-      }
-      if (agent.status === "missing" && !resolvedAgentId && compensationBps != null) {
-        exceptions.push("Agent split % was provided without a matched agent.");
       }
 
       const ready = exceptions.length === 0 && group.groupId != null && carrier.id != null && line.id != null && grossCommissionCents != null;
@@ -202,7 +189,7 @@ export function validateMappedRows(
         agentLabel: resolvedAgentLabel,
         premiumCents,
         grossCommissionCents,
-        compensationBps: resolvedAgentId == null ? 0 : compensationBps,
+        compensationBps,
         notes,
         importedGroupName: group.sourceName,
         importedGroupNumber: group.sourceNumber,

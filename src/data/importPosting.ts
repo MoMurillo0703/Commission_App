@@ -7,7 +7,7 @@ import { getCarrier, listCarriers } from "./carriers";
 import { getImportStatement, markImportStatementPosted, saveImportColumnMapping } from "./statements";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
-import type { ColumnMapping } from "@/domain/columnMapping";
+import { normalizeColumnMapping, type ColumnMapping } from "@/domain/columnMapping";
 import { collectUnmatchedImportGroups } from "@/domain/importGroups";
 import { validateMappedRows } from "@/domain/importRows";
 import { canReviewRows } from "@/domain/statementWorkflow";
@@ -27,16 +27,17 @@ async function references(db: AppDatabase, statementCarrierId?: number | null) {
 
 export async function previewImportPosting(db: AppDatabase | undefined, statementId: number, mapping: ColumnMapping) {
   const database = await resolveDb(db);
+  const normalizedMapping = normalizeColumnMapping(mapping);
   const statement = await getImportStatement(database, statementId);
   if (!statement) throw new NotFoundError("Statement not found.");
   if (!statement.preview || !canReviewRows(statement.preview)) {
     throw new ValidationError("This statement has no readable rows to review or post.");
   }
-  const saved = await saveImportColumnMapping(database, statementId, mapping);
+  const saved = await saveImportColumnMapping(database, statementId, normalizedMapping);
   const postedKeys = new Set(await listPostedSourceRowKeys(database, statementId));
   const rows = validateMappedRows(
     statement.preview.sheets,
-    mapping,
+    normalizedMapping,
     statement.paidMonth,
     { ...(await references(database, statement.carrierId)), groupResolutions: statement.preview.groupResolutions },
     postedKeys,
@@ -69,7 +70,6 @@ export async function postImportStatement(db: AppDatabase | undefined, statement
       agentId: row.agentId,
       premiumCents: row.premiumCents,
       grossCommissionCents: row.grossCommissionCents,
-      compensationBps: row.agentId == null ? 0 : row.compensationBps,
       sourceReference: `import:${statementId}:${row.sourceRowKey}`,
       notes: [row.notes, row.importedGroupName ? `Source group: ${row.importedGroupName}` : null].filter(Boolean).join(" · ") || null,
       premiumMonth: row.premiumMonth,

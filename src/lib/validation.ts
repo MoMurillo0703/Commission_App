@@ -70,7 +70,6 @@ export const columnMappingSchema = z.object({
   agent: z.string().nullable().optional(),
   premium: z.string().nullable().optional(),
   grossCommission: z.string().nullable().optional(),
-  compensationPercent: z.string().nullable().optional(),
   premiumMonth: z.string().nullable().optional(),
   notes: z.string().nullable().optional(),
 });

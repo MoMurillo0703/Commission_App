@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createAgreement } from "./agreements";
+import { createAgreement, listAgreements } from "./agreements";
 import { createAgent } from "./agents";
 import { createCarrier, listCarriers } from "./carriers";
 import { listCommissions } from "./commissions";
@@ -23,7 +23,6 @@ const mapping: ColumnMapping = {
   agent: "Agent",
   premium: "Premium",
   grossCommission: "Commission",
-  compensationPercent: "Split",
   premiumMonth: "Premium Month",
 };
 
@@ -79,7 +78,7 @@ describe("excel row posting", () => {
     const statement = await createImportStatement(db, { originalFilename: "anthem.csv", paidMonth: "2026-08", carrierId: carrier.id, sourceType: "csv", status: "ready_to_map", fingerprint: fingerprintBuffer(buffer), preview });
     const anthemMapping = suggestColumnMapping(preview.sheets[0].headers);
 
-    expect(anthemMapping.compensationPercent).toBeNull();
+    expect(anthemMapping).not.toHaveProperty("compensationPercent");
     expect((await postImportStatement(db, statement.id, anthemMapping)).postedCount).toBe(1);
     const [row] = await listCommissions(db);
     expect(row.statementMonth).toBe("2026-08");
@@ -90,10 +89,17 @@ describe("excel row posting", () => {
     expect(row.agencyNetCents).toBe(4763);
   });
 
-  it("posts ready rows using the statement paid month and keeps coverage month separate", async () => {
-    const { db } = await seed();
+  it("ignores a source split column and uses the agreement selected by paid month", async () => {
+    const { db, group, agent, lineOfBusiness } = await seed();
+    await createAgreement(db, {
+      groupId: group.id,
+      agentId: agent.id,
+      lineOfBusinessId: lineOfBusiness.id,
+      compensationBps: 4000,
+      effectiveStart: "2026-08",
+    });
     const statement = await savedStatement(db, [
-      ["Acme Benefits", "A1", "Principal", "Dental", "Alex Morgan", "10000.00", "500.00", "40", "2026-07"],
+      ["Acme Benefits", "A1", "Principal", "Dental", "Alex Morgan", "10000.00", "500.00", "90", "2026-07"],
     ]);
 
     const posted = await postImportStatement(db, statement.id, mapping);
@@ -103,6 +109,7 @@ describe("excel row posting", () => {
     expect(row.statementMonth).toBe("2026-08");
     expect(row.premiumMonth).toBe("2026-07");
     expect(row.grossCommissionCents).toBe(50000);
+    expect(row.compensationBps).toBe(4000);
     expect(row.agentCompensationCents).toBe(20000);
     expect(row.agencyNetCents).toBe(30000);
     expect(row.importStatementId).toBe(statement.id);
@@ -125,10 +132,10 @@ describe("excel row posting", () => {
     expect(await listCommissions(db)).toHaveLength(0);
   });
 
-  it("does not use the agent-level default when a split and agreement are missing", async () => {
+  it("does not use the agent-level default or a source split when an agreement is missing", async () => {
     const { db } = await seed();
     const statement = await savedStatement(db, [
-      ["Acme Benefits", "A1", "Principal", "Dental", "Alex Morgan", "1000.00", "80.00", "", "2026-07"],
+      ["Acme Benefits", "A1", "Principal", "Dental", "Alex Morgan", "1000.00", "80.00", "75", "2026-07"],
     ]);
 
     const preview = await previewImportPosting(db, statement.id, mapping);
@@ -138,9 +145,10 @@ describe("excel row posting", () => {
     expect(posted.postedCount).toBe(1);
     expect((await listCommissions(db))[0]?.agentCompensationCents).toBe(0);
     expect((await listCommissions(db))[0]?.agencyNetCents).toBe(8000);
+    expect(await listAgreements(db)).toHaveLength(0);
   });
 
-  it("uses the dated group compensation agreement when the import split is blank", async () => {
+  it("uses the dated group compensation agreement regardless of a source split column", async () => {
     const { db, group, agent, lineOfBusiness } = await seed();
     await createAgreement(db, {
       groupId: group.id,
@@ -150,7 +158,7 @@ describe("excel row posting", () => {
       effectiveStart: "2026-01",
     });
     const statement = await savedStatement(db, [
-      ["Acme Benefits", "A1", "Principal", "Dental", "Alex Morgan", "1000.00", "80.00", "", "2026-07"],
+      ["Acme Benefits", "A1", "Principal", "Dental", "Alex Morgan", "1000.00", "80.00", "95", "2026-07"],
     ]);
 
     const preview = await previewImportPosting(db, statement.id, mapping);
@@ -158,6 +166,45 @@ describe("excel row posting", () => {
     expect(preview.rows[0]?.compensationBps).toBe(4000);
     expect((await postImportStatement(db, statement.id, mapping)).postedCount).toBe(1);
     expect((await listCommissions(db))[0]?.agentCompensationCents).toBe(3200);
+    expect((await listCommissions(db))[0]?.compensationBps).toBe(4000);
+    expect(await listAgreements(db)).toHaveLength(1);
+  });
+
+  it("selects the agreement by paid month, not premium month, and leaves historical snapshots unchanged", async () => {
+    const { db, group, agent, lineOfBusiness } = await seed();
+    await createAgreement(db, {
+      groupId: group.id,
+      agentId: agent.id,
+      lineOfBusinessId: lineOfBusiness.id,
+      compensationBps: 4000,
+      effectiveStart: "2026-01",
+      effectiveEnd: "2026-06",
+    });
+    await createAgreement(db, {
+      groupId: group.id,
+      agentId: agent.id,
+      lineOfBusinessId: lineOfBusiness.id,
+      compensationBps: 2500,
+      effectiveStart: "2026-07",
+    });
+    const june = await savedStatement(db, [
+      ["Acme Benefits", "A1", "Principal", "Dental", "Alex Morgan", "1000.00", "80.00", "90", "2026-08"],
+    ], "2026-06");
+    const august = await savedStatement(db, [
+      ["Acme Benefits", "A1", "Principal", "Dental", "Alex Morgan", "1000.00", "80.00", "90", "2026-05"],
+    ], "2026-08");
+
+    expect((await postImportStatement(db, june.id, mapping)).postedCount).toBe(1);
+    expect((await postImportStatement(db, august.id, mapping)).postedCount).toBe(1);
+    const rows = await listCommissions(db);
+    const juneRow = rows.find((row) => row.importStatementId === june.id);
+    const augustRow = rows.find((row) => row.importStatementId === august.id);
+    expect(juneRow?.premiumMonth).toBe("2026-08");
+    expect(juneRow?.compensationBps).toBe(4000);
+    expect(juneRow?.agentCompensationCents).toBe(3200);
+    expect(augustRow?.premiumMonth).toBe("2026-05");
+    expect(augustRow?.compensationBps).toBe(2500);
+    expect(augustRow?.agentCompensationCents).toBe(2000);
   });
 
   it("skips rows that were already posted from the same statement", async () => {

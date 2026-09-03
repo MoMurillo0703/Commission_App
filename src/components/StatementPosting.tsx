@@ -130,6 +130,7 @@ export function StatementPosting({
         {statement.carrierName
           ? " Map a Carrier column only if this file contains more than one carrier."
           : " Map a Carrier column for each row."}
+        {" "}Agent compensation comes from the Compensation page for the Group, Agent, line of business, and paid month. Statement rate or split columns are not used as the agent split.
       </p>
       {statement.carrierName && (
         <div className="related-block">

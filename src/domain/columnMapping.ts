@@ -8,13 +8,15 @@ export const mappingFields = [
   "agent",
   "premium",
   "grossCommission",
-  "compensationPercent",
   "premiumMonth",
   "notes",
 ] as const;
 
 export type MappingField = (typeof mappingFields)[number];
-export type ColumnMapping = Partial<Record<MappingField, string | null>>;
+export type ColumnMapping = Partial<Record<MappingField, string | null>> & {
+  /** Ignored leftover from older statement mappings. Compensation comes from agreements. */
+  compensationPercent?: string | null;
+};
 
 const headerPatterns: Record<Exclude<MappingField, "groupName" | "groupNumber" | "premiumMonth">, RegExp> = {
   carrier: /^(carrier|company|insurer)$/i,
@@ -22,7 +24,6 @@ const headerPatterns: Record<Exclude<MappingField, "groupName" | "groupNumber" |
   agent: /^(agent|producer( name)?|broker)$/i,
   premium: /^(premium|billed premium|premium received)$/i,
   grossCommission: /^(gross |current )?commission|comm\.?$/i,
-  compensationPercent: /^(split|agent %|agent split|compensation( %| percent)?)$/i,
   notes: /^(notes?|comments?)$/i,
 };
 
@@ -34,7 +35,6 @@ export const mappingFieldLabels: Record<MappingField, string> = {
   agent: "Agent",
   premium: "Premium",
   grossCommission: "Gross commission",
-  compensationPercent: "Agent split %",
   premiumMonth: "Premium / coverage month",
   notes: "Notes",
 };
@@ -43,9 +43,14 @@ function findHeader(headers: string[], pattern: RegExp) {
   return headers.find((header) => pattern.test(header.trim())) ?? null;
 }
 
+export function normalizeColumnMapping(mapping: ColumnMapping): ColumnMapping {
+  const { compensationPercent: _ignored, ...rest } = mapping;
+  return rest;
+}
+
 export function suggestColumnMapping(headers: string[]): ColumnMapping {
   const detected = detectGroupHeaders(headers);
-  return {
+  return normalizeColumnMapping({
     groupName: detected.groupNameHeader,
     groupNumber: detected.groupNumberHeader,
     premiumMonth: detected.premiumMonthHeader,
@@ -54,9 +59,8 @@ export function suggestColumnMapping(headers: string[]): ColumnMapping {
     agent: findHeader(headers, headerPatterns.agent),
     premium: findHeader(headers, headerPatterns.premium),
     grossCommission: findHeader(headers, headerPatterns.grossCommission),
-    compensationPercent: findHeader(headers, headerPatterns.compensationPercent),
     notes: findHeader(headers, headerPatterns.notes),
-  };
+  });
 }
 
 export function mappingValue(values: Record<string, string>, header: string | null | undefined) {
