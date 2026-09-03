@@ -14,6 +14,67 @@ export const groupInputSchema = z.object({
   defaultCompensationPercent: z.string().optional().nullable(),
 });
 
+export const bulkGroupAssignmentSchema = z.object({
+  groupIds: z.array(z.coerce.number().int().positive()).min(1, "Select at least one group."),
+  accountManagerId: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
+  primaryAgentId: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
+});
+
+export const allocationEntrySchema = z.object({
+  recipientType: z.enum(["agency", "person", "team"]),
+  personKind: z.enum(["agent", "account_manager"]).nullable().optional(),
+  personId: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
+  teamId: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
+  compensationPercent: z.string().min(1, "Compensation split is required."),
+});
+
+export const allocationInputSchema = z.object({
+  groupId: z.coerce.number().int().positive("Group is required."),
+  lineOfBusinessId: z.coerce.number().int().positive("Line of business is required."),
+  effectiveStart: z.string().regex(paidMonthPattern, "Enter an effective start month as YYYY-MM."),
+  effectiveEnd: z.union([
+    z.string().regex(paidMonthPattern, "Enter an effective end month as YYYY-MM."),
+    z.literal(""),
+    z.null(),
+  ]).optional(),
+  status: z.enum(["active", "inactive"]).optional(),
+  entries: z.array(allocationEntrySchema).min(1, "Add at least one recipient."),
+});
+
+export const allocationPatchSchema = z.object({
+  status: z.enum(["active", "inactive"]).optional(),
+  effectiveEnd: z.union([
+    z.string().regex(paidMonthPattern, "Enter an effective end month as YYYY-MM."),
+    z.literal(""),
+    z.null(),
+  ]).optional(),
+});
+
+export const teamMemberInputSchema = z.object({
+  personKind: z.enum(["agent", "account_manager"]),
+  personId: z.coerce.number().int().positive(),
+  compensationPercent: z.string().min(1, "Team member split is required."),
+  effectiveStart: z.string().regex(paidMonthPattern, "Enter an effective start month as YYYY-MM."),
+  effectiveEnd: z.union([
+    z.string().regex(paidMonthPattern, "Enter an effective end month as YYYY-MM."),
+    z.literal(""),
+    z.null(),
+  ]).optional(),
+  status: z.enum(["active", "inactive"]).optional(),
+});
+
+export const teamInputSchema = z.object({
+  name: z.string().trim().min(1, "Team name is required."),
+  status: z.enum(["active", "inactive"]).optional(),
+  members: z.array(teamMemberInputSchema).optional(),
+});
+
+export const teamPatchSchema = z.object({
+  name: z.string().trim().min(1, "Team name is required.").optional(),
+  status: z.enum(["active", "inactive"]).optional(),
+  members: z.array(teamMemberInputSchema).optional(),
+});
+
 export const agentInputSchema = z.object({
   name: z.string().trim().min(1, "Name is required."),
   defaultCompensationPercent: z.string().optional().nullable(),

@@ -215,7 +215,7 @@ export function StatementPosting({
         {statement.carrierName
           ? " Map a Carrier column only if this file contains more than one carrier."
           : " Map a Carrier column for each row."}
-        {" "}Agent compensation comes from the Compensation page for the Group, Agent, line of business, and paid month. Statement rate or split columns are not used as the agent split.
+        {" "}Recipient compensation and Agency net come from the Compensation allocation for the Group, line of business, and paid month. Statement rate or split columns are not used as compensation terms.
       </p>
       {recognizedLayout && (
         <p><strong>Recognized carrier layout:</strong> {recognizedLayout}{preview.pdf?.layoutVersion ? ` · version ${preview.pdf.layoutVersion}` : ""}</p>
@@ -376,19 +376,18 @@ export function StatementPosting({
                   <th>Agent</th>
                   <th>Premium</th>
                   <th>Gross</th>
-                  <th>Agent compensation</th>
+                  <th>Compensation</th>
+                  <th>Agency net</th>
                   <th>Coverage month</th>
                   <th>Status</th>
                 </tr>
               </thead>
               <tbody>
                 {review.rows.map((row) => {
-                  const agentCompensation = row.grossCommissionCents == null
-                    ? null
-                    : calculateAgentCompensationCents(row.grossCommissionCents, row.compensationBps ?? 0);
-                  const agencyNet = row.grossCommissionCents == null || agentCompensation == null
-                    ? null
-                    : calculateAgencyNetCents(row.grossCommissionCents, agentCompensation);
+                  const distributed = row.compensationDistributedCents
+                    ?? (row.grossCommissionCents == null ? null : calculateAgentCompensationCents(row.grossCommissionCents, row.compensationBps ?? 0));
+                  const agencyNet = row.agencyNetCents
+                    ?? (row.grossCommissionCents == null || distributed == null ? null : calculateAgencyNetCents(row.grossCommissionCents, distributed));
                   return (
                     <tr key={row.sourceRowKey}>
                       <td>{row.rowNumber}</td>
@@ -401,10 +400,8 @@ export function StatementPosting({
                       <td>{row.agentLabel || "Unassigned"}</td>
                       <td>{row.premiumCents == null ? "—" : formatCents(row.premiumCents)}</td>
                       <td>{row.grossCommissionCents == null ? "—" : formatCents(row.grossCommissionCents)}</td>
-                      <td>
-                        {agentCompensation == null ? "—" : formatCents(agentCompensation)}
-                        {agencyNet != null ? <small> · agency net {formatCents(agencyNet)}</small> : null}
-                      </td>
+                      <td>{distributed == null ? "—" : formatCents(distributed)}</td>
+                      <td>{agencyNet == null ? "—" : formatCents(agencyNet)}</td>
                       <td>{row.premiumMonth || "—"}</td>
                       <td>
                         <span className={`pill ${row.status === "ready" ? "ready_to_map" : row.status === "posted" ? "posted" : "review"}`}>

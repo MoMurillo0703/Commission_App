@@ -1,9 +1,12 @@
 import { agreementCandidates } from "./agreements";
+import { allocationCandidates, listAllocations } from "./allocations";
 import { createCommission, listPostedSourceRowKeys } from "./commissions";
+import { listAccountManagers } from "./accountManagers";
 import { listAgents } from "./agents";
 import { listGroups } from "./groups";
 import { listLinesOfBusiness } from "./linesOfBusiness";
 import { getCarrier, listCarriers } from "./carriers";
+import { currentTeamMembers, listTeams } from "./teams";
 import { getImportStatement, markImportStatementPosted, saveImportColumnMapping } from "./statements";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
@@ -15,14 +18,36 @@ import { collectMappingBlockers, statementReadiness } from "@/domain/statementRe
 import { canReviewRows } from "@/domain/statementWorkflow";
 import { NotFoundError, StatementBlockedError, ValidationError } from "@/lib/errors";
 
-async function references(db: AppDatabase, statementCarrierId?: number | null) {
+async function references(db: AppDatabase, statementCarrierId?: number | null, paidMonth?: string) {
   const statementCarrier = statementCarrierId ? await getCarrier(db, statementCarrierId) : null;
+  const [agents, managers, teamRows] = await Promise.all([
+    listAgents(db),
+    listAccountManagers(db),
+    listTeams(db),
+  ]);
+  const personNames = Object.fromEntries([
+    ...agents.map((agent) => [`agent:${agent.id}`, agent.name]),
+    ...managers.map((manager) => [`account_manager:${manager.id}`, manager.name]),
+  ]);
+  const teams = new Map(teamRows.map((team) => [team.id, {
+    id: team.id,
+    name: team.name,
+    members: currentTeamMembers(team, paidMonth ?? "9999-12").map((member) => ({
+      personKind: member.personKind,
+      personId: member.personId,
+      name: member.personName,
+      shareBps: member.shareBps,
+    })),
+  }]));
   return {
     groups: await listGroups(db),
     carriers: await listCarriers(db),
     linesOfBusiness: await listLinesOfBusiness(db),
-    agents: await listAgents(db),
+    agents,
     agreements: await agreementCandidates(db),
+    allocations: allocationCandidates(await listAllocations(db)),
+    teams,
+    personNames,
     statementCarrier,
   };
 }
@@ -42,7 +67,7 @@ export async function previewImportPosting(db: AppDatabase | undefined, statemen
     normalizedMapping,
     statement.paidMonth,
     {
-      ...(await references(database, statement.carrierId)),
+      ...(await references(database, statement.carrierId, statement.paidMonth)),
       groupResolutions: statement.preview.groupResolutions,
       lineResolutions: statement.preview.lineResolutions,
       agentResolutions: statement.preview.agentResolutions,

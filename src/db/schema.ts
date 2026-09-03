@@ -112,13 +112,75 @@ export const commissionRecords = pgTable("commission_records", {
   updatedAt: text("updated_at").notNull(),
 });
 
-export const commissionRecordRelations = relations(commissionRecords, ({ one }) => ({
+export const commissionRecordRelations = relations(commissionRecords, ({ one, many }) => ({
   group: one(groups, { fields: [commissionRecords.groupId], references: [groups.id] }),
   carrier: one(carriers, { fields: [commissionRecords.carrierId], references: [carriers.id] }),
   lineOfBusiness: one(linesOfBusiness, { fields: [commissionRecords.lineOfBusinessId], references: [linesOfBusiness.id] }),
   agent: one(agents, { fields: [commissionRecords.agentId], references: [agents.id] }),
   importStatement: one(importStatements, { fields: [commissionRecords.importStatementId], references: [importStatements.id] }),
+  payouts: many(commissionPayouts),
 }));
+
+export const teams = pgTable("teams", {
+  id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
+  name: text("name").notNull(),
+  status: text("status").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const teamMemberships = pgTable("team_memberships", {
+  id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
+  teamId: integer("team_id").notNull().references(() => teams.id),
+  personKind: text("person_kind").notNull(),
+  personId: integer("person_id").notNull(),
+  shareBps: integer("share_bps").notNull(),
+  effectiveStart: text("effective_start").notNull(),
+  effectiveEnd: text("effective_end"),
+  status: text("status").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const compensationAllocations = pgTable("compensation_allocations", {
+  id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
+  groupId: integer("group_id").notNull().references(() => groups.id),
+  lineOfBusinessId: integer("line_of_business_id").notNull().references(() => linesOfBusiness.id),
+  effectiveStart: text("effective_start").notNull(),
+  effectiveEnd: text("effective_end"),
+  status: text("status").notNull(),
+  sourceAgreementId: integer("source_agreement_id").references(() => groupCompensationAgreements.id),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const compensationAllocationEntries = pgTable("compensation_allocation_entries", {
+  id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
+  allocationId: integer("allocation_id").notNull().references(() => compensationAllocations.id),
+  recipientType: text("recipient_type").notNull(),
+  personKind: text("person_kind"),
+  personId: integer("person_id"),
+  teamId: integer("team_id").references(() => teams.id),
+  compensationBps: integer("compensation_bps").notNull(),
+  sortOrder: integer("sort_order").notNull(),
+});
+
+export const commissionPayouts = pgTable("commission_payouts", {
+  id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
+  commissionId: integer("commission_id").notNull().references(() => commissionRecords.id),
+  allocationId: integer("allocation_id").references(() => compensationAllocations.id),
+  recipientType: text("recipient_type").notNull(),
+  personKind: text("person_kind"),
+  personId: integer("person_id"),
+  personName: text("person_name"),
+  teamId: integer("team_id"),
+  teamName: text("team_name"),
+  parentPayoutId: integer("parent_payout_id"),
+  allocationBps: integer("allocation_bps").notNull(),
+  teamInternalBps: integer("team_internal_bps"),
+  compensationCents: integer("compensation_cents").notNull(),
+  createdAt: text("created_at").notNull(),
+});
 
 export type Carrier = typeof carriers.$inferSelect;
 export type LineOfBusiness = typeof linesOfBusiness.$inferSelect;
@@ -129,3 +191,8 @@ export type GroupCompensationAgreement = typeof groupCompensationAgreements.$inf
 export type CommissionRecord = typeof commissionRecords.$inferSelect;
 export type ImportStatement = typeof importStatements.$inferSelect;
 export type CarrierStatementLayout = typeof carrierStatementLayouts.$inferSelect;
+export type Team = typeof teams.$inferSelect;
+export type TeamMembership = typeof teamMemberships.$inferSelect;
+export type CompensationAllocation = typeof compensationAllocations.$inferSelect;
+export type CompensationAllocationEntry = typeof compensationAllocationEntries.$inferSelect;
+export type CommissionPayout = typeof commissionPayouts.$inferSelect;

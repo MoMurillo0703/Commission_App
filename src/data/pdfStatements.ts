@@ -1,4 +1,5 @@
 import { extractText, extractTextItems, getDocumentProxy } from "unpdf";
+import { statementInspectLog } from "@/domain/statementInspect";
 import {
   candidateRowsFromPdfPages,
   classifyPdfText,
@@ -11,8 +12,8 @@ import type { GroupCandidate } from "@/domain/groupMatch";
 import type { StatementPreview } from "@/domain/workbook";
 
 export async function extractPdfPages(contents: ArrayBuffer | Uint8Array): Promise<PdfExtractionResult> {
+  const bytes = contents instanceof Uint8Array ? Uint8Array.from(contents) : new Uint8Array(contents);
   try {
-    const bytes = contents instanceof Uint8Array ? contents : new Uint8Array(contents);
     const pdf = await getDocumentProxy(bytes);
     if (pdf.numPages > 200) {
       return {
@@ -36,6 +37,16 @@ export async function extractPdfPages(contents: ArrayBuffer | Uint8Array): Promi
     });
     return { pages, ...classifyPdfText(pages) };
   } catch {
+    statementInspectLog({
+      outcome: "pdf_extraction_exception",
+      classifiedAs: "pdf",
+      mimeType: "application/pdf",
+      extension: ".pdf",
+      byteLength: bytes.byteLength,
+      persist: false,
+      failureType: "unpdf_runtime",
+      errorName: "Error",
+    });
     return {
       classification: "failed",
       pages: [],

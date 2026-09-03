@@ -1,5 +1,14 @@
 import { resolveCompensationAgreement, type CompensationAgreementCandidate } from "./agreements";
+import {
+  implicitAgencyAllocation,
+  previewCompensationBps,
+  resolveCompensationAllocation,
+  settleAllocation,
+  type AllocationCandidate,
+  type TeamShare,
+} from "./allocations";
 import { mappingValue, type ColumnMapping } from "./columnMapping";
+import { calculateAgentCompensationCents } from "./compensation";
 import { applyGroupResolutions, matchImportedGroup, type GroupCandidate, type GroupImportResolution } from "./groupMatch";
 import { parseDollarsToCents } from "./money";
 import { resolveNamedImport, type NamedImportResolution } from "./namedImport";
@@ -28,6 +37,8 @@ export type ValidatedImportRow = {
   premiumCents: number | null;
   grossCommissionCents: number | null;
   compensationBps: number | null;
+  compensationDistributedCents: number | null;
+  agencyNetCents: number | null;
   notes: string | null;
   importedGroupName: string | null;
   importedGroupNumber: string | null;
@@ -42,6 +53,9 @@ export type ImportReferenceData = {
   linesOfBusiness: NamedRecord[];
   agents: NamedRecord[];
   agreements?: CompensationAgreementCandidate[];
+  allocations?: AllocationCandidate[];
+  teams?: Map<number, TeamShare>;
+  personNames?: Record<string, string>;
   statementCarrier?: NamedRecord | null;
   groupResolutions?: GroupImportResolution[];
   lineResolutions?: NamedImportResolution[];
@@ -161,18 +175,55 @@ export function validateMappedRows(
       const resolvedAgentId = agent.id ?? (agent.status === "missing" ? primaryAgent?.id ?? null : null);
       const resolvedAgentLabel = agent.name ?? agent.source ?? primaryAgent?.name ?? null;
       let compensationBps = 0;
-      if (
-        resolvedAgentId != null
-        && group.groupId != null
-        && line.id != null
-      ) {
-        const agreement = resolveCompensationAgreement(references.agreements ?? [], {
+      let compensationDistributedCents: number | null = null;
+      let agencyNetCents: number | null = null;
+      if (group.groupId != null && line.id != null && grossCommissionCents != null) {
+        const names = {
+          agencyName: "Murillo Insurance",
+          personName: (kind: "agent" | "account_manager", id: number) => (
+            references.personNames?.[`${kind}:${id}`] ?? (kind === "agent" ? "Person" : "Person")
+          ),
+        };
+        const allocation = resolveCompensationAllocation(references.allocations ?? [], {
           groupId: group.groupId,
-          agentId: resolvedAgentId,
           lineOfBusinessId: line.id,
           paidMonth,
         });
-        compensationBps = agreement?.compensationBps ?? 0;
+        try {
+          let settled;
+          let legacyCompensationBps: number | null = null;
+          if (allocation) {
+            settled = settleAllocation(grossCommissionCents, allocation.entries, references.teams ?? new Map(), names);
+          } else if (resolvedAgentId != null) {
+            const legacy = resolveCompensationAgreement(references.agreements ?? [], {
+              groupId: group.groupId,
+              agentId: resolvedAgentId,
+              lineOfBusinessId: line.id,
+              paidMonth,
+            });
+            settled = legacy
+              ? {
+                allocatedBps: legacy.compensationBps,
+                remainingBps: 10000 - legacy.compensationBps,
+                complete: legacy.compensationBps === 10000,
+                compensationDistributedCents: calculateAgentCompensationCents(grossCommissionCents, legacy.compensationBps),
+                agencyNetCents: grossCommissionCents - calculateAgentCompensationCents(grossCommissionCents, legacy.compensationBps),
+                payouts: [],
+              }
+              : implicitAgencyAllocation(grossCommissionCents, "Murillo Insurance");
+            legacyCompensationBps = legacy?.compensationBps ?? null;
+          } else {
+            settled = implicitAgencyAllocation(grossCommissionCents, "Murillo Insurance");
+          }
+          if (settled) {
+            compensationBps = legacyCompensationBps ?? previewCompensationBps(settled, resolvedAgentId);
+            compensationDistributedCents = settled.compensationDistributedCents;
+            agencyNetCents = settled.agencyNetCents;
+          }
+        } catch (error) {
+          compensationBps = 0;
+          exceptions.push(error instanceof Error ? error.message : "Compensation allocation requires review.");
+        }
       }
 
       const ready = exceptions.length === 0 && group.groupId != null && carrier.id != null && line.id != null && grossCommissionCents != null;
@@ -197,6 +248,8 @@ export function validateMappedRows(
         premiumCents,
         grossCommissionCents,
         compensationBps,
+        compensationDistributedCents,
+        agencyNetCents,
         notes,
         importedGroupName: group.sourceName,
         importedGroupNumber: group.sourceNumber,

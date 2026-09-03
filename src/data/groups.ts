@@ -73,3 +73,38 @@ export async function updateGroup(db: AppDatabase | undefined, id: number, input
   }).where(eq(groups.id, id)).returning();
   return row;
 }
+
+export async function bulkAssignGroups(
+  db: AppDatabase | undefined,
+  input: { groupIds: number[]; accountManagerId?: number | null; primaryAgentId?: number | null },
+) {
+  const { normalizeBulkGroupAssignment } = await import("@/domain/groupBulk");
+  const assignment = normalizeBulkGroupAssignment(input);
+  const database = await resolveDb(db);
+  const patch: { accountManagerId?: number | null; primaryAgentId?: number | null; updatedAt: string } = {
+    updatedAt: new Date().toISOString(),
+  };
+  if (assignment.hasManager) {
+    if (assignment.accountManagerId != null && !await getAccountManager(database, assignment.accountManagerId)) {
+      throw new NotFoundError("Account manager not found.");
+    }
+    patch.accountManagerId = assignment.accountManagerId ?? null;
+  }
+  if (assignment.hasAgent) {
+    if (assignment.primaryAgentId != null && !await getAgent(database, assignment.primaryAgentId)) {
+      throw new NotFoundError("Agent not found.");
+    }
+    patch.primaryAgentId = assignment.primaryAgentId ?? null;
+  }
+  for (const id of assignment.groupIds) {
+    if (!await getGroup(database, id)) throw new NotFoundError("Group not found.");
+  }
+  const updated: Array<typeof groups.$inferSelect> = [];
+  await database.transaction(async (tx) => {
+    for (const id of assignment.groupIds) {
+      const [row] = await tx.update(groups).set(patch).where(eq(groups.id, id)).returning();
+      updated.push(row);
+    }
+  });
+  return updated;
+}

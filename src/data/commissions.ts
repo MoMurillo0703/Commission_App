@@ -1,13 +1,25 @@
 import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
-import { calculateAgencyNetCents, settleCommission } from "@/domain/compensation";
+import {
+  allocationFromExplicitAgentOverride,
+  implicitAgencyAllocation,
+  previewCompensationBps,
+  settleAllocation,
+  type PersonKind,
+  type SettledAllocation,
+} from "@/domain/allocations";
+import { calculateAgencyNetCents, calculateAgentCompensationCents } from "@/domain/compensation";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import { agents, carriers, commissionRecords, groups, linesOfBusiness } from "@/db/schema";
+import { getAgent, listAgents } from "./agents";
+import { listAccountManagers } from "./accountManagers";
 import { findApplicableAgreement } from "./agreements";
-import { getAgent } from "./agents";
+import { findApplicableAllocation } from "./allocations";
 import { getCarrier } from "./carriers";
 import { getGroup } from "./groups";
 import { getLineOfBusiness } from "./linesOfBusiness";
+import { replaceCommissionPayouts } from "./payouts";
+import { currentTeamMembers, listTeams } from "./teams";
 import { isForeignKeyError, NotFoundError, ValidationError } from "@/lib/errors";
 import { emptyToNull } from "@/lib/validation";
 
@@ -93,6 +105,8 @@ type CompensationSnapshot = {
   compensationBps: number | null;
   agentCompensationCents: number;
   agencyNetCents: number;
+  settled: SettledAllocation | null;
+  allocationId: number | null;
 };
 
 async function assignedAgentId(db: AppDatabase, input: CommissionWrite) {
@@ -100,36 +114,145 @@ async function assignedAgentId(db: AppDatabase, input: CommissionWrite) {
   return (await getGroup(db, input.groupId))?.primaryAgentId ?? null;
 }
 
-async function resolveNewCompensation(db: AppDatabase, input: CommissionWrite, agentId: number | null): Promise<CompensationSnapshot> {
-  if (!agentId) {
-    return settleCommission(input.grossCommissionCents, 0);
-  }
+async function personNameLookup(db: AppDatabase) {
+  const [agentRows, managerRows] = await Promise.all([listAgents(db), listAccountManagers(db)]);
+  const names = new Map<string, string>([
+    ...agentRows.map((agent) => [`agent:${agent.id}`, agent.name] as const),
+    ...managerRows.map((manager) => [`account_manager:${manager.id}`, manager.name] as const),
+  ]);
+  return (kind: PersonKind, id: number) => names.get(`${kind}:${id}`) ?? "Person";
+}
 
-  if (!await getAgent(db, agentId)) throw new NotFoundError("Agent not found.");
-  if (input.compensationBps != null) {
-    return settleCommission(input.grossCommissionCents, input.compensationBps);
-  }
+async function teamShareMap(db: AppDatabase, paidMonth: string) {
+  const rows = await listTeams(db);
+  return new Map(rows.map((team) => [team.id, {
+    id: team.id,
+    name: team.name,
+    members: currentTeamMembers(team, paidMonth).map((member) => ({
+      personKind: member.personKind,
+      personId: member.personId,
+      name: member.personName,
+      shareBps: member.shareBps,
+    })),
+  }]));
+}
 
-  const agreement = await findApplicableAgreement(db, {
+function snapshotFromSettled(settled: SettledAllocation, agentId: number | null, allocationId: number | null = null): CompensationSnapshot {
+  return {
+    compensationBps: previewCompensationBps(settled, agentId),
+    agentCompensationCents: settled.compensationDistributedCents,
+    agencyNetCents: settled.agencyNetCents,
+    settled,
+    allocationId,
+  };
+}
+
+async function legacyAgreementSnapshot(
+  db: AppDatabase,
+  grossCommissionCents: number,
+  agentId: number,
+  compensationBps: number,
+): Promise<CompensationSnapshot> {
+  const agent = await getAgent(db, agentId);
+  if (!agent) throw new NotFoundError("Agent not found.");
+  const personCents = calculateAgentCompensationCents(grossCommissionCents, compensationBps);
+  return snapshotFromSettled({
+    allocatedBps: compensationBps,
+    remainingBps: 10000 - compensationBps,
+    complete: compensationBps === 10000,
+    compensationDistributedCents: personCents,
+    agencyNetCents: calculateAgencyNetCents(grossCommissionCents, personCents),
+    payouts: [{
+      recipientType: "person",
+      personKind: "agent",
+      personId: agentId,
+      personName: agent.name,
+      teamId: null,
+      teamName: null,
+      parentKey: null,
+      allocationBps: compensationBps,
+      teamInternalBps: null,
+      compensationCents: personCents,
+      key: `legacy:agent:${agentId}`,
+    }],
+  }, agentId);
+}
+
+export async function settleCommissionCompensation(
+  db: AppDatabase,
+  input: CommissionWrite,
+  agentId: number | null,
+): Promise<CompensationSnapshot> {
+  const names = { agencyName: "Murillo Insurance", personName: await personNameLookup(db) };
+  const allocation = await findApplicableAllocation(db, {
     groupId: input.groupId,
-    agentId,
     lineOfBusinessId: input.lineOfBusinessId,
     paidMonth: input.statementMonth,
   });
-  return settleCommission(input.grossCommissionCents, agreement?.compensationBps ?? 0);
+  if (allocation) {
+    if (input.compensationBps != null && agentId) {
+      const agent = await getAgent(db, agentId);
+      if (!agent) throw new NotFoundError("Agent not found.");
+      return snapshotFromSettled(settleAllocation(
+        input.grossCommissionCents,
+        allocationFromExplicitAgentOverride(input.compensationBps, { personKind: "agent", personId: agentId, name: agent.name }),
+        new Map(),
+        names,
+      ), agentId);
+    }
+    return snapshotFromSettled(settleAllocation(
+      input.grossCommissionCents,
+      allocation.entries,
+      await teamShareMap(db, input.statementMonth),
+      names,
+    ), agentId, allocation.id);
+  }
+
+  if (input.compensationBps != null) {
+    if (agentId && !await getAgent(db, agentId)) throw new NotFoundError("Agent not found.");
+    if (!agentId) return snapshotFromSettled(implicitAgencyAllocation(input.grossCommissionCents, "Murillo Insurance"), null);
+    const agent = await getAgent(db, agentId);
+    return snapshotFromSettled(settleAllocation(
+      input.grossCommissionCents,
+      allocationFromExplicitAgentOverride(input.compensationBps, { personKind: "agent", personId: agentId, name: agent?.name ?? "Agent" }),
+      new Map(),
+      names,
+    ), agentId);
+  }
+
+  if (agentId) {
+    if (!await getAgent(db, agentId)) throw new NotFoundError("Agent not found.");
+    const agreement = await findApplicableAgreement(db, {
+      groupId: input.groupId,
+      agentId,
+      lineOfBusinessId: input.lineOfBusinessId,
+      paidMonth: input.statementMonth,
+    });
+    if (agreement) {
+      return legacyAgreementSnapshot(db, input.grossCommissionCents, agentId, agreement.compensationBps);
+    }
+  }
+
+  return snapshotFromSettled(implicitAgencyAllocation(input.grossCommissionCents, "Murillo Insurance"), agentId);
+}
+
+async function resolveNewCompensation(db: AppDatabase, input: CommissionWrite, agentId: number | null): Promise<CompensationSnapshot> {
+  return settleCommissionCompensation(db, input, agentId);
 }
 
 async function resolveUpdatedCompensation(
   db: AppDatabase,
   input: CommissionWrite,
   existing: CommissionView,
-) {
+): Promise<CompensationSnapshot> {
   const agentUnchanged = (input.agentId ?? null) === existing.agentId;
   if (agentUnchanged && input.compensationBps == null) {
     return {
       compensationBps: existing.compensationBps,
       agentCompensationCents: existing.agentCompensationCents,
       agencyNetCents: calculateAgencyNetCents(input.grossCommissionCents, existing.agentCompensationCents),
+      settled: null,
+      allocationId: null,
     };
   }
   return resolveNewCompensation(db, input, input.agentId ?? null);
@@ -178,10 +301,18 @@ export async function createCommission(db: AppDatabase | undefined, input: Commi
   const agentId = await assignedAgentId(database, input);
   const resolved = { ...input, agentId };
   try {
-    const [inserted] = await database.insert(commissionRecords).values({
-      ...valuesFrom(resolved, await resolveNewCompensation(database, resolved, agentId), now),
-      createdAt: now,
-    }).returning({ id: commissionRecords.id });
+    const inserted = await database.transaction(async (tx) => {
+      const transaction = tx as unknown as AppDatabase;
+      const settled = await resolveNewCompensation(transaction, resolved, agentId);
+      const [row] = await transaction.insert(commissionRecords).values({
+        ...valuesFrom(resolved, settled, now),
+        createdAt: now,
+      }).returning({ id: commissionRecords.id });
+      if (settled.settled) {
+        await replaceCommissionPayouts(transaction, row.id, settled.settled.payouts, settled.allocationId);
+      }
+      return row;
+    });
     return (await getCommission(database, inserted.id))!;
   } catch (error) {
     if (isForeignKeyError(error)) throw new ValidationError("Commission records must reference existing groups, carriers, lines of business, and agents.");
@@ -194,9 +325,11 @@ export async function updateCommission(db: AppDatabase | undefined, id: number, 
   const existing = await getCommission(database, id);
   if (!existing) throw new NotFoundError("Commission record not found.");
   await assertReferences(database, input);
+  const settled = await resolveUpdatedCompensation(database, input, existing);
   await database.update(commissionRecords)
-    .set(valuesFrom(input, await resolveUpdatedCompensation(database, input, existing), new Date().toISOString()))
+    .set(valuesFrom(input, settled, new Date().toISOString()))
     .where(eq(commissionRecords.id, id));
+  if (settled.settled) await replaceCommissionPayouts(database, id, settled.settled.payouts, settled.allocationId);
   return (await getCommission(database, id))!;
 }
 
