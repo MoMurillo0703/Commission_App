@@ -135,7 +135,7 @@ Examples the schema currently enforces:
 - Header identity `agency_net_cents = gross_commission_cents - agent_compensation_cents`
 - Unique posted import identity on (`import_statement_id`, `source_row_key`) when both are present
 - Unique carrier coverage alias per (`carrier_id`, `source_value`)
-- `0002` calendar `CHECK`s on the four columns listed above, for **new/future** writes only (`NOT VALID`)
+- `0002` calendar `CHECK`s on the five columns listed above, for **new/future** writes only (`NOT VALID`)
 - **Allocation triggers** (0004, with the five-person limit updated in 0005). These are the enforcement boundary; application checks exist for UX:
   - active allocation total must be exactly 10,000 bps (`validate_compensation_allocation_activation`)
   - at most five direct Person entries on an active allocation (same activation function)
