@@ -8,7 +8,7 @@ import { createTestDb } from "@/db/test-db";
 import { fingerprintBuffer } from "@/domain/fingerprint";
 import { storeStatementFile } from "@/lib/storage";
 import { pdfIntakeSurface } from "@/domain/pdfIntakeSurface";
-import { readableHiddenTablePdf, imageOnlyPdf, textCommissionPdf } from "../../tests/helpers/pdfFixtures";
+import { choiceBuilderStatementLines, readableHiddenTablePdf, imageOnlyPdf, textCommissionPdf } from "../../tests/helpers/pdfFixtures";
 
 describe("automatic PDF read recovery and intake", () => {
   it("recovers an old needs_layout Choice Builder extraction into confirmation rows", async () => {
@@ -62,21 +62,18 @@ describe("automatic PDF read recovery and intake", () => {
       pageCount: 1,
       pages: [{
         pageNumber: 1,
-        lines: [
-          "Member    Plan    Paid    Fee",
-          "Acme Benefits    Dental    1000.00    80.00",
-          "Gamma Group    Dental    250.00    20.00",
-        ],
+        lines: choiceBuilderStatementLines,
       }],
     })));
     const stored = await saveImportExtractionPath(db, leftover.id, extractionPath);
     const recovered = await recoverAutomaticPdfRead(db, stored);
-    expect(recovered.preview?.rowCount).toBe(2);
+    expect(recovered.preview?.rowCount).toBe(6);
     expect(recovered.status === "ready_to_map" || recovered.status === "mapped").toBe(true);
     expect(recovered.columnMapping).toMatchObject({
-      groupName: "Member",
-      lineOfBusiness: "Plan",
-      grossCommission: "Fee",
+      groupName: "Company Name",
+      lineOfBusiness: "Product",
+      grossCommission: "Comm Amount",
+      premiumMonth: "Paid Month",
     });
     expect(await getImportStatement(db, leftover.id)).toMatchObject({ id: leftover.id });
     expect(await listCommissions(db)).toHaveLength(0);

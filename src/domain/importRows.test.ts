@@ -191,4 +191,41 @@ describe("statement compensation from agreements", () => {
     expect(august[0]?.premiumMonth).toBe("2026-05");
     expect(august[0]?.compensationBps).toBe(2500);
   });
+
+  it("accepts named coverage months such as Aug 2026 without inventing values", () => {
+    const namedMonthSheets: PreviewSheet[] = [{
+      ...sheets[0]!,
+      premiumMonthHeader: "Paid Month",
+      rows: [{
+        ...sheets[0]!.rows[0]!,
+        values: { ...sheets[0]!.rows[0]!.values, "Paid Month": "Aug 2026" },
+        premiumMonth: "Aug 2026",
+      }],
+    }];
+    const [row] = validateMappedRows(namedMonthSheets, { ...mapping, premiumMonth: "Paid Month" }, "2026-09", {
+      ...references,
+      statementCarrier: { id: 9, name: "Choice Builder" },
+    });
+    expect(row?.premiumMonth).toBe("2026-08");
+    expect(row?.exceptions.join(" ")).not.toMatch(/coverage month/i);
+    const [invalid] = validateMappedRows(namedMonthSheets, { ...mapping, premiumMonth: "Paid Month" }, "2026-09", {
+      ...references,
+      statementCarrier: { id: 9, name: "Choice Builder" },
+    });
+    const badSheets: PreviewSheet[] = [{
+      ...namedMonthSheets[0]!,
+      rows: [{
+        ...namedMonthSheets[0]!.rows[0]!,
+        values: { ...namedMonthSheets[0]!.rows[0]!.values, "Paid Month": "Sometime Soon" },
+        premiumMonth: "Sometime Soon",
+      }],
+    }];
+    const [blocked] = validateMappedRows(badSheets, { ...mapping, premiumMonth: "Paid Month" }, "2026-09", {
+      ...references,
+      statementCarrier: { id: 9, name: "Choice Builder" },
+    });
+    expect(blocked?.premiumMonth).toBeNull();
+    expect(blocked?.exceptions.join(" ")).toMatch(/coverage month/i);
+    expect(invalid?.premiumMonth).toBe("2026-08");
+  });
 });

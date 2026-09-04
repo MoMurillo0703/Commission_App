@@ -25,7 +25,7 @@ const headerPatterns: Record<Exclude<MappingField, "groupName" | "groupNumber" |
   carrier: /^(carrier|company|insurer)$/i,
   lineOfBusiness: /^(line of business|lob|product( line| type| code)?|coverage( code| type)?|plan( type| code)?|benefit)$/i,
   premium: /^(premium|billed premium|premium received|paid)$/i,
-  grossCommission: /^(gross |current )?commission|comm\.?$|^fee$/i,
+  grossCommission: /^(gross |current )?commission|comm(ission)?\s*amount$|comm\.?$|^fee$/i,
   notes: /^(notes?|comments?)$/i,
 };
 const agentHeader = /^(agent|producer( name)?|broker)$/i;

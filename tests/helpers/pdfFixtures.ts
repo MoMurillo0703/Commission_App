@@ -52,6 +52,42 @@ export async function readableHiddenTablePdf() {
   return new Uint8Array(await pdf.save());
 }
 
+export const choiceBuilderStatementLines = [
+  "COMMISSION STATEMENT",
+  "Choice Builder",
+  "COMMISSIONS FOR AGENCY MURILLO INSURANCE",
+  "Broker Name    Comm",
+  "Amount",
+  "ALEX MORGAN    $340.68",
+  "TOTAL PAID COMMISSIONS    $340.68",
+  "COMMISSIONS FOR BROKER ALEX MORGAN",
+  "Company Name    Paid Month    Product    Comm Amount    ADJ CD",
+  "Policy Number: B05095",
+  "ACME PET RESORT    Aug 2026    Dental    $14.88",
+  "Aug 2026    Vision    $7.47",
+  "Sep 2026    Dental    $14.88",
+  "Sep 2026    Vision    $7.47",
+  "Policy Number: B16568",
+  "SMITH FARMS    Aug 2026    Dental    $22.00",
+  "Aug 2026    Vision    $5.00",
+  "TOTAL COMMISSIONS: ALEX MORGAN",
+  "Total Dental Commissions    $36.88",
+  "Total Vision Commissions    $12.47",
+  "Page 1 of 1",
+];
+
+export async function choiceBuilderStatementPdf() {
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([720, 720]);
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  let y = 680;
+  for (const line of choiceBuilderStatementLines) {
+    page.drawText(line, { x: 36, y, size: 9, font, color: rgb(0, 0, 0), maxWidth: 650 });
+    y -= 16;
+  }
+  return new Uint8Array(await pdf.save());
+}
+
 export async function unrecognizedHeaderTablePdf() {
   const pdf = await PDFDocument.create();
   const page = pdf.addPage([720, 420]);

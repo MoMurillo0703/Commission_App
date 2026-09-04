@@ -16,9 +16,9 @@ export type GroupMatch = {
   sourceNumber: string | null;
 };
 
-const groupNameHeader = /^(group(\s*name)?|name\s*\/\s*group name|client(\s*name)?|account(\s*name)?|member|subscriber|employer)$/i;
+const groupNameHeader = /^(group(\s*name)?|name\s*\/\s*group name|company(\s*name)?|client(\s*name)?|account(\s*name)?|member|subscriber|employer)$/i;
 const groupNumberHeader = /^(group\s*(number|no\.?|#|id)|account\s*(number|no\.?|#|id)|client\s*(number|no\.?|#|id)|policy\s*(number|no\.?|#|id)|group\s*#)$/i;
-const premiumMonthHeader = /^(premium|coverage|policy)\s*month$|^(coverage|benefit)\s*period$|^due date$/i;
+const premiumMonthHeader = /^(premium|coverage|policy|paid)\s*month$|^(coverage|benefit)\s*period$|^due date$/i;
 
 export function normalizeGroupText(value: string | null | undefined) {
   const collapsed = value?.trim().replace(/\s+/g, " ");

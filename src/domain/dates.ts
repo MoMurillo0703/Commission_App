@@ -17,6 +17,35 @@ export function formatPaidMonthTitle(value: string) {
 
 export const paidMonthPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
 
+const namedMonth = /^(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{4})$/i;
+const namedMonthIndex: Record<string, string> = {
+  jan: "01",
+  feb: "02",
+  mar: "03",
+  apr: "04",
+  may: "05",
+  jun: "06",
+  jul: "07",
+  aug: "08",
+  sep: "09",
+  oct: "10",
+  nov: "11",
+  dec: "12",
+};
+
+/** Accepts YYYY-MM, M/D/YYYY, or "Aug 2026" / "August 2026". Does not invent a month. */
+export function parseFlexibleMonth(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  if (paidMonthPattern.test(trimmed)) return trimmed;
+  const numeric = trimmed.match(/^(0?[1-9]|1[0-2])[/-]\d{1,2}[/-](\d{4})$/);
+  if (numeric) return `${numeric[2]}-${numeric[1].padStart(2, "0")}`;
+  const named = trimmed.match(namedMonth);
+  if (!named) return null;
+  const month = namedMonthIndex[named[1].slice(0, 3).toLowerCase()];
+  return month ? `${named[2]}-${month}` : null;
+}
+
 export function isPaidMonth(value: string | null | undefined): value is string {
   return typeof value === "string" && paidMonthPattern.test(value);
 }

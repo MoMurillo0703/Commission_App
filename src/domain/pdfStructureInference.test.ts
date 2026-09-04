@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { inferPdfStatementStructure } from "./pdfStructureInference";
+import { inferPdfStatementStructure, interpretExtractedPdfPages } from "./pdfStructureInference";
 import { candidateRowsFromPdfPages } from "./pdfExtraction";
+import { choiceBuilderStatementLines } from "../../tests/helpers/pdfFixtures";
 
 const choiceBuilderLines = [
   "Choice Builder commission statement for the paid month with readable embedded text.",
@@ -52,6 +53,47 @@ describe("automatic PDF structure inference", () => {
     ];
     expect(inferPdfStatementStructure([{ pageNumber: 1, text: lines.join("\n"), lines }], [])).toBeNull();
     expect(candidateRowsFromPdfPages([{ pageNumber: 1, text: lines.join("\n"), lines }], []).rowCount).toBe(0);
+  });
+
+  it("reads a Choice Builder Company Name / Product / Comm Amount statement with continuation rows", () => {
+    const pages = [{ pageNumber: 1, text: choiceBuilderStatementLines.join("\n"), lines: choiceBuilderStatementLines }];
+    const inferred = inferPdfStatementStructure(pages, []);
+    expect(inferred?.preview.rowCount).toBe(6);
+    expect(inferred?.mapping).toMatchObject({
+      groupName: "Company Name",
+      groupNumber: "Policy Number",
+      lineOfBusiness: "Product",
+      premiumMonth: "Paid Month",
+      grossCommission: "Comm Amount",
+    });
+    const rows = inferred?.preview.sheets[0]?.rows ?? [];
+    expect(rows.map((row) => row.values["Company Name"])).toEqual([
+      "ACME PET RESORT",
+      "ACME PET RESORT",
+      "ACME PET RESORT",
+      "ACME PET RESORT",
+      "SMITH FARMS",
+      "SMITH FARMS",
+    ]);
+    expect(rows.map((row) => row.values["Policy Number"])).toEqual([
+      "B05095",
+      "B05095",
+      "B05095",
+      "B05095",
+      "B16568",
+      "B16568",
+    ]);
+    expect(rows.map((row) => row.values.Product)).toEqual([
+      "Dental",
+      "Vision",
+      "Dental",
+      "Vision",
+      "Dental",
+      "Vision",
+    ]);
+    expect(rows.every((row) => row.group.status === "new_group")).toBe(true);
+    expect(interpretExtractedPdfPages(pages, [])?.preview.rowCount).toBe(6);
+    expect(inferred?.mapping.agent).toBeFalsy();
   });
 
   it("keeps extracted rows when one coverage value is unknown", () => {

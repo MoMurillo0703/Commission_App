@@ -3,7 +3,7 @@ import { loadStatementExtractionPages } from "./pdfLayoutConfirm";
 import { saveConfirmedPdfPreview, saveImportColumnMapping, type ImportStatementView } from "./statements";
 import type { AppDatabase } from "@/db";
 import { omitStatementCompensationMapping } from "@/domain/columnMapping";
-import { inferPdfStatementStructure } from "@/domain/pdfStructureInference";
+import { interpretExtractedPdfPages } from "@/domain/pdfStructureInference";
 import { canReviewRows } from "@/domain/statementWorkflow";
 
 export async function recoverAutomaticPdfRead(
@@ -16,10 +16,10 @@ export async function recoverAutomaticPdfRead(
   if (canReviewRows(statement.preview)) return statement;
   try {
     const pages = await loadStatementExtractionPages(db, statement);
-    const inferred = inferPdfStatementStructure(pages, await listGroups(db));
-    if (!inferred || inferred.preview.rowCount === 0) return statement;
-    await saveConfirmedPdfPreview(db, statement.id, inferred.preview);
-    return saveImportColumnMapping(db, statement.id, omitStatementCompensationMapping(inferred.mapping));
+    const interpreted = interpretExtractedPdfPages(pages, await listGroups(db));
+    if (!interpreted || interpreted.preview.rowCount === 0) return statement;
+    await saveConfirmedPdfPreview(db, statement.id, interpreted.preview);
+    return saveImportColumnMapping(db, statement.id, omitStatementCompensationMapping(interpreted.mapping));
   } catch {
     return statement;
   }

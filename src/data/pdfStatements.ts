@@ -1,15 +1,14 @@
 import { extractText, extractTextItems, getDocumentProxy } from "unpdf";
 import { statementInspectLog } from "@/domain/statementInspect";
 import {
-  candidateRowsFromPdfPages,
   classifyPdfText,
   linesFromTextItems,
   splitPdfLines,
   type ExtractedPdfPage,
   type PdfExtractionResult,
 } from "@/domain/pdfExtraction";
-import { inferPdfStatementStructure } from "@/domain/pdfStructureInference";
-import { omitStatementCompensationMapping, suggestColumnMapping, type ColumnMapping } from "@/domain/columnMapping";
+import { interpretExtractedPdfPages } from "@/domain/pdfStructureInference";
+import { omitStatementCompensationMapping, type ColumnMapping } from "@/domain/columnMapping";
 import type { GroupCandidate } from "@/domain/groupMatch";
 import type { StatementPreview } from "@/domain/workbook";
 
@@ -79,30 +78,28 @@ export async function previewPdfStatement(
     };
   }
 
-  const firstPass = candidateRowsFromPdfPages(extraction.pages, groups);
-  if (firstPass.rowCount > 0) {
+  const interpreted = interpretExtractedPdfPages(extraction.pages, groups);
+  if (interpreted) {
     return {
       extraction,
       preview: {
-        ...firstPass,
+        ...interpreted.preview,
         pdf: {
           classification: "readable",
           pageCount: extraction.pages.length,
         },
       },
-      mapping: omitStatementCompensationMapping(suggestColumnMapping(firstPass.sheets.flatMap((sheet) => sheet.headers))),
+      mapping: omitStatementCompensationMapping(interpreted.mapping),
     };
-  }
-
-  const inferred = inferPdfStatementStructure(extraction.pages, groups);
-  if (inferred) {
-    return { extraction, preview: inferred.preview, mapping: omitStatementCompensationMapping(inferred.mapping) };
   }
 
   return {
     extraction,
     preview: {
-      ...firstPass,
+      sheets: [],
+      unmatchedGroups: [],
+      rowCount: 0,
+      newGroupCount: 0,
       pdf: {
         classification: "needs_layout",
         pageCount: extraction.pages.length,

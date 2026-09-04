@@ -10,6 +10,7 @@ import {
 import { mappingValue, type ColumnMapping } from "./columnMapping";
 import { calculateAgentCompensationCents } from "./compensation";
 import { applyGroupResolutions, matchImportedGroup, type GroupCandidate, type GroupImportResolution } from "./groupMatch";
+import { parseFlexibleMonth } from "./dates";
 import { parseDollarsToCents } from "./money";
 import { applyCarrierCoverageAlias, type CarrierCoverageAlias } from "./carrierCoverage";
 import { resolveNamedImport, type NamedImportResolution } from "./namedImport";
@@ -100,9 +101,8 @@ function parseOptionalMoney(value: string | null, label: string, exceptions: str
 
 function normalizeImportedMonth(value: string | null, exceptions: string[]) {
   if (!value) return null;
-  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) return value;
-  const date = value.match(/^(0?[1-9]|1[0-2])[/-]\d{1,2}[/-](\d{4})$/);
-  if (date) return `${date[2]}-${date[1].padStart(2, "0")}`;
+  const parsed = parseFlexibleMonth(value);
+  if (parsed) return parsed;
   exceptions.push("Premium / coverage month is not a valid month or date.");
   return null;
 }
