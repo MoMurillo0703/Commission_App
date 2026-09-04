@@ -1,12 +1,12 @@
 # Commissions App
 
-Internal application for importing carrier commission statements, reconciling groups and insurance products, assigning production credit to agents, and reporting commissions at agency and agent levels.
+Internal commission statement intake, compensation tracking, and reporting for Murillo Insurance.
 
-## Initial vertical slice
+Start here:
 
-`upload Excel -> map columns -> validate rows -> match group/product/agent -> review exceptions -> post statement -> agency and agent reports`
+- How we work: [`AGENTS.md`](AGENTS.md)
+- What the product is: [`docs/PRODUCT_VISION.md`](docs/PRODUCT_VISION.md)
+- What is authorized now: [`docs/CURRENT_SPRINT.md`](docs/CURRENT_SPRINT.md)
+- What is deployed: [`docs/RELEASE_STATUS.md`](docs/RELEASE_STATUS.md)
 
-PDF statements will enter the same validation and review pipeline after carrier-specific extraction is added.
-
-Hosted demo setup (GitHub, Vercel, Supabase) is documented in `DEPLOYMENT.md`. Use `.env.example` for required variable names. Do not commit real credentials.
-
+All other project rules live under [`docs/`](docs/) with one owner per file. Do not add a second copy of business rules or release facts at the repo root.

@@ -1,201 +1,116 @@
 # Project Operating Instructions
 
-## Project Team
+Authoritative owner: **Alex**, with role definitions accepted by **Mo**.
 
-The user is the **Product Owner**.
+Consult this file for who does what, how work is assigned, and how reports are written. Product rules live in [`docs/BUSINESS_RULES.md`](docs/BUSINESS_RULES.md). Current work lives in [`docs/CURRENT_SPRINT.md`](docs/CURRENT_SPRINT.md). Deployed facts live in [`docs/RELEASE_STATUS.md`](docs/RELEASE_STATUS.md).
 
-ChatGPT is the **Project Quarterback**. ChatGPT evaluates agent reports with the Product Owner and determines the next development task.
+The codebase is the source of truth for what exists. If a document disagrees with verified implementation, report the discrepancy. Do not implement stale documentation.
 
-### BEN — Codex
+## Team
 
-BEN's role:
+### Mo Murillo — Product Owner / CEO
 
-- Review
-- Architecture
-- Business-rule validation
-- Data-model validation
-- Testing and verification
-- Identifying conflicts, risks, duplication, or scope creep
+Owns vision, business rules, priorities, and product acceptance.
 
-Ben should generally avoid implementing features being actively developed by Cleo unless explicitly assigned implementation work.
+Mo decides what the product should do and when behavior is accepted.
 
-### CLEO — Cursor
+### Alex / ChatGPT — Product + Technical Lead / Orchestrator
 
-CLEO's role:
+Owns requirements, roadmap coordination, acceptance criteria, task assignment, report reconciliation, and release coordination.
 
-- Primary implementation engineer
-- Application development
-- UI implementation
-- API implementation
-- Database implementation
-- Migrations
-- Integration
-- Bug fixes
-- Testing of implemented work
+Alex translates Mo’s vision into one assigned task at a time and decides which specialist must review a change.
 
-## Product Scope
+### Cleo — Lead Implementation Engineer
 
-This application is a **simple insurance commission tracking and reporting tool**.
+Owns implementation, UI, application logic, APIs, and implementation tests.
 
-Core functionality includes:
+Cleo does **not** independently change architecture or business rules.
 
-- Groups / Accounts
-- Carriers
-- Lines of Business
-- Agents
-- Account Managers
-- Agent-to-group relationships
-- Agent compensation / splits
-- Commission records
-- Gross commission
-- Agent compensation
-- Agency net commission
-- Paid commission months
-- Premium / coverage months when available
-- Missing commission tracking
-- Excel imports
-- CSV imports
-- PDF imports
-- Manual commission entry
-- Commission reporting
-- Audit-oriented views and exports
+### Ben — Architecture + Data Integrity Engineer
 
-Reporting should ultimately support:
+Owns review for schema and migrations, financial calculations, compensation, historical records, destructive operations, concurrency/reliability, and security-sensitive architecture.
 
-- Month
-- Group
-- Carrier
-- LOB
-- Agent
-- Agency
+Ben is **risk-based**. Cosmetic UI copy or layout that does not touch money, history, schema, or security does not require Ben unless Alex assigns it.
 
-The original uploaded commission statements should remain identifiable and accessible.
+Ben does not implement features Cleo is actively building unless Alex explicitly assigns implementation.
 
-The application may eventually provide agency-income information to a separate budgeting application.
+### Tom — QA + Product Validation Engineer
 
-Budgeting itself is **not** part of this application.
+Owns independent QA, production verification, workflow and regression testing, attempting to break completed workflows, and comparing actual behavior with requirements.
 
-Do not expand the application into:
+Tom does **not** fix code while auditing unless Alex explicitly assigns a fix.
 
-- CRM
-- AMS
-- General accounting
-- Payroll
-- Policy servicing
-- Compliance management
-- Contact management
-- General task management
-- Multitenant SaaS infrastructure
+## Definition of Done
 
-unless specifically directed by the Product Owner through ChatGPT.
+Lifecycle:
 
-## Business Principles
+`PLANNED → READY → IN PROGRESS → BUILT → QA PASSED → DEPLOYED → PRODUCT ACCEPTED → DONE`
 
-- Commission records are primarily organized according to **paid month**: the month the agency received the commission.
-- Premium / coverage month is separate when known.
-- Do not assume paid month and premium month are the same.
-- Financial history must remain stable.
-- Changing a current agent split or assignment must never silently alter historical commission records.
-- Persisted historical commission records should retain the compensation values and rates actually used.
-- Money must use the project's exact-money representation.
-- Use stable database IDs rather than mutable display names for relationships.
-- Avoid unnecessary complexity.
-- Build for the current requirements rather than hypothetical future functionality.
+| Gate | Required |
+| --- | --- |
+| **BUILT** | Implementation complete, targeted regression exists, automated validation passes |
+| **QA PASSED** | Tom independently verifies the acceptance criteria |
+| **Before production QA** | Expected production SHA confirmed; required migrations confirmed applied |
+| **DEPLOYED** | Code is live. This is **not** Done |
+| **PRODUCT ACCEPTED** | Mo verifies the actual workflow |
+| **DONE** | All gates above, and project status documentation is current |
 
-## Development Process
+A feature is not Done because code exists, tests pass, an engineer reports completion, or it deployed.
 
-- Work one assigned task at a time.
-- Do not automatically begin the next recommended task.
-- Do not create multi-phase implementations unless specifically requested.
-- Inspect existing code before creating new functionality.
-- Reuse existing architecture, components, repositories, domain functions, APIs, and patterns when appropriate.
-- Do not create duplicate implementations.
-- Prefer additive database migrations.
-- Never rewrite an already-applied migration unless explicitly instructed and safe.
-- Do not redesign unrelated UI.
-- Do not refactor unrelated working code simply because another implementation is preferred.
-- Do not add speculative features.
+## Operating rules
 
-## Parallel Work
+- Work one assigned task at a time. Do not start the next recommended task automatically.
+- Do not create multi-phase implementations unless Mo/Alex request them.
+- Inspect existing code before adding functionality. Reuse existing architecture. Do not duplicate implementations.
+- Prefer additive migrations. Never rewrite an already-applied migration unless explicitly instructed and safe.
+- Runtime requests never apply migrations. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+- Do not redesign unrelated UI or refactor working code because another style is preferred.
+- Do not add speculative features or expand into CRM, AMS, accounting, payroll, budgeting, policy servicing, compliance, or contact/task management unless Mo directs it through Alex.
+- If Cleo’s work would conflict with an area Ben is assigned, stop that portion and report it. Alex and Mo decide.
+- Financial calculations require focused tests.
+- Do not claim something works unless it was verified.
+- Do not post, delete, or rewrite production financial records merely to test.
 
-Ben and Cleo may work simultaneously.
+## Risk-based review
 
-- Each task should identify the area assigned to that agent.
-- Do not modify files or architecture actively assigned to the other agent unless required.
-- If work would materially conflict with the other agent's assigned area, stop that portion of the task.
-- Document the conflict in the handoff report.
-- Allow ChatGPT and the Product Owner to decide how to proceed.
-- Do not independently resolve cross-agent architectural conflicts.
+Alex assigns Ben review when a change touches any of:
 
-## Project Documentation
+- schema or migrations
+- cents, bps, Agency Net, allocations, or payouts
+- posted or historical commission records
+- destructive data operations
+- connection pooling, timeouts, retries, or concurrency
+- authentication, storage, or other security-sensitive architecture
 
-Before substantial work, consult as relevant:
+Cleo may ship an assigned cosmetic UI task without Ben when none of the above apply.
 
-- `AGENTS.md`
-- `PROJECT.md`
-- `DATA_MODEL.md`
-- `BUILD_STATUS.md`
+Tom reviews after BUILT when the task has acceptance criteria that must be proven in the app or production.
 
-The actual codebase remains the source of truth for what currently exists.
+## Documentation map
 
-If documentation disagrees with implementation, report the discrepancy. Do not blindly implement stale documentation.
+| File | Owns |
+| --- | --- |
+| [`AGENTS.md`](AGENTS.md) | Roles, process, reports |
+| [`docs/PRODUCT_VISION.md`](docs/PRODUCT_VISION.md) | What the product is |
+| [`docs/PRODUCT_ROADMAP.md`](docs/PRODUCT_ROADMAP.md) | Future outcomes only |
+| [`docs/BUSINESS_RULES.md`](docs/BUSINESS_RULES.md) | Financial and product rules |
+| [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) | Physical schema and migrations |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Runtime architecture |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Hosting, env, migrate, deploy |
+| [`docs/UX_PRINCIPLES.md`](docs/UX_PRINCIPLES.md) | Interaction rules |
+| [`docs/ACCEPTANCE_TESTS.md`](docs/ACCEPTANCE_TESTS.md) | Permanent acceptance criteria |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | Dated decisions |
+| [`docs/CURRENT_SPRINT.md`](docs/CURRENT_SPRINT.md) | Authorized work now |
+| [`docs/RELEASE_STATUS.md`](docs/RELEASE_STATUS.md) | Deployed facts |
+| [`docs/KNOWN_DEFECTS.md`](docs/KNOWN_DEFECTS.md) | Open defects |
 
-`BUILD_STATUS.md` should only claim functionality that has actually been verified.
+Do not copy full rule text into multiple files. Link to the owner.
 
-## Validation
+## Reports
 
-For implementation tasks, run relevant:
+Every assigned task ends with one copy-ready report. Be concise and factual. No internal reasoning. No multi-phase roadmaps. Recommendations are recommendations only.
 
-- Tests
-- Typecheck
-- Lint
-- Production build
-
-Do not claim something works unless it was verified.
-
-Financial calculations should receive focused testing.
-
-## Reporting to ChatGPT
-
-Every assigned task ends with a copy-ready report.
-
-BEN must end with:
-
-```text
-BEN’S REPORT:
-
-TASK:
-[assigned task]
-
-STATUS:
-[Complete / Partial / Blocked / Review Only]
-
-FINDINGS:
-[important findings]
-
-CHANGES MADE:
-[actual changes or None]
-
-FILES CHANGED:
-[list or None]
-
-DATABASE CHANGES:
-[list or None]
-
-TESTS / VALIDATION:
-[actual verification]
-
-ISSUES / RISKS:
-[meaningful issues or None]
-
-RECOMMENDED NEXT STEP:
-[ONE recommendation only]
-
-MESSAGE FOR CLEO:
-[important handoff or None]
-```
-
-Cleo must end with:
+### Cleo
 
 ```text
 CLEO’S REPORT:
@@ -231,9 +146,68 @@ MESSAGE FOR BEN:
 [important handoff or None]
 ```
 
-Reports should be concise and factual.
+### Ben
 
-- Do not include internal reasoning.
-- Do not provide long future roadmaps.
-- Recommendations are recommendations only.
-- ChatGPT and the Product Owner determine what happens next.
+```text
+BEN’S REPORT:
+
+TASK:
+[assigned task]
+
+STATUS:
+[Complete / Partial / Blocked / Review Only]
+
+FINDINGS:
+[important findings]
+
+CHANGES MADE:
+[actual changes or None]
+
+FILES CHANGED:
+[list or None]
+
+DATABASE CHANGES:
+[list or None]
+
+TESTS / VALIDATION:
+[actual verification]
+
+ISSUES / RISKS:
+[meaningful issues or None]
+
+RECOMMENDED NEXT STEP:
+[ONE recommendation only]
+
+MESSAGE FOR CLEO:
+[important handoff or None]
+```
+
+### Tom
+
+```text
+TOM’S REPORT:
+
+TASK:
+[assigned task]
+
+STATUS:
+[Complete / Partial / Blocked / Review Only]
+
+ENVIRONMENT:
+[local / production SHA]
+
+WORKFLOWS EXERCISED:
+[list]
+
+EXPECTED VS ACTUAL:
+[mismatches or None]
+
+DEFECTS:
+[verified defects or None]
+
+ACCEPTANCE:
+[Pass / Fail / Blocked]
+
+RECOMMENDED NEXT STEP:
+[ONE recommendation only]
+```
