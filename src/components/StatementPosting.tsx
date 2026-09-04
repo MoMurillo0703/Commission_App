@@ -8,10 +8,10 @@ import type { UnmatchedImportGroup, GroupImportDecision } from "@/domain/importG
 import type { ValidatedImportRow } from "@/domain/importRows";
 import { formatCents } from "@/domain/money";
 import type { NamedImportDecision, UnmatchedNamedImport } from "@/domain/namedImport";
-import { continueImportBlockedReason, type StatementReadiness } from "@/domain/statementReadiness";
+import { continueImportBlockedReason, isStatementFullyPosted, type StatementReadiness } from "@/domain/statementReadiness";
 import type { StatementPreview } from "@/domain/workbook";
 
-type NamedOption = { id: number; name: string; groupNumber?: string | null };
+type NamedOption = { id: number; name: string; groupNumber?: string | null; accountManagerId?: number | null; primaryAgentId?: number | null };
 
 type PreviewResponse = {
   paidMonth: string;
@@ -60,6 +60,7 @@ export function StatementPosting({
   );
   const [review, setReview] = useState<PreviewResponse | null>(null);
   const [groups, setGroups] = useState<NamedOption[]>([]);
+  const [accountManagers, setAccountManagers] = useState<NamedOption[]>([]);
   const [lines, setLines] = useState<NamedOption[]>([]);
   const [agents, setAgents] = useState<NamedOption[]>([]);
   const [groupDecisions, setGroupDecisions] = useState<Record<string, GroupImportDecision>>({});
@@ -79,6 +80,7 @@ export function StatementPosting({
   useEffect(() => {
     void Promise.all([
       fetchWithDeadline("/api/groups").then(async (response) => { if (response.ok) setGroups(await readApiJson<NamedOption[]>(response)); }),
+      fetchWithDeadline("/api/account-managers").then(async (response) => { if (response.ok) setAccountManagers(await readApiJson<NamedOption[]>(response)); }),
       fetchWithDeadline("/api/lines-of-business").then(async (response) => { if (response.ok) setLines(await readApiJson<NamedOption[]>(response)); }),
       fetchWithDeadline("/api/agents").then(async (response) => { if (response.ok) setAgents(await readApiJson<NamedOption[]>(response)); }),
     ]);
@@ -246,11 +248,12 @@ export function StatementPosting({
   const unmatchedAgents = review?.unmatchedAgents ?? [];
   const readiness = review?.readiness ?? null;
   const continueBlocked = continueImportBlockedReason(readiness);
+  const fullyPosted = isStatementFullyPosted(readiness) && unmatchedGroups.length + unmatchedLines.length + unmatchedAgents.length === 0;
   const mappingFieldsToShow = mappingFields.filter((field) => !(field === "carrier" && statement.carrierName));
   const showCarrierMapping = extractedConfirm ? false : !statement.carrierName;
   const recognizedLayout = preview.pdf?.layoutName;
   const resolveActive = unmatchedGroups.length + unmatchedLines.length + unmatchedAgents.length > 0;
-  const workflowStep = review?.postedCount ? "post" : review && !resolveActive && readiness?.canContinue ? "review" : review ? "resolve" : "read";
+  const workflowStep = fullyPosted || review?.postedCount ? "post" : review && !resolveActive && readiness?.canContinue ? "review" : review ? "resolve" : "read";
 
   return (
     <div className="result">
@@ -277,7 +280,26 @@ export function StatementPosting({
       )}
       {review && (
         <div className="blocker-summary" id="statement-blockers">
-          {readiness?.canContinue ? (
+          {fullyPosted ? (
+            <>
+              <strong>Statement posted</strong>
+              <p>
+                All rows from this file are already posted commission records. The original statement remains available.
+                Reopening this statement will not post them twice.
+              </p>
+              <div className="form-actions">
+                <a className="secondary" href={`/api/imports/statements/${statement.id}/file`} style={{ display: "inline-block", textDecoration: "none" }}>
+                  Download original statement
+                </a>
+                <a className="secondary" href="/compensation" style={{ display: "inline-block", textDecoration: "none" }}>
+                  Confirm compensation
+                </a>
+                <a className="secondary" href="/reports" style={{ display: "inline-block", textDecoration: "none" }}>
+                  Recipient statement
+                </a>
+              </div>
+            </>
+          ) : readiness?.canContinue ? (
             <>
               <strong>{extractedConfirm ? "Ready to confirm" : "Ready to continue"}</strong>
               <p>{extractedConfirm ? "The extracted records are ready. Confirm and post the ready rows." : "Required mappings and unmatched items are resolved. Review the financial rows below, then post the ready rows."}</p>
@@ -310,7 +332,7 @@ export function StatementPosting({
           <p>This statement uses the selected carrier. A Carrier column is not needed unless the file contains more than one carrier.</p>
         </div>
       )}
-      {!showMappingHelp && (
+      {!showMappingHelp && !fullyPosted && (
         <div className="form-actions" id="statement-mapping" style={{ marginTop: 12 }}>
           <button type="button" className="secondary" disabled={busy} onClick={() => setShowMappingHelp(true)}>
             Help the app read this statement
@@ -356,13 +378,15 @@ export function StatementPosting({
                 Save this statement layout
               </button>
             )}
-            <button type="button" disabled={busy || !readiness?.canContinue} onClick={postReady}>
-              {review ? `Confirm & Post ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Confirm & Post"}
-            </button>
+            {!fullyPosted && (
+              <button type="button" disabled={busy || !readiness?.canContinue} onClick={postReady}>
+                {review ? `Confirm & Post ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Confirm & Post"}
+              </button>
+            )}
           </div>
         </>
       )}
-      {!readiness?.canContinue && <p className="form-error">{continueBlocked}</p>}
+      {!fullyPosted && !readiness?.canContinue && continueBlocked && <p className="form-error">{continueBlocked}</p>}
       {error && <p className="form-error">{error}</p>}
       {layoutMessage && <p className="form-success">{layoutMessage}</p>}
       {review && unmatchedGroups.length > 0 && (
@@ -432,7 +456,17 @@ export function StatementPosting({
         <>
           {review.createdCount ? <p className="form-success">Saved {review.createdCount} confirmed record{review.createdCount === 1 ? "" : "s"}. No compensation was created.</p> : null}
           {review.conflicts?.map((conflict) => <p key={conflict} className="form-error">{conflict}</p>)}
-          {review.postedCount > 0 && <p className="form-success">Posted rows are now commission records. Reopening this statement will not post them twice.</p>}
+          {review.postedCount > 0 && !fullyPosted && <p className="form-success">Posted rows are now commission records. Reopening this statement will not post them twice.</p>}
+          <StatementGroupAssignment
+            rows={review.rows}
+            groups={groups}
+            agents={agents}
+            accountManagers={accountManagers}
+            busy={busy}
+            onGroupsChange={setGroups}
+            onBusy={setBusy}
+            onError={setError}
+          />
           <div id="statement-rows">
             <p>
               {review.readyCount} ready · {review.blockedCount} {extractedConfirm ? "needs review" : "blocked"} · {review.postedCount} already posted
@@ -482,6 +516,143 @@ export function StatementPosting({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function StatementGroupAssignment({
+  rows,
+  groups,
+  agents,
+  accountManagers,
+  busy,
+  onGroupsChange,
+  onBusy,
+  onError,
+}: {
+  rows: ValidatedImportRow[];
+  groups: NamedOption[];
+  agents: NamedOption[];
+  accountManagers: NamedOption[];
+  busy: boolean;
+  onGroupsChange: (groups: NamedOption[]) => void;
+  onBusy: (busy: boolean) => void;
+  onError: (message: string) => void;
+}) {
+  const statementGroups = useMemo(() => {
+    const ids = [...new Set(rows.flatMap((row) => row.groupId == null ? [] : [row.groupId]))];
+    return ids
+      .map((id) => groups.find((group) => group.id === id))
+      .filter((group): group is NamedOption => Boolean(group));
+  }, [groups, rows]);
+  const [drafts, setDrafts] = useState<Record<number, { accountManagerId: string; primaryAgentId: string }>>({});
+  const [saved, setSaved] = useState("");
+
+  useEffect(() => {
+    setDrafts(Object.fromEntries(statementGroups.map((group) => [group.id, {
+      accountManagerId: group.accountManagerId ? String(group.accountManagerId) : "",
+      primaryAgentId: group.primaryAgentId ? String(group.primaryAgentId) : "",
+    }])));
+  }, [statementGroups]);
+
+  if (statementGroups.length === 0) return null;
+
+  async function saveAssignment(group: NamedOption) {
+    const draft = drafts[group.id] ?? { accountManagerId: "", primaryAgentId: "" };
+    onError("");
+    setSaved("");
+    try {
+      await runBusyAction(onBusy, async () => {
+        const response = await fetchWithDeadline(`/api/groups/${group.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: group.name,
+            groupNumber: group.groupNumber ?? null,
+            accountManagerId: draft.accountManagerId ? Number(draft.accountManagerId) : null,
+            primaryAgentId: draft.primaryAgentId ? Number(draft.primaryAgentId) : null,
+          }),
+        });
+        const body = await readApiJson<{ message?: string }>(response);
+        if (!response.ok) {
+          onError(httpFailureMessage(response.status, body.message));
+          return;
+        }
+        const listed = await fetchWithDeadline("/api/groups");
+        if (listed.ok) onGroupsChange(await readApiJson<NamedOption[]>(listed));
+        setSaved(`Saved assignment for ${group.name}. Assignment does not create compensation.`);
+      });
+    } catch (error) {
+      onError(requestFailureMessage(error, "Unable to save group assignment."));
+    }
+  }
+
+  return (
+    <div className="related-block" id="statement-group-assignment">
+      <strong>Assign people to groups on this statement</strong>
+      <p>
+        Set Account Manager and Primary Agent when needed. Assignment does not create compensation.
+        Confirm Group + line of business splits on <a href="/compensation">Compensation</a>.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Group</th>
+            <th>Account Manager</th>
+            <th>Primary Agent</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {statementGroups.map((group) => {
+            const draft = drafts[group.id] ?? { accountManagerId: "", primaryAgentId: "" };
+            return (
+              <tr key={group.id}>
+                <td>
+                  <strong>{group.name}</strong>
+                  {group.groupNumber ? <small> · {group.groupNumber}</small> : null}
+                </td>
+                <td>
+                  <select
+                    aria-label={`Account manager for ${group.name}`}
+                    value={draft.accountManagerId}
+                    onChange={(event) => setDrafts((current) => ({
+                      ...current,
+                      [group.id]: { ...draft, accountManagerId: event.target.value },
+                    }))}
+                  >
+                    <option value="">Unassigned</option>
+                    {accountManagers.map((manager) => (
+                      <option key={manager.id} value={manager.id}>{manager.name}</option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <select
+                    aria-label={`Primary agent for ${group.name}`}
+                    value={draft.primaryAgentId}
+                    onChange={(event) => setDrafts((current) => ({
+                      ...current,
+                      [group.id]: { ...draft, primaryAgentId: event.target.value },
+                    }))}
+                  >
+                    <option value="">Unassigned</option>
+                    {agents.map((agent) => (
+                      <option key={agent.id} value={agent.id}>{agent.name}</option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <button type="button" className="secondary" disabled={busy} onClick={() => void saveAssignment(group)}>
+                    Save assignment
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {saved && <p className="form-success">{saved}</p>}
     </div>
   );
 }

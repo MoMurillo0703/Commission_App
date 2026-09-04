@@ -105,6 +105,7 @@ export function statementReadiness(input: {
   }
 
   const reasons = blockers.map((blocker) => blocker.message);
+  const postedCount = input.postedCount ?? 0;
   const canContinue = !entityBlocked && input.blockedCount === 0 && input.readyCount > 0;
 
   return {
@@ -114,13 +115,19 @@ export function statementReadiness(input: {
     reasons,
     readyCount: input.readyCount,
     blockedCount: input.blockedCount,
-    postedCount: input.postedCount ?? 0,
+    postedCount,
   };
+}
+
+export function isStatementFullyPosted(readiness: StatementReadiness | null) {
+  if (!readiness) return false;
+  return readiness.postedCount > 0 && readiness.readyCount === 0 && readiness.blockedCount === 0 && readiness.blockers.length === 0;
 }
 
 export function continueImportBlockedReason(readiness: StatementReadiness | null) {
   if (!readiness) return "Review the statement first so the app can list anything that still needs a decision.";
   if (readiness.canContinue) return null;
+  if (isStatementFullyPosted(readiness)) return null;
   if (readiness.reasons.length === 0) return "Continue Import is unavailable until the statement is ready.";
   return `Continue Import is unavailable: ${readiness.reasons.join(" ")}`;
 }

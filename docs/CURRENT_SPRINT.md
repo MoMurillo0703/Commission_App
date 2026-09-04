@@ -4,22 +4,28 @@ Authoritative owner: **Alex**.
 
 ## Phase
 
-Project organization / Commission App 1.0 definition.
+Commission App 1.0 Sprint 1 — **IN PROGRESS**.
 
 ## Authorized work
 
-Documentation system for Commission App 1.0 (this set of files).
+End-to-end payable commission workflow:
 
-No active feature implementation.
+1. Upload and process at least three carrier statements for a paid month.
+2. Resolve unmatched Groups without re-reviewing known data.
+3. Assign Account Manager and Primary Agent to a Group when needed (assignment ≠ compensation).
+4. Confirm the applicable Group + LOB compensation allocation.
+5. Post commissions and preserve the original statement.
+6. Generate a recipient commission statement for an Agent or Account Manager + paid month from posted payouts.
+7. Download that statement as a PDF.
+8. Fix KD-001 if the statement-review path is touched.
 
 ## Not authorized
 
-The next 1.0 feature (intake polish, reports, compensation UX, missing commissions, or Groups/People UX) is **not** started by this documentation task.
-
-Mo and Alex will select the first 1.0 implementation sprint after Ben and Tom review these docs.
+Missing commissions, Book of Business, budgeting, CRM, email delivery, secure report links, payment execution/reconciliation, broad dashboard/Groups/People redesign, Medicare/Individual reporting redesign.
 
 ## See
 
-- Vision: [`PRODUCT_VISION.md`](PRODUCT_VISION.md)
-- Future outcomes: [`PRODUCT_ROADMAP.md`](PRODUCT_ROADMAP.md)
+- Rules: [`BUSINESS_RULES.md`](BUSINESS_RULES.md)
+- Schema: [`DATA_MODEL.md`](DATA_MODEL.md)
+- Defects: [`KNOWN_DEFECTS.md`](KNOWN_DEFECTS.md)
 - Live release: [`RELEASE_STATUS.md`](RELEASE_STATUS.md)

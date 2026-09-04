@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { continueImportBlockedReason, statementReadiness } from "./statementReadiness";
+import { continueImportBlockedReason, isStatementFullyPosted, statementReadiness } from "./statementReadiness";
 
 describe("statement readiness", () => {
   it("blocks continuation while groups need review and names the action", () => {
@@ -51,5 +51,17 @@ describe("statement readiness", () => {
     expect(reason).toBeTruthy();
     expect(reason).toMatch(/Group/);
     expect(reason).toMatch(/Line/);
+  });
+
+  it("does not describe a fully posted statement as a blocked import", () => {
+    const readiness = statementReadiness({
+      readyCount: 0,
+      blockedCount: 0,
+      postedCount: 30,
+    });
+    expect(readiness.canContinue).toBe(false);
+    expect(isStatementFullyPosted(readiness)).toBe(true);
+    expect(continueImportBlockedReason(readiness)).toBeNull();
+    expect(readiness.reasons).toEqual([]);
   });
 });

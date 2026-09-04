@@ -28,7 +28,7 @@ Upload, preview, confirm, and post must leave “Reading and saving…” / “W
 
 ## Historical screens tell the truth
 
-A fully posted statement must not read as an in-progress import. See [`KNOWN_DEFECTS.md`](KNOWN_DEFECTS.md) for the current contradictory review copy.
+A fully posted statement must not read as an in-progress import. KD-001 is fixed: posted statements read as posted.
 
 ## Compensation setup
 
@@ -37,6 +37,8 @@ A missing or incomplete Group + LOB plan should eventually be a **soft reminder*
 ## Scope of chrome
 
 Keep navigation to commission work: Overview, Statements, Groups, Carriers, People, Compensation, Reports. Do not add CRM/task chrome.
+
+A recipient commission statement is generated from posted payouts for a person and paid month. Generating or downloading it is not a payment.
 
 ## Groups and People (planned UX)
 
