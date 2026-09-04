@@ -17,15 +17,17 @@ Do not put passwords, service-role keys, or connection strings in git.
 4. Replace the password placeholder with the database password.
 5. Put that value in `DATABASE_URL`. Never commit it.
 
-The app applies the numbered Postgres migrations on first database open. Migration execution is transaction-protected and serialized across application instances. Historical SQLite files remain in `migrations/sqlite/` for reference only.
+Request handling does **not** apply migrations. Schema changes must be applied explicitly before the new application code serves traffic.
 
-To apply migrations and verify the connection from your laptop, put `DATABASE_URL` in `.env.local` (or export it) and run:
+To apply migrations and verify the connection, put `DATABASE_URL` in `.env.local` (or export the production URI) and run:
 
 ```bash
-npm run db:setup
+npm run db:migrate
 ```
 
-A successful run prints `connected:` and `carriers table reachable`.
+`npm run db:setup` is the same command. It uses an advisory transaction lock, applies any missing files from `migrations/*.sql`, then prints `connected:` and `carriers table reachable`. Historical SQLite files remain in `migrations/sqlite/` for reference only.
+
+Do this against the production `DATABASE_URL` before deploying application code that requires a new migration. This incident does not add a schema change.
 
 ## 3. Storage
 
@@ -79,7 +81,7 @@ The service-role key is server-only. Do not expose it in client code or screensh
    - `DEMO_ALLOWED_EMAILS` (required for this private demo)
    - `ENABLE_REGISTRATION=false` (change to `true` only when intentionally allowing sign-up)
 
-5. Deploy.
+5. If this release includes a new file in `migrations/`, run `npm run db:migrate` against the production `DATABASE_URL` first. Then deploy.
 
 ## 8. Verify the demo
 
@@ -97,7 +99,7 @@ Copy `.env.example` to `.env.local` and use the same Supabase project, or a loca
 
 ```bash
 npm install
-npm run db:setup
+npm run db:migrate
 npm run dev
 ```
 

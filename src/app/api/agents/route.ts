@@ -8,7 +8,11 @@ import { agentInputSchema } from "@/lib/validation";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json(await listAgents());
+  try {
+    return NextResponse.json(await listAgents());
+  } catch (error) {
+    return toErrorResponse(error);
+  }
 }
 
 export async function POST(request: Request) {

@@ -7,7 +7,11 @@ import { nameInputSchema } from "@/lib/validation";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json(await listLinesOfBusiness());
+  try {
+    return NextResponse.json(await listLinesOfBusiness());
+  } catch (error) {
+    return toErrorResponse(error);
+  }
 }
 
 export async function POST(request: Request) {

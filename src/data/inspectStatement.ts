@@ -19,6 +19,7 @@ import { parseId } from "@/lib/http";
 import { storeStatementFile } from "@/lib/storage";
 import { emptyToNull } from "@/lib/validation";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
+import { timedStage } from "@/lib/stageLog";
 
 const allowed = new Set(["application/pdf", "text/csv", "application/csv", "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]);
 const maxStatementBytes = 20 * 1024 * 1024;
@@ -225,7 +226,11 @@ export async function inspectStatementUpload(
       return { status: 415, body: { message: "Upload a CSV, XLSX, XLS, or PDF statement." } };
     }
 
-    let statement = await createImportStatement(db, {
+    let statement = await timedStage("import-persist", "create_statement", {
+      paidMonth: paidMonthValue,
+      rowCount: preview.rowCount,
+      unmatchedGroupCount: preview.newGroupCount,
+    }, () => createImportStatement(db, {
       originalFilename: input.fileName,
       paidMonth: paidMonthValue,
       carrierId: resolved.carrier.id,
@@ -234,7 +239,7 @@ export async function inspectStatementUpload(
       fingerprint: fingerprintBuffer(bytes),
       preview,
       fileBuffer: bytes,
-    });
+    }));
     let reusedMapping = false;
     if (isPdf && preview.rowCount > 0) {
       const signature = buildLayoutSignature(
@@ -243,7 +248,7 @@ export async function inspectStatementUpload(
       );
       const layout = await findMatchingLayout(db, resolved.carrier.id, signature);
       if (layout) {
-        statement = await saveImportColumnMapping(db, statement.id, layout.mapping);
+        statement = await timedStage("import-persist", "save_layout_mapping", { statementId: statement.id }, () => saveImportColumnMapping(db, statement.id, layout.mapping));
         await attachLayoutToStatement(db, statement.id, layout);
         preview = {
           ...preview,
@@ -259,12 +264,15 @@ export async function inspectStatementUpload(
         reusedMapping = true;
         statement = await saveImportPreview(db, statement.id, preview);
       } else if (inferredPdfMapping) {
-        statement = await saveImportColumnMapping(db, statement.id, inferredPdfMapping);
+        statement = await timedStage("import-persist", "save_inferred_mapping", {
+          statementId: statement.id,
+          rowCount: preview.rowCount,
+        }, () => saveImportColumnMapping(db, statement.id, inferredPdfMapping));
       }
     } else if (status === "ready_to_map") {
       const prior = await findLatestColumnMappingForCarrier(resolved.carrier.id, db);
       if (prior) {
-        statement = await saveImportColumnMapping(db, statement.id, prior);
+        statement = await timedStage("import-persist", "reuse_carrier_mapping", { statementId: statement.id }, () => saveImportColumnMapping(db, statement.id, prior));
         reusedMapping = true;
       }
     }
@@ -279,7 +287,7 @@ export async function inspectStatementUpload(
             lines: page.lines,
           })),
         }));
-        const extractionPath = await storeStatementFile(statement.id, "extraction.json", artifact);
+        const extractionPath = await timedStage("import-persist", "store_extraction", { statementId: statement.id }, () => storeStatementFile(statement.id, "extraction.json", artifact));
         statement = await saveImportExtractionPath(db, statement.id, extractionPath);
       } catch (error) {
         statementInspectLog({

@@ -33,6 +33,8 @@ if (!url) {
 const sql = postgres(url, {
   max: 1,
   prepare: false,
+  connect_timeout: 10,
+  idle_timeout: 20,
   ssl: process.env.DATABASE_SSL === "disable" ? false : "require",
 });
 

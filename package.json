@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
-    "db:setup": "node scripts/db-setup.mjs"
+    "db:setup": "node scripts/db-setup.mjs",
+    "db:migrate": "node scripts/db-setup.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",

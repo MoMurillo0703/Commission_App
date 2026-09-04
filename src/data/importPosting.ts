@@ -18,6 +18,7 @@ import { validateMappedRows } from "@/domain/importRows";
 import { collectMappingBlockers, statementReadiness } from "@/domain/statementReadiness";
 import { canReviewRows } from "@/domain/statementWorkflow";
 import { NotFoundError, StatementBlockedError, ValidationError } from "@/lib/errors";
+import { timedStage } from "@/lib/stageLog";
 
 async function references(db: AppDatabase, statementCarrierId?: number | null, paidMonth?: string) {
   const statementCarrier = statementCarrierId ? await getCarrier(db, statementCarrierId) : null;
@@ -57,19 +58,25 @@ async function references(db: AppDatabase, statementCarrierId?: number | null, p
 export async function previewImportPosting(db: AppDatabase | undefined, statementId: number, mapping: ColumnMapping) {
   const database = await resolveDb(db);
   const normalizedMapping = normalizeColumnMapping(mapping);
-  const statement = await getImportStatement(database, statementId);
+  const statement = await timedStage("import-preview", "load_statement", { statementId }, () => getImportStatement(database, statementId));
   if (!statement) throw new NotFoundError("Statement not found.");
   if (!statement.preview || !canReviewRows(statement.preview)) {
     throw new ValidationError("This statement has no readable rows to review or post.");
   }
-  const saved = await saveImportColumnMapping(database, statementId, normalizedMapping);
-  const postedKeys = new Set(await listPostedSourceRowKeys(database, statementId));
+  const saved = await timedStage("import-preview", "save_mapping", {
+    statementId,
+    paidMonth: statement.paidMonth,
+    rowCount: statement.preview.rowCount,
+    unmatchedGroupCount: statement.preview.newGroupCount,
+  }, () => saveImportColumnMapping(database, statementId, normalizedMapping));
+  const postedKeys = new Set(await timedStage("import-preview", "posted_keys", { statementId }, () => listPostedSourceRowKeys(database, statementId)));
+  const refs = await timedStage("import-preview", "load_references", { statementId, paidMonth: statement.paidMonth }, () => references(database, statement.carrierId, statement.paidMonth));
   const rows = validateMappedRows(
     statement.preview.sheets,
     normalizedMapping,
     statement.paidMonth,
     {
-      ...(await references(database, statement.carrierId, statement.paidMonth)),
+      ...refs,
       groupResolutions: statement.preview.groupResolutions,
       lineResolutions: statement.preview.lineResolutions,
       agentResolutions: statement.preview.agentResolutions,
@@ -91,6 +98,18 @@ export async function previewImportPosting(db: AppDatabase | undefined, statemen
     blockedCount,
     postedCount,
   });
+  console.info(JSON.stringify({
+    scope: "import-preview",
+    stage: "validated",
+    ok: true,
+    statementId,
+    paidMonth: statement.paidMonth,
+    rowCount: rows.length,
+    unmatchedGroupCount: unmatchedGroups.length,
+    readyCount,
+    blockedCount,
+    postedCount,
+  }));
   return {
     statement: saved,
     paidMonth: statement.paidMonth,

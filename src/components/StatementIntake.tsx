@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { httpFailureMessage, readApiJson, runBusyAction } from "@/lib/apiClient";
 import { currentPaidMonth, formatPaidMonthTitle, formatStatementMonth } from "@/domain/dates";
 import type { ImportStatementView } from "@/data/statements";
 import type { Carrier } from "@/db/schema";
@@ -95,46 +96,59 @@ export function StatementIntake({
       setResult({ status: "review", message: "Choose or drop at least one statement file." });
       return;
     }
-    setBusy(true);
     try {
-      const results: IntakeResult[] = [];
-      let lastReviewable: IntakeResult | null = null;
-      for (const file of selectedFiles) {
-        const form = new FormData();
-        form.set("statement", file);
-        form.set("paidMonth", paidMonth);
-        if (carrierId) form.set("carrierId", carrierId);
-        if (carrierName.trim()) form.set("carrierName", carrierName.trim());
-        const response = await fetch("/api/imports/inspect", { method: "POST", body: form });
-        const body = (await response.json()) as IntakeResult;
-        const statement = body.statement ?? body.existing ?? null;
-        const normalized = { ...body, fileName: body.fileName ?? file.name, status: body.status ?? statement?.status ?? "review", statement };
-        results.push(normalized);
-        if (statement && (canReviewRows(statement.preview ?? body.preview) || statement.status === "needs_layout")) {
-          lastReviewable = normalized;
+      await runBusyAction(setBusy, async () => {
+        const results: IntakeResult[] = [];
+        let lastReviewable: IntakeResult | null = null;
+        for (const file of selectedFiles) {
+          const form = new FormData();
+          form.set("statement", file);
+          form.set("paidMonth", paidMonth);
+          if (carrierId) form.set("carrierId", carrierId);
+          if (carrierName.trim()) form.set("carrierName", carrierName.trim());
+          const response = await fetch("/api/imports/inspect", { method: "POST", body: form });
+          const body = await readApiJson<IntakeResult>(response);
+          if (!response.ok && response.status !== 409) {
+            results.push({
+              fileName: file.name,
+              status: "review",
+              message: httpFailureMessage(response.status, body.message),
+            });
+            continue;
+          }
+          const statement = body.statement ?? body.existing ?? null;
+          const normalized = { ...body, fileName: body.fileName ?? file.name, status: body.status ?? statement?.status ?? "review", statement };
+          results.push(normalized);
+          if (statement && (canReviewRows(statement.preview ?? body.preview) || statement.status === "needs_layout")) {
+            lastReviewable = normalized;
+          }
         }
-      }
-      setBatchResults(results);
-      setResult(results.length === 1 ? results[0] : null);
-      setPreview(lastReviewable?.preview ?? lastReviewable?.statement?.preview ?? null);
-      setActiveStatement(lastReviewable?.statement ?? null);
-      setManualReadHelp(false);
-      await Promise.all([loadStatements(paidMonth), refreshCarriers()]);
-      setCarrierName("");
-      setSelectedFiles([]);
-    } catch {
-      setResult({ status: "review", message: "Unable to finish reading and saving that statement." });
-    } finally {
-      setBusy(false);
+        setBatchResults(results);
+        setResult(results.length === 1 ? results[0] : null);
+        setPreview(lastReviewable?.preview ?? lastReviewable?.statement?.preview ?? null);
+        setActiveStatement(lastReviewable?.statement ?? null);
+        setManualReadHelp(false);
+        await Promise.all([loadStatements(paidMonth), refreshCarriers()]);
+        setCarrierName("");
+        setSelectedFiles([]);
+      });
+    } catch (error) {
+      setResult({
+        status: "review",
+        message: error instanceof Error ? error.message : "Unable to finish reading and saving that statement.",
+      });
     }
   }
 
   async function inspectSaved(id: number) {
-    setBusy(true);
     try {
-      const response = await fetch(`/api/imports/statements/${id}`);
-      const body = await response.json();
-      if (response.ok) {
+      await runBusyAction(setBusy, async () => {
+        const response = await fetch(`/api/imports/statements/${id}`);
+        const body = await readApiJson<ImportStatementView & { message?: string }>(response);
+        if (!response.ok) {
+          setResult({ status: "review", message: httpFailureMessage(response.status, body.message) });
+          return;
+        }
         setPreview(body.preview ?? null);
         setActiveStatement(body);
         setManualReadHelp(false);
@@ -154,13 +168,12 @@ export function StatementIntake({
           }).next,
         });
         await loadStatements(paidMonth);
-      } else {
-        setResult({ status: "review", message: body.message ?? "Unable to open that statement." });
-      }
-    } catch {
-      setResult({ status: "review", message: "Unable to open that statement." });
-    } finally {
-      setBusy(false);
+      });
+    } catch (error) {
+      setResult({
+        status: "review",
+        message: error instanceof Error ? error.message : "Unable to open that statement.",
+      });
     }
   }
 

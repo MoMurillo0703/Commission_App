@@ -31,7 +31,7 @@ describe("Choice Builder real-structure regression", () => {
   it("interprets the real structure into confirmation rows instead of mapping", () => {
     const interpreted = interpretExtractedPdfPages(choiceBuilderRealStructurePages, []);
     expect(interpreted?.inferred).toBe(true);
-    expect(interpreted?.preview.rowCount).toBeGreaterThanOrEqual(26);
+    expect(interpreted?.preview.rowCount).toBe(26);
     expect(interpreted?.mapping).toMatchObject({
       groupName: "Company Name",
       groupNumber: "Policy Number",

@@ -8,7 +8,11 @@ import { groupInputSchema } from "@/lib/validation";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json(await listGroups());
+  try {
+    return NextResponse.json(await listGroups());
+  } catch (error) {
+    return toErrorResponse(error);
+  }
 }
 
 export async function POST(request: Request) {

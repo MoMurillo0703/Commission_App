@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ImportStatementView } from "@/data/statements";
+import { httpFailureMessage, readApiJson, runBusyAction } from "@/lib/apiClient";
 import { collectPreviewHeaders, mappingFieldLabels, mappingFields, mappingLooksAutomatic, omitStatementCompensationMapping, suggestColumnMapping, type ColumnMapping } from "@/domain/columnMapping";
 import type { UnmatchedImportGroup, GroupImportDecision } from "@/domain/importGroups";
 import type { ValidatedImportRow } from "@/domain/importRows";
@@ -94,24 +95,23 @@ export function StatementPosting({
   }
 
   async function runPreview() {
-    setBusy(true);
     setError("");
     try {
-      const response = await fetch(`/api/imports/statements/${statement.id}/preview`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ columnMapping: postingMapping }),
+      await runBusyAction(setBusy, async () => {
+        const response = await fetch(`/api/imports/statements/${statement.id}/preview`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ columnMapping: postingMapping }),
+        });
+        const body = await readApiJson<PreviewResponse>(response);
+        if (!response.ok) {
+          setError(httpFailureMessage(response.status, body.message));
+          return;
+        }
+        applyReview(body);
       });
-      const body = (await response.json()) as PreviewResponse;
-      if (!response.ok) {
-        setError((body as { message?: string }).message ?? "Unable to preview rows.");
-        return;
-      }
-      applyReview(body);
-    } catch {
-      setError("Unable to preview rows.");
-    } finally {
-      setBusy(false);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Unable to preview rows.");
     }
   }
 
@@ -124,15 +124,15 @@ export function StatementPosting({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ columnMapping: postingMapping }),
         });
-        const body = (await response.json()) as PreviewResponse;
+        const body = await readApiJson<PreviewResponse>(response);
         if (cancelled) return;
         if (!response.ok) {
-          setError((body as { message?: string }).message ?? "Unable to preview rows.");
+          setError(httpFailureMessage(response.status, body.message));
           return;
         }
         applyReview(body);
-      } catch {
-        if (!cancelled) setError("Unable to preview rows.");
+      } catch (error) {
+        if (!cancelled) setError(error instanceof Error ? error.message : "Unable to preview rows.");
       }
     })();
     return () => {

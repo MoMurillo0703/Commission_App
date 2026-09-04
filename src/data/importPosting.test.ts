@@ -9,7 +9,7 @@ import { listCommissions } from "./commissions";
 import { createGroup, listGroups } from "./groups";
 import { postImportStatement, previewImportPosting } from "./importPosting";
 import { createLineOfBusiness } from "./linesOfBusiness";
-import { createImportStatement } from "./statements";
+import { createImportStatement, getImportStatement } from "./statements";
 import { createTestDb } from "@/db/test-db";
 import { suggestColumnMapping, type ColumnMapping } from "@/domain/columnMapping";
 import { fingerprintBuffer } from "@/domain/fingerprint";
@@ -280,6 +280,22 @@ describe("excel row posting", () => {
     expect(preview.rows[0]?.exceptions.join(" ")).toMatch(/Unmatched carrier/);
     await expect(postImportStatement(db, statement.id, mapping)).rejects.toMatchObject({ name: "StatementBlockedError" });
     expect(await listCarriers(db)).toHaveLength(before);
+  });
+
+  it("preview does not create commissions or rewrite saved preview rows", async () => {
+    const { db, carrier } = await seed();
+    const statement = await savedStatement(db, [
+      ["New Group LLC", "N1", "Principal", "Dental", "Alex Morgan", "1000.00", "80.00", "25", "2026-07"],
+    ], "2026-08", carrier.id);
+    const before = await getImportStatement(db, statement.id);
+    expect(before?.preview?.rowCount).toBeGreaterThan(0);
+    const review = await previewImportPosting(db, statement.id, mapping);
+    const after = await getImportStatement(db, statement.id);
+    expect(review.postedCount).toBe(0);
+    expect(await listCommissions(db)).toHaveLength(0);
+    expect(after?.preview?.rowCount).toBe(before?.preview?.rowCount);
+    expect(after?.preview?.newGroupCount).toBe(before?.preview?.newGroupCount);
+    expect(after?.preview?.unmatchedGroups).toEqual(before?.preview?.unmatchedGroups);
   });
 
   it("rejects review and posting for a saved file with no readable rows", async () => {
