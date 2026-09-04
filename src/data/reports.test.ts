@@ -61,6 +61,7 @@ describe("posted commission reports", () => {
   it("totals the agency report and filters by paid month, group, carrier, and LOB", async () => {
     const { db, group, carrier, medical } = await seed();
     const all = await buildAgencyReport(db, { kind: "agency" });
+    expect(all.filters.paidMonth).toBeNull();
     expect(all.availability.postedCommissionCount).toBe(2);
     expect(all.availability.availablePaidMonths).toEqual(["2026-09", "2026-10"]);
     expect(all.totals.grossCommissionCents).toBe(15000);

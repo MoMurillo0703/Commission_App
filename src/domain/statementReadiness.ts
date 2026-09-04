@@ -80,7 +80,7 @@ export function statementReadiness(input: {
       kind: "mapping",
       count: mappingReasons.length,
       message: mappingReasons.join(" "),
-      actionLabel: "Review column mapping",
+      actionLabel: "Help the app read this statement",
       targetId: "statement-mapping",
     });
   }

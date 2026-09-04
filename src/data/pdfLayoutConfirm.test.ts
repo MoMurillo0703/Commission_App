@@ -92,7 +92,7 @@ describe("PDF layout confirmation", () => {
     const statement = await savedNeedsLayout(db, hiddenLines);
     const extraction = await getStatementExtraction(db, statement.id);
     expect(extraction.pages[0]?.lines.some((line) => /Member/.test(line.text))).toBe(true);
-    expect(extraction.message).toMatch(/help identifying the commission table/i);
+    expect(extraction.message).toMatch(/could not automatically find the commission table|Help the app read this statement/i);
 
     const header = findLine(extraction, /^Member\s{2,}Plan/);
     const start = findLine(extraction, /^Acme Benefits/);

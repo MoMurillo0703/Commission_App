@@ -100,8 +100,10 @@ describe("statement inspect production path", () => {
     expect(result.status).toBe(200);
     expect(result.body.fileType).toBe("pdf");
     expect(result.body.status).toBe("needs_layout");
+    expect(result.body.status).not.toBe("needs_profile");
     expect(String(result.body.message)).toMatch(/table|layout|confirm/i);
     expect(String(result.body.message)).not.toMatch(/valid CSV or XLSX/i);
+    expect(String(result.body.message)).not.toMatch(/extraction profile/i);
   });
 
   it("never returns the spreadsheet error when a classified PDF throws during inspect", async () => {

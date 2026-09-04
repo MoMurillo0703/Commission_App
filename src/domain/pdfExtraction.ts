@@ -20,7 +20,7 @@ const totalLine = /^(subtotal|sub-total|total|grand total|amount due|page total|
 const pageLine = /^page\s+\d+(\s+of\s+\d+)?$/i;
 const footerLine = /^(confidential|continued|please remit|thank you|questions\?)/i;
 const moneyToken = /^-?\$?\d{1,3}(?:,\d{3})*(?:\.\d{2})%?$|^-?\d+\.\d{2}$/;
-const headerSignals = /^(current|gross|total)?\s*commission|^premium( received)?$|^carrier$|^product type$|^line of business$|^producer name$|^group(\s*name)?$|^name\s*\/\s*group name$/i;
+const headerSignals = /^(current|gross|total)?\s*commission|^premium( received)?$|^carrier$|^product( type| code| line)?$|^line of business$|^lob$|^coverage( code| type)?$|^producer name$|^group(\s*(name|number|#))?$|^name\s*\/\s*group name$/i;
 
 export type PdfTextItem = {
   str: string;

@@ -11,6 +11,7 @@ import { mappingValue, type ColumnMapping } from "./columnMapping";
 import { calculateAgentCompensationCents } from "./compensation";
 import { applyGroupResolutions, matchImportedGroup, type GroupCandidate, type GroupImportResolution } from "./groupMatch";
 import { parseDollarsToCents } from "./money";
+import { applyCarrierCoverageAlias, type CarrierCoverageAlias } from "./carrierCoverage";
 import { resolveNamedImport, type NamedImportResolution } from "./namedImport";
 import { matchNamedRecord, type NamedRecord } from "./nameMatch";
 import type { PreviewSheet } from "./workbook";
@@ -60,6 +61,7 @@ export type ImportReferenceData = {
   groupResolutions?: GroupImportResolution[];
   lineResolutions?: NamedImportResolution[];
   agentResolutions?: NamedImportResolution[];
+  carrierCoverageAliases?: CarrierCoverageAlias[];
 };
 
 export function resolveImportedCarrier(
@@ -127,7 +129,13 @@ export function validateMappedRows(
       const carrier = resolveImportedCarrier(mapping, row.values, references.carriers, references.statementCarrier);
       const importedLineName = mappingValue(row.values, mapping.lineOfBusiness);
       const importedAgentName = mappingValue(row.values, mapping.agent);
-      const line = resolveNamedImport(references.linesOfBusiness, importedLineName, references.lineResolutions);
+      const line = applyCarrierCoverageAlias(
+        resolveNamedImport(references.linesOfBusiness, importedLineName, references.lineResolutions),
+        references.carrierCoverageAliases,
+        carrier.id,
+        importedLineName,
+        references.linesOfBusiness,
+      );
       const matchedGroup = references.groups.find((candidate) => candidate.id === group.groupId);
       const agent = resolveNamedImport(references.agents, importedAgentName, references.agentResolutions);
       const grossText = mappingValue(row.values, mapping.grossCommission);

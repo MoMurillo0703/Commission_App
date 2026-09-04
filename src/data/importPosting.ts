@@ -5,6 +5,7 @@ import { listAccountManagers } from "./accountManagers";
 import { listAgents } from "./agents";
 import { listGroups } from "./groups";
 import { listLinesOfBusiness } from "./linesOfBusiness";
+import { listCarrierCoverageAliases } from "./carrierCoverage";
 import { getCarrier, listCarriers } from "./carriers";
 import { currentTeamMembers, listTeams } from "./teams";
 import { getImportStatement, markImportStatementPosted, saveImportColumnMapping } from "./statements";
@@ -49,6 +50,7 @@ async function references(db: AppDatabase, statementCarrierId?: number | null, p
     teams,
     personNames,
     statementCarrier,
+    carrierCoverageAliases: await listCarrierCoverageAliases(db),
   };
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mappingFieldLabels, mappingFields, normalizeColumnMapping, suggestColumnMapping } from "./columnMapping";
+import { mappingFieldLabels, mappingFields, mappingLooksAutomatic, normalizeColumnMapping, suggestColumnMapping } from "./columnMapping";
 
 describe("column mapping", () => {
   it("suggests commission import columns from common headers without Agent split %", () => {
@@ -16,6 +16,13 @@ describe("column mapping", () => {
     expect(mapping.compensationPercent).toBeUndefined();
     expect(mappingFields).not.toContain("compensationPercent");
     expect(Object.values(mappingFieldLabels)).not.toContain("Agent split %");
+  });
+
+  it("recognizes coverage-code headers and treats group plus commission as automatic", () => {
+    const mapping = suggestColumnMapping(["Group Name", "Coverage", "Commission"]);
+    expect(mapping.lineOfBusiness).toBe("Coverage");
+    expect(mappingLooksAutomatic(mapping)).toBe(true);
+    expect(mappingLooksAutomatic({ groupName: "Group Name" })).toBe(false);
   });
 
   it("clears a leftover Agent split mapping so it cannot override compensation", () => {

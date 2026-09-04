@@ -72,6 +72,32 @@ describe("statement-level carrier row resolution", () => {
     expect(rows[0]?.carrierSource).toBe("statement");
     expect(rows[0]?.exceptions.join(" ")).not.toMatch(/carrier/i);
   });
+
+  it("applies a confirmed carrier coverage alias only for that carrier", () => {
+    const visSheets = sheets.map((sheet) => ({
+      ...sheet,
+      rows: sheet.rows.map((row) => ({ ...row, values: { ...row.values, LOB: "VIS" } })),
+    }));
+    const aliases = [{ carrierId: 1, sourceValue: "vis", lineOfBusinessId: 20 }];
+    const lines = [{ id: 20, name: "Group Vision" }];
+    const anthem = validateMappedRows(visSheets, mapping, "2026-08", {
+      ...references,
+      carriers: [{ id: 1, name: "Anthem" }],
+      linesOfBusiness: lines,
+      statementCarrier: { id: 1, name: "Anthem" },
+      carrierCoverageAliases: aliases,
+    });
+    expect(anthem[0]?.status).toBe("ready");
+    expect(anthem[0]?.lineOfBusinessId).toBe(20);
+    expect(anthem[0]?.lineOfBusinessLabel).toBe("Group Vision");
+    const otherCarrier = validateMappedRows(visSheets, mapping, "2026-08", {
+      ...references,
+      linesOfBusiness: lines,
+      carrierCoverageAliases: aliases,
+    });
+    expect(otherCarrier[0]?.status).toBe("blocked");
+    expect(otherCarrier[0]?.exceptions.join(" ")).toMatch(/Unmatched line of business/);
+  });
 });
 
 const compensationSheets: PreviewSheet[] = [

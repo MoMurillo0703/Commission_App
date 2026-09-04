@@ -7,6 +7,7 @@ import { countUnassignedCommissions } from "@/data/commissions";
 import { listCompensationQueue } from "@/data/compensationQueue";
 import { listGroups } from "@/data/groups";
 import { listLinesOfBusiness } from "@/data/linesOfBusiness";
+import { listGroupLineEvidence } from "@/data/groupLineEvidence";
 import { listTeams } from "@/data/teams";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +30,7 @@ export default async function CompensationPage() {
         initialAllocations={await listAllocations()}
         initialTeams={await listTeams()}
         initialQueue={await listCompensationQueue()}
+        groupLineEvidence={await listGroupLineEvidence()}
       />
     </AppShell>
   );

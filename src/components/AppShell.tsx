@@ -33,7 +33,7 @@ export function AppShell({
             <small>Commissions</small>
           </div>
         </div>
-        <nav>
+        <nav aria-label="Workspace">
           {items.map((item) => (
             <Link key={item.id} href={item.href} className={active === item.id ? "active" : undefined}>
               {item.label}
@@ -55,7 +55,16 @@ export function AppShell({
           ) : null}
         </div>
       </aside>
-      <section className="content">{children}</section>
+      <section className="content">
+        <nav className="content-nav" aria-label="Workspace pages">
+          {items.map((item) => (
+            <Link key={item.id} href={item.href} className={active === item.id ? "active" : undefined}>
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+        {children}
+      </section>
     </main>
   );
 }

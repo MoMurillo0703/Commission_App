@@ -18,14 +18,17 @@ describe("statement workflow language", () => {
     expect(statementStatusLabel("mapped")).toBe("Ready to continue");
     expect(statementStatusLabel("unreadable")).toBe("Scanned/image PDF cannot yet be read");
     expect(statementStatusLabel("extraction_failed")).toBe("PDF extraction failed — original retained");
-    expect(statementStatusLabel("needs_layout")).toBe("PDF needs layout confirmation");
+    expect(statementStatusLabel("needs_layout")).toBe("Needs help reading");
     expect(statementStatusLabel("needs_conversion")).toBe("XLS reading not supported yet");
     expect(statementStatusLabel("ready_to_map", "pdf", true)).toBe("Text-based PDF successfully read");
     expect(statementNextAction("unreadable", false, "pdf")).toBe("View original");
-    expect(statementNextAction("ready_to_map", true, "pdf")).toBe("Review Statement");
-    expect(statementNextAction("needs_layout", false, "pdf")).toBe("Review Statement");
+    expect(statementNextAction("ready_to_map", true, "pdf")).toBe("Confirm extracted data");
+    expect(statementNextAction("needs_layout", false, "pdf")).toBe("Help the app read this statement");
     expect(statementNextAction("mapped", true)).toBe("Continue Import");
     expect(statementCanOpenReview("needs_layout", false, "pdf")).toBe(true);
+    expect(statementNextAction("needs_profile", false, "pdf", { extractionPath: "statements/1-extraction.json" })).toBe("Help the app read this statement");
+    expect(statementNextAction("needs_profile", false, "pdf")).toBe("View original");
+    expect(statementNextAction("needs_layout", false, "pdf")).not.toBe("Inspect");
     expect(statementKeepViewOriginal("needs_layout", false, "pdf")).toBe(true);
   });
 
@@ -33,6 +36,7 @@ describe("statement workflow language", () => {
     expect(isUnparsedStatement({ status: "unreadable", sourceType: "pdf" })).toBe(true);
     expect(isUnparsedStatement({ status: "extraction_failed", sourceType: "pdf" })).toBe(true);
     expect(isUnparsedStatement({ status: "needs_profile", sourceType: "pdf" })).toBe(true);
+    expect(isUnparsedStatement({ status: "needs_profile", sourceType: "pdf", extractionPath: "statements/1-extraction.json" })).toBe(false);
     expect(isUnparsedStatement({ status: "ready_to_map", sourceType: "pdf" }, true)).toBe(false);
     expect(canReviewRows({ sheets: [] })).toBe(false);
     expect(statementHasReadableRows({ preview: { sheets: [] }, rowCount: 0, sourceType: "pdf" })).toBe(false);
@@ -44,12 +48,12 @@ describe("statement workflow language", () => {
     expect(scanned.why).toMatch(/not supported yet|original file has been saved/i);
     expect(`${scanned.title} ${scanned.why} ${scanned.next}`).not.toMatch(/profile/i);
     const layout = statementGuidance({ status: "needs_layout", sourceType: "pdf", hasReadableRows: true });
-    expect(layout.title).toMatch(/found a table/i);
-    expect(layout.next).toMatch(/Review Statement/i);
+    expect(layout.title).toMatch(/extracted commission data/i);
+    expect(layout.next).toMatch(/Confirm the extracted/i);
     expect(`${layout.title} ${layout.why} ${layout.next}`).not.toMatch(/profile/i);
     const noTable = statementGuidance({ status: "needs_layout", sourceType: "pdf", hasReadableRows: false });
-    expect(noTable.title).toMatch(/need your help identifying the commission table/i);
-    expect(noTable.next).toMatch(/header row|begin and end/i);
+    expect(noTable.title).toMatch(/could not automatically find the commission table/i);
+    expect(noTable.next).toMatch(/Help the app read this statement/i);
     expect(noTable.next).toMatch(/CSV or XLSX/i);
     expect(noTable.next).not.toMatch(/Open the statement to see what still needs attention/i);
     expect(isUnparsedStatement({ status: "needs_layout", sourceType: "pdf" })).toBe(false);

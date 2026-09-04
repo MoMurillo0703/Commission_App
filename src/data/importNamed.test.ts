@@ -3,6 +3,8 @@ import { createAgreement, listAgreements } from "./agreements";
 import { createAgent, listAgents } from "./agents";
 import { createCarrier } from "./carriers";
 import { createGroup, listGroups } from "./groups";
+import { listCarrierCoverageAliases, rememberCarrierCoverageAlias } from "./carrierCoverage";
+import { listCommissions } from "./commissions";
 import { confirmImportAgents, confirmImportLines } from "./importNamed";
 import { confirmImportGroups } from "./importGroups";
 import { postImportStatement, previewImportPosting } from "./importPosting";
@@ -116,5 +118,79 @@ describe("statement named-entity review", () => {
     expect(confirmed.rows[0]?.lineOfBusinessId).toBe(dental.id);
     expect(confirmed.unmatchedLines).toHaveLength(0);
     expect(await listAgreements(db)).toHaveLength(0);
+  });
+
+  it("learns a carrier-scoped coverage value and does not rewrite posted commissions", async () => {
+    const db = await createTestDb();
+    await createGroup(db, { name: "Acme Benefits", groupNumber: "A1" });
+    const anthem = await createCarrier(db, { name: "Anthem" });
+    const principal = await createCarrier(db, { name: "Principal" });
+    const vision = await createLineOfBusiness(db, { name: "Group Vision" });
+    const dental = await createLineOfBusiness(db, { name: "Dental" });
+    await createAgent(db, { name: "Alex Morgan" });
+
+    const firstBuffer = await workbook([
+      ["Acme Benefits", "A1", "Anthem", "VIS", "Alex Morgan", "1000.00", "80.00", "2026-07"],
+    ]);
+    const first = await createImportStatement(db, {
+      originalFilename: "anthem-1.xlsx",
+      paidMonth: "2026-08",
+      carrierId: anthem.id,
+      sourceType: "excel",
+      status: "ready_to_map",
+      fingerprint: fingerprintBuffer(firstBuffer),
+      preview: await previewWorkbook(firstBuffer, await listGroups(db)),
+    });
+    const firstReview = await previewImportPosting(db, first.id, mapping);
+    expect(firstReview.unmatchedLines[0]?.sourceName).toBe("VIS");
+    await confirmImportLines(db, first.id, mapping, [
+      { key: firstReview.unmatchedLines[0]!.key, action: "match", existingId: vision.id },
+    ]);
+    expect((await listCarrierCoverageAliases(db, anthem.id)).map((item) => item.sourceValue)).toEqual(["vis"]);
+
+    const posted = await postImportStatement(db, first.id, mapping);
+    expect(posted.postedCount).toBe(1);
+    const postedCommission = (await listCommissions(db))[0];
+    expect(postedCommission?.lineOfBusinessId).toBe(vision.id);
+
+    const laterBuffer = await workbook([
+      ["Acme Benefits", "A1", "Anthem", "VIS", "Alex Morgan", "900.00", "72.00", "2026-08"],
+    ]);
+    const later = await createImportStatement(db, {
+      originalFilename: "anthem-2.xlsx",
+      paidMonth: "2026-09",
+      carrierId: anthem.id,
+      sourceType: "excel",
+      status: "ready_to_map",
+      fingerprint: fingerprintBuffer(laterBuffer),
+      preview: await previewWorkbook(laterBuffer, await listGroups(db)),
+    });
+    const laterReview = await previewImportPosting(db, later.id, mapping);
+    expect(laterReview.unmatchedLines).toHaveLength(0);
+    expect(laterReview.rows[0]?.lineOfBusinessId).toBe(vision.id);
+
+    const otherBuffer = await workbook([
+      ["Acme Benefits", "A1", "Principal", "VIS", "Alex Morgan", "500.00", "40.00", "2026-08"],
+    ]);
+    const other = await createImportStatement(db, {
+      originalFilename: "principal-1.xlsx",
+      paidMonth: "2026-09",
+      carrierId: principal.id,
+      sourceType: "excel",
+      status: "ready_to_map",
+      fingerprint: fingerprintBuffer(otherBuffer),
+      preview: await previewWorkbook(otherBuffer, await listGroups(db)),
+    });
+    const otherReview = await previewImportPosting(db, other.id, mapping);
+    expect(otherReview.unmatchedLines[0]?.sourceName).toBe("VIS");
+
+    await rememberCarrierCoverageAlias(db, {
+      carrierId: anthem.id,
+      sourceValue: "VIS",
+      lineOfBusinessId: dental.id,
+    });
+    const afterOverride = await listCommissions(db);
+    expect(afterOverride[0]?.id).toBe(postedCommission?.id);
+    expect(afterOverride[0]?.lineOfBusinessId).toBe(vision.id);
   });
 });

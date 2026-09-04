@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ImportStatementView } from "@/data/statements";
-import { collectPreviewHeaders, mappingFieldLabels, mappingFields, suggestColumnMapping, type ColumnMapping } from "@/domain/columnMapping";
+import { collectPreviewHeaders, mappingFieldLabels, mappingFields, mappingLooksAutomatic, suggestColumnMapping, type ColumnMapping } from "@/domain/columnMapping";
 import { calculateAgentCompensationCents, calculateAgencyNetCents } from "@/domain/compensation";
 import type { UnmatchedImportGroup, GroupImportDecision } from "@/domain/importGroups";
 import type { ValidatedImportRow } from "@/domain/importRows";
@@ -54,6 +54,7 @@ export function StatementPosting({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [layoutMessage, setLayoutMessage] = useState("");
+  const [showMappingHelp, setShowMappingHelp] = useState(() => !mappingLooksAutomatic(statement.columnMapping ?? suggestColumnMapping(headers)));
 
   useEffect(() => {
     void Promise.all([
@@ -68,6 +69,9 @@ export function StatementPosting({
     setGroupDecisions(Object.fromEntries((body.unmatchedGroups ?? []).map((group) => [group.key, { key: group.key, action: "create" }])));
     setLineDecisions(defaultNamedDecisions(body.unmatchedLines ?? []));
     setAgentDecisions(defaultNamedDecisions(body.unmatchedAgents ?? []));
+    if (body.readiness?.blockers.some((blocker) => blocker.kind === "mapping")) {
+      setShowMappingHelp(true);
+    }
   }
 
   async function runPreview() {
@@ -202,20 +206,17 @@ export function StatementPosting({
     <div className="result">
       <ol className="workflow-steps" aria-label="Statement workflow">
         <li className="done">Upload</li>
-        <li className={workflowStep === "read" ? "active" : "done"}>Read</li>
-        <li className={workflowStep === "resolve" ? "active" : resolveActive || review ? "done" : ""}>Resolve</li>
-        <li className={workflowStep === "review" ? "active" : review && readiness?.canContinue ? "done" : ""}>Review</li>
-        <li className={workflowStep === "post" ? "done" : ""}>Post</li>
+        <li className={workflowStep === "read" ? "active" : "done"}>Automatically Read</li>
+        <li className={workflowStep === "resolve" ? "active" : resolveActive || review ? "done" : ""}>Confirm</li>
+        <li className={workflowStep === "review" || workflowStep === "post" ? "active" : review && readiness?.canContinue ? "done" : ""}>Post</li>
       </ol>
-      <strong>Resolve unmatched items, review the financial rows, then continue the import</strong>
+      <strong>Confirm the extracted commission data, then post</strong>
       <p>
         Paid month is {statement.paidMonth}
         {statement.carrierName ? ` · statement carrier is ${statement.carrierName}` : ""}.
-        Premium / coverage month stays on the row when mapped.
-        {statement.carrierName
-          ? " Map a Carrier column only if this file contains more than one carrier."
-          : " Map a Carrier column for each row."}
-        {" "}Recipient compensation and Agency net come from the Compensation allocation for the Group, line of business, and paid month. Statement rate or split columns are not used as compensation terms.
+        The app already read this file and identified likely groups, coverage values, premium, and commission.
+        Correct any field that looks wrong, then post.
+        Recipient compensation and Agency net come from the Compensation allocation for the Group, line of business, and paid month.
       </p>
       {recognizedLayout && (
         <p><strong>Recognized carrier layout:</strong> {recognizedLayout}{preview.pdf?.layoutVersion ? ` · version ${preview.pdf.layoutVersion}` : ""}</p>
@@ -252,44 +253,61 @@ export function StatementPosting({
       {statement.carrierName && (
         <div className="related-block">
           <p><strong>Carrier: {statement.carrierName}</strong></p>
-          <p>Source: Statement carrier. Imported rows use this carrier unless a row-level Carrier column is mapped.</p>
-          <label>
-            Carrier column (optional)
-            <select value={mapping.carrier ?? ""} onChange={(event) => setField("carrier", event.target.value)}>
-              <option value="">Use statement carrier</option>
-              {headers.map((header) => (
-                <option key={header} value={header}>{header}</option>
-              ))}
-            </select>
-          </label>
+          <p>Imported rows use this carrier unless a row names a different carrier.</p>
         </div>
       )}
-      <div className="form-grid form-grid-wide" id="statement-mapping">
-        {mappingFieldsToShow.map((field) => (
-          <label key={field}>
-            {mappingFieldLabels[field]}
-            <select value={mapping[field] ?? ""} onChange={(event) => setField(field, event.target.value)}>
-              <option value="">Not mapped</option>
-              {headers.map((header) => (
-                <option key={header} value={header}>{header}</option>
-              ))}
-            </select>
-          </label>
-        ))}
-      </div>
-      <div className="form-actions" style={{ marginTop: 12 }}>
-        <button type="button" className="secondary" disabled={busy} onClick={runPreview}>
-          {busy ? "Working…" : "Review Statement"}
-        </button>
-        {statement.sourceType === "pdf" && statement.carrierId && (
-          <button type="button" className="secondary" disabled={busy} onClick={saveLayout}>
-            Save this statement layout
+      {!showMappingHelp && (
+        <div className="form-actions" id="statement-mapping" style={{ marginTop: 12 }}>
+          <button type="button" className="secondary" disabled={busy} onClick={() => setShowMappingHelp(true)}>
+            Help the app read this statement
           </button>
-        )}
-        <button type="button" disabled={busy || !readiness?.canContinue} onClick={postReady}>
-          {review ? `Continue Import · post ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Continue Import"}
-        </button>
-      </div>
+          <button type="button" disabled={busy || !readiness?.canContinue} onClick={postReady}>
+            {review ? `Confirm and post ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Confirm and post"}
+          </button>
+        </div>
+      )}
+      {showMappingHelp && (
+        <>
+          <p className="muted-note">Advanced recovery: choose columns only if automatic reading missed them.</p>
+          {statement.carrierName && (
+            <label>
+              Carrier column (optional)
+              <select value={mapping.carrier ?? ""} onChange={(event) => setField("carrier", event.target.value)}>
+                <option value="">Use statement carrier</option>
+                {headers.map((header) => (
+                  <option key={header} value={header}>{header}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          <div className="form-grid form-grid-wide" id="statement-mapping">
+            {mappingFieldsToShow.map((field) => (
+              <label key={field}>
+                {mappingFieldLabels[field]}
+                <select value={mapping[field] ?? ""} onChange={(event) => setField(field, event.target.value)}>
+                  <option value="">Not mapped</option>
+                  {headers.map((header) => (
+                    <option key={header} value={header}>{header}</option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+          <div className="form-actions" style={{ marginTop: 12 }}>
+            <button type="button" className="secondary" disabled={busy} onClick={runPreview}>
+              {busy ? "Working…" : "Refresh extracted data"}
+            </button>
+            {statement.sourceType === "pdf" && statement.carrierId && (
+              <button type="button" className="secondary" disabled={busy} onClick={saveLayout}>
+                Save this statement layout
+              </button>
+            )}
+            <button type="button" disabled={busy || !readiness?.canContinue} onClick={postReady}>
+              {review ? `Confirm and post ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Confirm and post"}
+            </button>
+          </div>
+        </>
+      )}
       {!readiness?.canContinue && <p className="form-error">{continueBlocked}</p>}
       {error && <p className="form-error">{error}</p>}
       {layoutMessage && <p className="form-success">{layoutMessage}</p>}
@@ -318,7 +336,7 @@ export function StatementPosting({
         <ResolveTable
           id="resolve-lines"
           title={`${unmatchedLines.length} Line${unmatchedLines.length === 1 ? "" : "s"} of Business need review`}
-          help="Carrier product labels that do not match a line of business stay unmatched until you confirm. Creating a line of business does not create a compensation agreement."
+          help="Carrier product labels that do not match a line of business stay unmatched until you confirm. Confirming a coverage value for this carrier is reused on later statements from the same carrier only. Changing it later does not rewrite posted commissions. Creating a line of business does not create a compensation agreement."
           rows={unmatchedLines.map((line) => ({
             key: line.key,
             label: line.sourceName,

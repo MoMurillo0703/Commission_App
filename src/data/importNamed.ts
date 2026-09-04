@@ -1,10 +1,12 @@
 import { createAgent, listAgents } from "./agents";
 import { listAgreements } from "./agreements";
 import { previewImportPosting } from "./importPosting";
+import { rememberCarrierCoverageAlias } from "./carrierCoverage";
 import { createLineOfBusiness, listLinesOfBusiness } from "./linesOfBusiness";
 import { saveImportNamedResolutions } from "./statements";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
+import { normalizeCoverageValue } from "@/domain/carrierCoverage";
 import type { ColumnMapping } from "@/domain/columnMapping";
 import {
   collectUnmatchedImportAgents,
@@ -14,6 +16,32 @@ import {
   type NamedImportResolution,
 } from "@/domain/namedImport";
 import { ValidationError } from "@/lib/errors";
+
+function carrierIdsForCoverage(
+  preview: { statement: { carrierId?: number | null }; rows: Array<{ importedLineName?: string | null; carrierId?: number | null }> },
+  sourceName: string,
+) {
+  const ids = new Set<number>();
+  if (preview.statement.carrierId) ids.add(preview.statement.carrierId);
+  const normalized = normalizeCoverageValue(sourceName);
+  for (const row of preview.rows) {
+    if (normalizeCoverageValue(row.importedLineName) === normalized && row.carrierId) {
+      ids.add(row.carrierId);
+    }
+  }
+  return [...ids];
+}
+
+async function rememberLineCoverage(
+  db: AppDatabase,
+  preview: { statement: { carrierId?: number | null }; rows: Array<{ importedLineName?: string | null; carrierId?: number | null }> },
+  sourceName: string,
+  lineOfBusinessId: number,
+) {
+  for (const carrierId of carrierIdsForCoverage(preview, sourceName)) {
+    await rememberCarrierCoverageAlias(db, { carrierId, sourceValue: sourceName, lineOfBusinessId });
+  }
+}
 
 export async function confirmImportLines(
   db: AppDatabase | undefined,
@@ -80,6 +108,7 @@ async function confirmNamedImports(
           sourceName: proposed.sourceName,
           action: "match",
         });
+        if (kind === "line") await rememberLineCoverage(tx, preview, proposed.sourceName, existing.id);
         continue;
       }
 
@@ -92,6 +121,7 @@ async function confirmNamedImports(
           sourceName: proposed.sourceName,
           action: "create",
         });
+        if (kind === "line") await rememberLineCoverage(tx, preview, proposed.sourceName, already.id);
         continue;
       }
 
@@ -106,6 +136,7 @@ async function confirmNamedImports(
         sourceName: proposed.sourceName,
         action: "create",
       });
+      if (kind === "line") await rememberLineCoverage(tx, preview, proposed.sourceName, created.id);
     }
 
     await saveImportNamedResolutions(tx, statementId, kind, [...resolutions.values()]);

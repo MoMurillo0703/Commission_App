@@ -116,7 +116,7 @@ export async function getStatementExtraction(
     classification: statement.status === "needs_layout" ? "needs_layout" : "readable",
     pageCount: pages.length,
     pages: pagesView,
-    message: "We could read this PDF, but we need your help identifying the commission table.",
+    message: "The app could not automatically find the commission table. Help the app read this statement if you want to mark the table.",
   };
 }
 

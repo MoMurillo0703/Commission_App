@@ -20,7 +20,7 @@ export type ColumnMapping = Partial<Record<MappingField, string | null>> & {
 
 const headerPatterns: Record<Exclude<MappingField, "groupName" | "groupNumber" | "premiumMonth">, RegExp> = {
   carrier: /^(carrier|company|insurer)$/i,
-  lineOfBusiness: /^(line of business|lob|product( line| type)?)$/i,
+  lineOfBusiness: /^(line of business|lob|product( line| type| code)?|coverage( code| type)?|plan( type| code)?)$/i,
   agent: /^(agent|producer( name)?|broker)$/i,
   premium: /^(premium|billed premium|premium received)$/i,
   grossCommission: /^(gross |current )?commission|comm\.?$/i,
@@ -71,4 +71,8 @@ export function mappingValue(values: Record<string, string>, header: string | nu
 
 export function collectPreviewHeaders(sheets: { headers: string[] }[]) {
   return [...new Set(sheets.flatMap((sheet) => sheet.headers))];
+}
+
+export function mappingLooksAutomatic(mapping: ColumnMapping) {
+  return Boolean((mapping.groupName || mapping.groupNumber) && mapping.grossCommission);
 }

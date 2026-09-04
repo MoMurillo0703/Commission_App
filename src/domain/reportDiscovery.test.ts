@@ -26,5 +26,15 @@ describe("report discovery", () => {
       availablePaidMonths: [],
       matchingRowCount: 0,
     })).toMatch(/on file yet/);
+    expect(reportEmptyMessage(normalizeReportFilters({ kind: "individual" }), {
+      postedCommissionCount: 49,
+      availablePaidMonths: ["2026-08"],
+      matchingRowCount: 0,
+    })).toMatch(/payout snapshots/i);
+    expect(reportEmptyMessage(normalizeReportFilters({ kind: "individual" }), {
+      postedCommissionCount: 49,
+      availablePaidMonths: ["2026-08"],
+      matchingRowCount: 0,
+    })).toMatch(/not invented|before payout snapshots/i);
   });
 });

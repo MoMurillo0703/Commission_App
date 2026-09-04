@@ -20,6 +20,7 @@ import {
   queueBannerLabel,
   skipQueueIndex,
 } from "@/domain/compensationQueue";
+import { linesForGroupSelection, type GroupLineEvidence } from "@/domain/activeGroupLines";
 import { formatStatementMonth } from "@/domain/dates";
 import { bpsToPercentString, parsePercentToBps } from "@/domain/money";
 
@@ -31,6 +32,7 @@ export function CompensationWorkspace({
   initialAllocations,
   initialTeams,
   initialQueue = [],
+  groupLineEvidence = [],
 }: {
   groups: Group[];
   agents: Agent[];
@@ -39,6 +41,7 @@ export function CompensationWorkspace({
   initialAllocations: AllocationView[];
   initialTeams: TeamView[];
   initialQueue?: CompensationQueueItem[];
+  groupLineEvidence?: GroupLineEvidence[];
 }) {
   const [allocations, setAllocations] = useState(initialAllocations);
   const [teams, setTeams] = useState(initialTeams);
@@ -54,6 +57,13 @@ export function CompensationWorkspace({
   const [queue, setQueue] = useState(initialQueue);
 
   const currentQueueItem = queue[queueIndex] ?? null;
+  const selectedGroupId = Number(draft.groupId) || null;
+  const visibleLines = linesForGroupSelection(
+    selectedGroupId,
+    linesOfBusiness,
+    groupLineEvidence,
+    currentQueueItem && currentQueueItem.groupId === selectedGroupId ? [currentQueueItem.lineOfBusinessId] : [],
+  );
 
   const totals = allocationTotals(draft.entries.flatMap((entry) => {
     try {
@@ -263,16 +273,35 @@ export function CompensationWorkspace({
         <form className="form-grid form-grid-wide" onSubmit={(event) => void saveAllocation(event)}>
           <label>
             Group
-            <select value={draft.groupId} onChange={(event) => setDraft((current) => ({ ...current, groupId: event.target.value }))} required>
+            <select
+              value={draft.groupId}
+              onChange={(event) => {
+                const groupId = event.target.value;
+                const nextLines = linesForGroupSelection(
+                  Number(groupId) || null,
+                  linesOfBusiness,
+                  groupLineEvidence,
+                  currentQueueItem && currentQueueItem.groupId === Number(groupId) ? [currentQueueItem.lineOfBusinessId] : [],
+                );
+                setDraft((current) => ({
+                  ...current,
+                  groupId,
+                  lineOfBusinessId: nextLines.some((line) => String(line.id) === current.lineOfBusinessId)
+                    ? current.lineOfBusinessId
+                    : "",
+                }));
+              }}
+              required
+            >
               <option value="">Select group</option>
               {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
             </select>
           </label>
           <label>
             Line of business
-            <select value={draft.lineOfBusinessId} onChange={(event) => setDraft((current) => ({ ...current, lineOfBusinessId: event.target.value }))} required>
-              <option value="">Select line</option>
-              {linesOfBusiness.map((line) => <option key={line.id} value={line.id}>{line.name}</option>)}
+            <select value={draft.lineOfBusinessId} onChange={(event) => setDraft((current) => ({ ...current, lineOfBusinessId: event.target.value }))} required disabled={!draft.groupId}>
+              <option value="">{draft.groupId ? "Select line" : "Select a group first"}</option>
+              {visibleLines.map((line) => <option key={line.id} value={line.id}>{line.name}</option>)}
             </select>
           </label>
           <label>
@@ -283,6 +312,12 @@ export function CompensationWorkspace({
             Effective end
             <input type="month" value={draft.effectiveEnd} onChange={(event) => setDraft((current) => ({ ...current, effectiveEnd: event.target.value }))} />
           </label>
+          {draft.groupId && visibleLines.length === 0 && (
+            <p className="muted-note full">This group does not yet have an active line of coverage on file from commissions, allocations, or agreements. Historical inactive lines stay in history and are not listed here.</p>
+          )}
+          {draft.groupId && visibleLines.length > 0 && (
+            <p className="muted-note full">Only lines of business evidenced for this group are listed. Historical inactive lines remain preserved in history.</p>
+          )}
           {editor}
           <p className={totals.complete ? "form-success full" : "allocation-progress full"}>{allocationProgressLabel(draft.entries.flatMap((entry) => {
             try { return [{ compensationBps: parsePercentToBps(entry.percent || "0") }]; } catch { return []; }

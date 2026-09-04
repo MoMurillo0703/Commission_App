@@ -127,9 +127,9 @@ export function PdfLayoutReview({
 
   return (
     <div className="result pdf-layout-review">
-      <p className="eyebrow">Review Statement</p>
-      <strong>We could read this PDF, but we need your help identifying the commission table.</strong>
-      <p>The extracted text is shown in page and line order. Mark the header row, the first commission row, and the last commission row. Confirming the layout does not post commissions.</p>
+      <p className="eyebrow">Advanced reading help</p>
+      <strong>Help the app read this statement</strong>
+      <p>This is a fallback when automatic reading cannot find the commission table. Mark the header row, the first commission row, and the last commission row. Confirming the layout does not post commissions.</p>
       <div className="form-actions" style={{ marginTop: 12, flexWrap: "wrap" }}>
         <button type="button" className={mark === "header" ? "" : "secondary"} onClick={() => setMark("header")}>
           Header row
@@ -192,7 +192,7 @@ export function PdfLayoutReview({
           <p>
             {preview.rowCount === 0
               ? "No commission rows yet. Repeated headers, totals, and page labels are left out."
-              : `${preview.rowCount} row${preview.rowCount === 1 ? "" : "s"} will continue into column mapping.`}
+              : `${preview.rowCount} row${preview.rowCount === 1 ? "" : "s"} will continue into confirmation.`}
           </p>
           {preview.sheets[0] && preview.rowCount > 0 && (
             <table>

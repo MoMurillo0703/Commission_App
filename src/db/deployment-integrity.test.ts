@@ -32,12 +32,12 @@ describe("deployment database integrity", () => {
       WHERE relname IN (
         'carriers', 'lines_of_business', 'account_managers', 'agents', 'groups',
         'import_statements', 'group_compensation_agreements', 'commission_records',
-        'carrier_statement_layouts', 'teams', 'team_memberships', 'compensation_allocations',
-        'compensation_allocation_entries', 'commission_payouts'
+        'carrier_statement_layouts', 'carrier_coverage_aliases', 'teams', 'team_memberships',
+        'compensation_allocations', 'compensation_allocation_entries', 'commission_payouts'
       )
     `);
     const rows = (result as unknown as { rows: Array<{ relname: string; relrowsecurity: boolean }> }).rows;
-    expect(rows).toHaveLength(14);
+    expect(rows).toHaveLength(15);
     expect(rows.every((row) => row.relrowsecurity)).toBe(true);
   });
 

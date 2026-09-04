@@ -6,7 +6,8 @@ import { currentPaidMonth, formatPaidMonthTitle, formatStatementMonth } from "@/
 import type { ImportStatementView } from "@/data/statements";
 import type { Carrier } from "@/db/schema";
 import type { StatementPreview } from "@/domain/workbook";
-import { canReviewRows, isUnparsedStatement, statementCanBeDeleted, statementCanOpenReview, statementDeleteBlockedReason, statementGuidance, statementHasReadableRows, statementKeepViewOriginal, statementNextAction, statementStatusLabel } from "@/domain/statementWorkflow";
+import { acceptedStatementFiles, pdfNeedsLayoutConfirmation, STATEMENT_INTAKE_FORMATS, STATEMENT_INTAKE_LEAD, statementListActions } from "@/domain/statementActions";
+import { canReviewRows, isUnparsedStatement, statementCanBeDeleted, statementCanOpenReview, statementGuidance, statementHasExtractedText, statementStatusLabel } from "@/domain/statementWorkflow";
 import { PdfLayoutReview } from "./PdfLayoutReview";
 import { StatementPosting } from "./StatementPosting";
 
@@ -51,6 +52,7 @@ export function StatementIntake({
   const [busy, setBusy] = useState(false);
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [manualReadHelp, setManualReadHelp] = useState(false);
 
   useEffect(() => {
     onPaidMonthChange?.(paidMonth);
@@ -81,6 +83,7 @@ export function StatementIntake({
     setResult(null);
     setPreview(null);
     setActiveStatement(null);
+    setManualReadHelp(false);
     router.replace(`/statements?paidMonth=${value}`);
     await loadStatements(value);
   }
@@ -113,6 +116,7 @@ export function StatementIntake({
     setResult(results.length === 1 ? results[0] : null);
     setPreview(lastReviewable?.preview ?? lastReviewable?.statement?.preview ?? null);
     setActiveStatement(lastReviewable?.statement ?? null);
+    setManualReadHelp(false);
     await Promise.all([loadStatements(paidMonth), refreshCarriers()]);
     setCarrierName("");
     setSelectedFiles([]);
@@ -126,6 +130,7 @@ export function StatementIntake({
     if (response.ok) {
       setPreview(body.preview ?? null);
       setActiveStatement(body);
+      setManualReadHelp(pdfNeedsLayoutConfirmation(body, body.preview) && !canReviewRows(body.preview));
       setResult({
         fileName: body.originalFilename,
         fileType: body.sourceType,
@@ -137,6 +142,8 @@ export function StatementIntake({
           sourceType: body.sourceType,
           unmatchedGroupCount: body.preview?.newGroupCount,
           hasReadableRows: canReviewRows(body.preview),
+          hasExtractedText: statementHasExtractedText(body),
+          pdfClassification: body.preview?.pdf?.classification,
         }).next,
       });
     } else {
@@ -186,7 +193,8 @@ export function StatementIntake({
       <div>
         <p className="eyebrow">Statement intake</p>
         <h2>{formatPaidMonthTitle(paidMonth)}</h2>
-        <p>Upload statements for the month the agency received payment. The app reads each file, then you review anything it could not determine and post the ready rows.</p>
+        <p>{STATEMENT_INTAKE_LEAD}</p>
+        <p>{STATEMENT_INTAKE_FORMATS}</p>
       </div>
       <form onSubmit={upload}>
         <label>
@@ -228,18 +236,18 @@ export function StatementIntake({
           onDrop={(event) => {
             event.preventDefault();
             setDragging(false);
-            setSelectedFiles(Array.from(event.dataTransfer.files));
+            setSelectedFiles(acceptedStatementFiles(event.dataTransfer.files));
           }}
         >
           <strong>Drop statement files here</strong>
-          <span>or choose CSV, XLSX, XLS, or PDF files</span>
+          <span>or click to choose Excel, CSV, or readable PDF files</span>
           <input
             id="statement"
             name="statement"
             type="file"
             accept=".csv,.xlsx,.xls,.pdf"
             multiple
-            onChange={(event) => setSelectedFiles(Array.from(event.target.files ?? []))}
+            onChange={(event) => setSelectedFiles(acceptedStatementFiles(event.target.files ?? []))}
           />
           {selectedFiles.length > 0 && <small>{selectedFiles.map((file) => file.name).join(" · ")}</small>}
         </label>
@@ -311,12 +319,24 @@ export function StatementIntake({
           {preview.pdf?.layoutName && <p>Recognized carrier layout: {preview.pdf.layoutName}</p>}
         </div>
       )}
-      {activeStatement && preview && activeStatement.status === "needs_layout" && !canReviewRows(preview) && (
+      {activeStatement && pdfNeedsLayoutConfirmation(activeStatement, preview) && !manualReadHelp && (
+        <div className="result">
+          <strong>Automatic reading needs a little help</strong>
+          <p>The file was read, but the app could not confidently identify the commission table. Mapping or page/line selection is a fallback, not the normal workflow.</p>
+          <div className="form-actions" style={{ marginTop: 12 }}>
+            <button type="button" onClick={() => setManualReadHelp(true)}>
+              Help the app read this statement
+            </button>
+          </div>
+        </div>
+      )}
+      {activeStatement && pdfNeedsLayoutConfirmation(activeStatement, preview) && manualReadHelp && (
         <PdfLayoutReview
           statement={activeStatement}
           onConfirmed={(next) => {
             setActiveStatement(next);
             setPreview(next.preview);
+            setManualReadHelp(false);
             setResult({
               fileName: next.originalFilename,
               fileType: next.sourceType,
@@ -334,8 +354,7 @@ export function StatementIntake({
             void loadStatements(paidMonth);
           }}
           onCancel={() => {
-            setActiveStatement(null);
-            setPreview(null);
+            setManualReadHelp(false);
           }}
         />
       )}
@@ -369,7 +388,9 @@ export function StatementIntake({
             </tr>
           </thead>
           <tbody>
-            {statements.map((statement) => (
+            {statements.map((statement) => {
+              const actions = statementListActions(statement);
+              return (
               <tr key={statement.id}>
                 <td>
                   {renamingId === statement.id ? (
@@ -392,23 +413,23 @@ export function StatementIntake({
                 <td>{new Date(statement.uploadedAt).toLocaleString()}</td>
                 <td>{statement.sourceType}</td>
                 <td>
-                  <span className={`pill ${statement.status}`}>{statementStatusLabel(statement.status, statement.sourceType, statementHasReadableRows(statement))}</span>
+                  <span className={`pill ${statement.status}`}>{actions.statusLabel}</span>
                 </td>
                 <td>
-                  <div className="form-actions">
+                  <div className="form-actions statement-row-actions">
                     <button
                       type="button"
-                      className={statementCanOpenReview(statement.status, statementHasReadableRows(statement), statement.sourceType) ? "" : "secondary"}
+                      className={actions.canOpenReview ? "" : "secondary"}
                       onClick={() => inspectSaved(statement.id)}
                     >
-                      {statementNextAction(statement.status, statementHasReadableRows(statement), statement.sourceType)}
+                      {actions.reviewLabel}
                     </button>
-                    {statementKeepViewOriginal(statement.status, statementHasReadableRows(statement), statement.sourceType) && statement.storedPath && (
+                    {actions.showViewOriginal && (
                       <a className="secondary" href={`/api/imports/statements/${statement.id}/file`} style={{ display: "inline-block", textDecoration: "none" }}>
                         View original
                       </a>
                     )}
-                    {statement.storedPath && (
+                    {actions.showDownload && (
                       <a className="secondary" href={`/api/imports/statements/${statement.id}/file`} style={{ display: "inline-block", textDecoration: "none" }}>
                         Download
                       </a>
@@ -425,19 +446,20 @@ export function StatementIntake({
                         Rename
                       </button>
                     )}
-                    {statementCanBeDeleted(statement) ? (
+                    {actions.showDelete ? (
                       <button type="button" className="secondary" disabled={busy} onClick={() => removeStatement(statement)}>
                         Delete
                       </button>
                     ) : (
-                      <button type="button" className="secondary" disabled title={statementDeleteBlockedReason()}>
+                      <button type="button" className="secondary" disabled title={actions.deleteBlockedReason ?? ""}>
                         Posted — cannot delete
                       </button>
                     )}
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       )}
