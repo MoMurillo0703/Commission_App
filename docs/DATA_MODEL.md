@@ -25,10 +25,17 @@ Do not rewrite an applied migration. Add a new numbered file. Runtime code must 
 
 ### Migration 0002 calendar constraints are `NOT VALID`
 
-`0002` added YYYY-MM calendar `CHECK` constraints on paid month, agreement/allocation effective dates, statement month, and premium month using `NOT VALID`.
+`0002` added YYYY-MM calendar `CHECK` constraints with `NOT VALID` on:
 
-- They apply to **new and future writes** that would violate the pattern.
-- PostgreSQL **did not** retroactively validate every existing row when the constraint was added.
+- import-statement paid month (`import_statements.paid_month`)
+- legacy agreement start and end months (`group_compensation_agreements.effective_start` / `effective_end`)
+- commission statement month (`commission_records.statement_month`)
+- commission premium month (`commission_records.premium_month`)
+
+`0002` does **not** cover compensation-allocation effective dates. Allocations did not exist until `0004`.
+
+- These `0002` constraints enforce applicable **new and future writes**.
+- PostgreSQL **did not** retroactively validate every existing row when the constraints were added.
 - The presence of these constraints therefore does **not** prove every preexisting row satisfied them at migration time.
 
 Do not modify `0002`. If existing rows must be proven valid, that is a separate, assigned data-integrity task.
@@ -73,7 +80,9 @@ Reusable team. Members are agent or account-manager records with internal `share
 
 ### `compensation_allocations` / `compensation_allocation_entries`
 
-Complete Group + LOB + effective period plan. Entries: Agency, Person (≤5 direct), and/or Team. Active allocations total exactly 10,000 bps and cannot overlap for the same group and LOB.
+Complete Group + LOB + effective period plan. Entries: Agency, Person (≤5 direct), and/or Team. Active allocations total exactly 10,000 bps and cannot overlap for the same group and LOB. Those activation, overlap, and immutability rules are **database-enforced** (see Enforcement boundaries). Application validation exists for UX and error messages; it is not the enforcement boundary.
+
+`compensation_allocation_entries.team_id` **has** a foreign key to `teams(id)`.
 
 `source_agreement_id` points at a legacy agreement when `0004` copied it. Partial legacy copies stay inactive until completed. No Agency remainder was inferred.
 
@@ -91,7 +100,11 @@ Header `agent_id` is a leftover single-producer slot. Pay is in `commission_payo
 
 ### `commission_payouts`
 
-Posted snapshot per recipient, including expanded team members. **Business rule:** these rows are historical truth and must not be silently rewritten. **Current mechanism:** application posting and update paths avoid rewriting them. There is **no** database immutability trigger on this table. Canonical Agency Net is the Agency payout when a complete allocation existed at post.
+Posted snapshot per recipient, including expanded team members. `commission_payouts.team_id` is denormalized historical snapshot data and does **not** have a foreign key to `teams`. That is a different column from `compensation_allocation_entries.team_id`.
+
+**Business rule:** these rows are authoritative historical truth and must not be silently rewritten by later configuration changes.
+
+**Current mechanism:** there is **no** database immutability trigger on this table. Later allocation, team, or assignment changes do not rewrite already-posted payouts. When compensation for a specific commission is intentionally changed through an authorized commission-update workflow, application logic may delete and rebuild that commission’s payout rows. Physical database immutability is not the same as the no-silent-rewrite rule. Canonical Agency Net is the Agency payout when a complete allocation existed at post.
 
 ### `import_statements`
 
@@ -111,25 +124,31 @@ Filename + applied_at. Written only by `npm run db:migrate` / `db:setup`.
 
 ## Enforcement boundaries
 
-**Business requirement (unchanged):** posted payout snapshots are authoritative historical truth and must not be silently rewritten. That requirement is not the same as a database guarantee. See [`BUSINESS_RULES.md`](BUSINESS_RULES.md).
+**Business requirement (unchanged):** posted payout snapshots are authoritative historical truth and must not be silently rewritten. That requirement is not the same as a database immutability guarantee. See [`BUSINESS_RULES.md`](BUSINESS_RULES.md).
 
 ### Database-enforced integrity
 
 Examples the schema currently enforces:
 
-- Conventional foreign keys such as `commission_records.group_id` → `groups`, `commission_payouts.commission_id` → `commission_records`, allocation `group_id` / `line_of_business_id`, and `team_id` when the recipient is a team
+- Conventional foreign keys such as `commission_records.group_id` → `groups`, `commission_payouts.commission_id` → `commission_records`, and allocation `group_id` / `line_of_business_id`
+- `compensation_allocation_entries.team_id` → `teams(id)`. `commission_payouts.team_id` does **not** have that foreign key
 - Header identity `agency_net_cents = gross_commission_cents - agent_compensation_cents`
 - Unique posted import identity on (`import_statement_id`, `source_row_key`) when both are present
 - Unique carrier coverage alias per (`carrier_id`, `source_value`)
-- `0002` calendar `CHECK`s on **new/future** writes only (`NOT VALID`; see above)
+- `0002` calendar `CHECK`s on the four columns listed above, for **new/future** writes only (`NOT VALID`)
+- **Allocation triggers** (0004, with the five-person limit updated in 0005). These are the enforcement boundary; application checks exist for UX:
+  - active allocation total must be exactly 10,000 bps (`validate_compensation_allocation_activation`)
+  - at most five direct Person entries on an active allocation (same activation function)
+  - active Group+LOB allocation periods must not overlap (`prevent_overlapping_compensation_allocations`)
+  - active or used allocation identity and entries are immutable (`prevent_active_allocation_identity_changes`, `prevent_active_allocation_entry_changes`)
 
 ### Application-enforced integrity
 
 These are **not** fully covered by conventional database foreign keys or triggers:
 
 - Polymorphic `person_kind` + `person_id` (allocation entries, team memberships, payouts) has no single FK that covers every recipient type. Recipient existence and kind matching are enforced in application/service logic.
-- Active allocation totals (10,000 bps), five-direct-Person limit, overlap of active Group+LOB periods, and active team-member share totals have application-enforced components (plus some CHECKs where present).
-- Preservation of historical `commission_payouts` depends on application behavior. **`commission_payouts` does not currently have a database immutability trigger.**
+- Active team-member share totals (10,000 bps for a team period) are enforced in application/service logic. The database only bounds each `share_bps` row.
+- `commission_payouts` has **no** database immutability trigger. Later allocation, team, or assignment configuration changes do not silently rewrite already-posted payouts. An authorized, explicit compensation change on a commission may replace that commission’s payout rows in application code. The business rule remains: no silent historical rewrite.
 
 ## Concept coverage
 
