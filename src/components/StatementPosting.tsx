@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ImportStatementView } from "@/data/statements";
-import { httpFailureMessage, readApiJson, runBusyAction } from "@/lib/apiClient";
+import { fetchWithDeadline, httpFailureMessage, readApiJson, requestFailureMessage, runBusyAction } from "@/lib/apiClient";
 import { collectPreviewHeaders, mappingFieldLabels, mappingFields, mappingLooksAutomatic, omitStatementCompensationMapping, suggestColumnMapping, type ColumnMapping } from "@/domain/columnMapping";
 import type { UnmatchedImportGroup, GroupImportDecision } from "@/domain/importGroups";
 import type { ValidatedImportRow } from "@/domain/importRows";
@@ -78,9 +78,9 @@ export function StatementPosting({
 
   useEffect(() => {
     void Promise.all([
-      fetch("/api/groups").then(async (response) => { if (response.ok) setGroups(await response.json()); }),
-      fetch("/api/lines-of-business").then(async (response) => { if (response.ok) setLines(await response.json()); }),
-      fetch("/api/agents").then(async (response) => { if (response.ok) setAgents(await response.json()); }),
+      fetchWithDeadline("/api/groups").then(async (response) => { if (response.ok) setGroups(await readApiJson<NamedOption[]>(response)); }),
+      fetchWithDeadline("/api/lines-of-business").then(async (response) => { if (response.ok) setLines(await readApiJson<NamedOption[]>(response)); }),
+      fetchWithDeadline("/api/agents").then(async (response) => { if (response.ok) setAgents(await readApiJson<NamedOption[]>(response)); }),
     ]);
   }, []);
 
@@ -98,7 +98,7 @@ export function StatementPosting({
     setError("");
     try {
       await runBusyAction(setBusy, async () => {
-        const response = await fetch(`/api/imports/statements/${statement.id}/preview`, {
+        const response = await fetchWithDeadline(`/api/imports/statements/${statement.id}/preview`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ columnMapping: postingMapping }),
@@ -111,7 +111,7 @@ export function StatementPosting({
         applyReview(body);
       });
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to preview rows.");
+      setError(requestFailureMessage(error, "Unable to preview rows."));
     }
   }
 
@@ -119,7 +119,7 @@ export function StatementPosting({
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch(`/api/imports/statements/${statement.id}/preview`, {
+        const response = await fetchWithDeadline(`/api/imports/statements/${statement.id}/preview`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ columnMapping: postingMapping }),
@@ -132,7 +132,7 @@ export function StatementPosting({
         }
         applyReview(body);
       } catch (error) {
-        if (!cancelled) setError(error instanceof Error ? error.message : "Unable to preview rows.");
+        if (!cancelled) setError(requestFailureMessage(error, "Unable to preview rows."));
       }
     })();
     return () => {
@@ -166,58 +166,79 @@ export function StatementPosting({
   }
 
   async function confirm(path: "groups" | "lines" | "agents", decisions: object[]) {
-    setBusy(true);
     setError("");
-    const response = await fetch(`/api/imports/statements/${statement.id}/${path}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ columnMapping: postingMapping, decisions }),
-    });
-    const body = (await response.json()) as PreviewResponse;
-    if (response.ok) {
-      if (path === "groups") setGroups(await fetch("/api/groups").then((item) => item.json()));
-      if (path === "lines") setLines(await fetch("/api/lines-of-business").then((item) => item.json()));
-      if (path === "agents") setAgents(await fetch("/api/agents").then((item) => item.json()));
-      applyReview(body);
-    } else {
-      setError((body as { message?: string }).message ?? "Unable to confirm those decisions.");
+    try {
+      await runBusyAction(setBusy, async () => {
+        const response = await fetchWithDeadline(`/api/imports/statements/${statement.id}/${path}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ columnMapping: postingMapping, decisions }),
+        });
+        const body = await readApiJson<PreviewResponse>(response);
+        if (response.ok) {
+          if (path === "groups") {
+            const listed = await fetchWithDeadline("/api/groups");
+            if (listed.ok) setGroups(await readApiJson<NamedOption[]>(listed));
+          }
+          if (path === "lines") {
+            const listed = await fetchWithDeadline("/api/lines-of-business");
+            if (listed.ok) setLines(await readApiJson<NamedOption[]>(listed));
+          }
+          if (path === "agents") {
+            const listed = await fetchWithDeadline("/api/agents");
+            if (listed.ok) setAgents(await readApiJson<NamedOption[]>(listed));
+          }
+          applyReview(body);
+        } else {
+          setError(httpFailureMessage(response.status, body.message));
+        }
+      });
+    } catch (error) {
+      setError(requestFailureMessage(error, "Unable to confirm those decisions."));
     }
-    setBusy(false);
   }
 
   async function postReady() {
-    setBusy(true);
     setError("");
-    const response = await fetch(`/api/imports/statements/${statement.id}/post`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ columnMapping: postingMapping }),
-    });
-    const body = await response.json();
-    setBusy(false);
-    if (!response.ok) {
-      setError(body.message ?? "Unable to post rows.");
-      return;
+    try {
+      await runBusyAction(setBusy, async () => {
+        const response = await fetchWithDeadline(`/api/imports/statements/${statement.id}/post`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ columnMapping: postingMapping }),
+        });
+        const body = await readApiJson<PreviewResponse>(response);
+        if (!response.ok) {
+          setError(httpFailureMessage(response.status, body.message));
+          return;
+        }
+        applyReview(body);
+      });
+    } catch (error) {
+      setError(requestFailureMessage(error, "Unable to post rows."));
     }
-    applyReview(body);
   }
 
   async function saveLayout() {
-    setBusy(true);
     setError("");
     setLayoutMessage("");
-    const response = await fetch(`/api/imports/statements/${statement.id}/layout`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ columnMapping: postingMapping }),
-    });
-    const body = await response.json();
-    setBusy(false);
-    if (!response.ok) {
-      setError(body.message ?? "Unable to save this statement layout.");
-      return;
+    try {
+      await runBusyAction(setBusy, async () => {
+        const response = await fetchWithDeadline(`/api/imports/statements/${statement.id}/layout`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ columnMapping: postingMapping }),
+        });
+        const body = await readApiJson<{ message?: string }>(response);
+        if (!response.ok) {
+          setError(httpFailureMessage(response.status, body.message));
+          return;
+        }
+        setLayoutMessage(body.message ?? "This statement layout was saved for later statements from this carrier.");
+      });
+    } catch (error) {
+      setError(requestFailureMessage(error, "Unable to save this statement layout."));
     }
-    setLayoutMessage(body.message ?? "This statement layout was saved for later statements from this carrier.");
   }
 
   const unmatchedGroups = review?.unmatchedGroups ?? [];

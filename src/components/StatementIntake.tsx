@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { httpFailureMessage, readApiJson, runBusyAction } from "@/lib/apiClient";
+import { fetchWithDeadline, httpFailureMessage, readApiJson, requestFailureMessage, runBusyAction } from "@/lib/apiClient";
 import { currentPaidMonth, formatPaidMonthTitle, formatStatementMonth } from "@/domain/dates";
 import type { ImportStatementView } from "@/data/statements";
 import type { Carrier } from "@/db/schema";
@@ -61,13 +61,13 @@ export function StatementIntake({
   }, [paidMonth, onPaidMonthChange]);
 
   async function loadStatements(month: string) {
-    const response = await fetch(`/api/imports/statements?paidMonth=${month}`);
-    if (response.ok) setStatements(await response.json());
+    const response = await fetchWithDeadline(`/api/imports/statements?paidMonth=${month}`);
+    if (response.ok) setStatements(await readApiJson<ImportStatementView[]>(response));
   }
 
   async function refreshCarriers() {
-    const response = await fetch("/api/carriers");
-    if (response.ok) setCarriers(await response.json());
+    const response = await fetchWithDeadline("/api/carriers");
+    if (response.ok) setCarriers(await readApiJson<Carrier[]>(response));
   }
 
   const carrierHint = useMemo(() => {
@@ -106,7 +106,7 @@ export function StatementIntake({
           form.set("paidMonth", paidMonth);
           if (carrierId) form.set("carrierId", carrierId);
           if (carrierName.trim()) form.set("carrierName", carrierName.trim());
-          const response = await fetch("/api/imports/inspect", { method: "POST", body: form });
+          const response = await fetchWithDeadline("/api/imports/inspect", { method: "POST", body: form });
           const body = await readApiJson<IntakeResult>(response);
           if (!response.ok && response.status !== 409) {
             results.push({
@@ -135,7 +135,7 @@ export function StatementIntake({
     } catch (error) {
       setResult({
         status: "review",
-        message: error instanceof Error ? error.message : "Unable to finish reading and saving that statement.",
+        message: requestFailureMessage(error, "Unable to finish reading and saving that statement."),
       });
     }
   }
@@ -143,7 +143,7 @@ export function StatementIntake({
   async function inspectSaved(id: number) {
     try {
       await runBusyAction(setBusy, async () => {
-        const response = await fetch(`/api/imports/statements/${id}`);
+        const response = await fetchWithDeadline(`/api/imports/statements/${id}`);
         const body = await readApiJson<ImportStatementView & { message?: string }>(response);
         if (!response.ok) {
           setResult({ status: "review", message: httpFailureMessage(response.status, body.message) });
@@ -172,13 +172,13 @@ export function StatementIntake({
     } catch (error) {
       setResult({
         status: "review",
-        message: error instanceof Error ? error.message : "Unable to open that statement.",
+        message: requestFailureMessage(error, "Unable to open that statement."),
       });
     }
   }
 
   async function rename(id: number) {
-    const response = await fetch(`/api/imports/statements/${id}`, {
+    const response = await fetchWithDeadline(`/api/imports/statements/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ displayName: renameValue }),
@@ -194,23 +194,27 @@ export function StatementIntake({
     if (!window.confirm(`Delete “${statement.displayName}” and its original file? Groups, carriers, people, and compensation already on file will be kept.`)) {
       return;
     }
-    setBusy(true);
-    const response = await fetch(`/api/imports/statements/${statement.id}`, { method: "DELETE" });
-    const body = await response.json().catch(() => ({})) as { message?: string; storageCleanupFailed?: boolean };
-    if (response.ok) {
-      if (activeStatement?.id === statement.id) {
-        setActiveStatement(null);
-        setPreview(null);
-        setResult(null);
-      }
-      await loadStatements(paidMonth);
-      if (body.storageCleanupFailed) {
-        setResult({ status: "review", message: body.message ?? "The statement was deleted, but its stored file still needs cleanup." });
-      }
-    } else {
-      setResult({ status: "review", message: body.message ?? "Unable to delete that statement." });
+    try {
+      await runBusyAction(setBusy, async () => {
+        const response = await fetchWithDeadline(`/api/imports/statements/${statement.id}`, { method: "DELETE" });
+        const body = await readApiJson<{ message?: string; storageCleanupFailed?: boolean }>(response);
+        if (response.ok) {
+          if (activeStatement?.id === statement.id) {
+            setActiveStatement(null);
+            setPreview(null);
+            setResult(null);
+          }
+          await loadStatements(paidMonth);
+          if (body.storageCleanupFailed) {
+            setResult({ status: "review", message: body.message ?? "The statement was deleted, but its stored file still needs cleanup." });
+          }
+        } else {
+          setResult({ status: "review", message: httpFailureMessage(response.status, body.message) });
+        }
+      });
+    } catch (error) {
+      setResult({ status: "review", message: requestFailureMessage(error, "Unable to delete that statement.") });
     }
-    setBusy(false);
   }
 
   return (

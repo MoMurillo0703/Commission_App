@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { httpFailureMessage, readApiJson, runBusyAction } from "./apiClient";
+import {
+  CLIENT_REQUEST_TIMEOUT_MS,
+  CLIENT_TIMEOUT_MESSAGE,
+  fetchWithDeadline,
+  httpFailureMessage,
+  readApiJson,
+  RequestTimeoutError,
+  requestFailureMessage,
+  runBusyAction,
+} from "./apiClient";
 
 describe("API client failure handling", () => {
   it("prefers a server message and maps timeout and unavailable statuses", () => {
@@ -27,5 +36,26 @@ describe("API client failure handling", () => {
     seen.length = 0;
     await runBusyAction((busy) => { seen.push(busy); }, async () => undefined);
     expect(seen).toEqual([true, false]);
+  });
+
+  it("aborts a fetch that never settles, clears busy, and does not retry", async () => {
+    expect(CLIENT_REQUEST_TIMEOUT_MS).toBeLessThan(300_000);
+    let fetchCalls = 0;
+    vi.stubGlobal("fetch", (_input: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls += 1;
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(Object.assign(new Error("Aborted"), { name: "AbortError" }));
+        });
+      });
+    });
+    const seen: boolean[] = [];
+    await expect(runBusyAction((busy) => { seen.push(busy); }, async () => {
+      await fetchWithDeadline("/api/imports/inspect", { method: "POST" }, 25);
+    })).rejects.toSatisfy((error) => error instanceof RequestTimeoutError && error.message === CLIENT_TIMEOUT_MESSAGE);
+    expect(requestFailureMessage(new RequestTimeoutError(), "Unable to preview rows.")).toBe(CLIENT_TIMEOUT_MESSAGE);
+    expect(seen).toEqual([true, false]);
+    expect(fetchCalls).toBe(1);
+    vi.unstubAllGlobals();
   });
 });

@@ -22,9 +22,12 @@ describe("production Postgres client", () => {
     expect(options.connect_timeout + options.connection.statement_timeout / 1000).toBeLessThan(300);
   });
 
-  it("does not run migrations from getDb request handling", () => {
-    const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
-    expect(source).not.toMatch(/applyMigrations|migrateSql|commissionsMigrated/);
-    expect(source).toMatch(/export async function getDb/);
+  it("does not run migrations from getDb or liveness recovery", () => {
+    const index = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+    const liveness = readFileSync(new URL("./liveness.ts", import.meta.url), "utf8");
+    expect(index).not.toMatch(/applyMigrations|migrateSql|commissionsMigrated/);
+    expect(liveness).not.toMatch(/applyMigrations|migrateSql|commissionsMigrated/);
+    expect(index).toMatch(/ensureLiveClient/);
+    expect(index).toMatch(/export async function getDb/);
   });
 });

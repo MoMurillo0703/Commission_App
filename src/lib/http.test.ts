@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { isDatabaseTimeoutError, isDatabaseUnavailableError, toErrorResponse } from "./http";
 
 describe("database error responses", () => {
+  it("maps a hung liveness check to 504", async () => {
+    const response = toErrorResponse(new Error("DATABASE_LIVENESS_TIMEOUT"));
+    expect(response.status).toBe(504);
+    expect(await response.json()).toEqual({ message: "The database request timed out. Try again." });
+  });
+
   it("maps statement and connect timeouts to 504", async () => {
     const timeout = Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" });
     expect(isDatabaseTimeoutError(timeout)).toBe(true);

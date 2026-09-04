@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ImportStatementView } from "@/data/statements";
+import { fetchWithDeadline, httpFailureMessage, readApiJson, requestFailureMessage, runBusyAction } from "@/lib/apiClient";
 import {
   previewFromConfirmedPdfLayout,
   type PdfLayoutLine,
@@ -46,16 +47,16 @@ export function PdfLayoutReview({
 
   useEffect(() => {
     let cancelled = false;
-    void fetch(`/api/imports/statements/${statement.id}/extraction`)
+    void fetchWithDeadline(`/api/imports/statements/${statement.id}/extraction`)
       .then(async (response) => {
-        const body = await response.json() as ExtractionResponse & { message?: string };
-        if (!response.ok) throw new Error(body.message ?? "Unable to load the extracted PDF text.");
+        const body = await readApiJson<ExtractionResponse & { message?: string }>(response);
+        if (!response.ok) throw new Error(httpFailureMessage(response.status, body.message));
         if (cancelled) return;
         setExtraction(body);
         setEnd(body.pages.at(-1)?.lines.at(-1) ?? null);
       })
       .catch((loadError: unknown) => {
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Unable to load the extracted PDF text.");
+        if (!cancelled) setError(requestFailureMessage(loadError, "Unable to load the extracted PDF text."));
       });
     return () => {
       cancelled = true;
@@ -106,20 +107,24 @@ export function PdfLayoutReview({
       setError("Mark the header row and where the commission rows begin and end.");
       return;
     }
-    setBusy(true);
     setError("");
-    const response = await fetch(`/api/imports/statements/${statement.id}/pdf-layout`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(selection),
-    });
-    const body = await response.json() as ImportStatementView & { message?: string };
-    setBusy(false);
-    if (!response.ok) {
-      setError(body.message ?? "Unable to confirm this layout.");
-      return;
+    try {
+      await runBusyAction(setBusy, async () => {
+        const response = await fetchWithDeadline(`/api/imports/statements/${statement.id}/pdf-layout`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(selection),
+        });
+        const body = await readApiJson<ImportStatementView & { message?: string }>(response);
+        if (!response.ok) {
+          setError(httpFailureMessage(response.status, body.message));
+          return;
+        }
+        onConfirmed(body);
+      });
+    } catch (error) {
+      setError(requestFailureMessage(error, "Unable to confirm this layout."));
     }
-    onConfirmed(body);
   }
 
   const scanned = extraction?.classification === "unreadable";

@@ -1,12 +1,16 @@
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { DATABASE_LIVENESS_TIMEOUT_MS, ensureLiveClient } from "./liveness";
 import * as schema from "./schema";
 
 export type AppDatabase = PostgresJsDatabase<typeof schema>;
 
+type SqlClient = ReturnType<typeof postgres>;
+
 const globalForDb = globalThis as unknown as {
-  commissionsSql?: ReturnType<typeof postgres>;
+  commissionsSql?: SqlClient;
   commissionsDb?: AppDatabase;
+  commissionsDbInFlight?: Promise<AppDatabase>;
 };
 
 export const POSTGRES_POOL_MAX = 10;
@@ -44,14 +48,38 @@ function createSql() {
   return postgres(databaseUrl(), postgresClientOptions());
 }
 
+function holdSql(sql: SqlClient | undefined) {
+  globalForDb.commissionsSql = sql;
+  globalForDb.commissionsDb = sql ? drizzle(sql, { schema }) : undefined;
+}
+
+async function pingSql(sql: SqlClient) {
+  await sql`SELECT 1`;
+}
+
+async function disposeSql(sql: SqlClient) {
+  await sql.end({ timeout: 2 });
+}
+
+async function openLiveDb() {
+  await ensureLiveClient({
+    getCurrent: () => globalForDb.commissionsSql,
+    setCurrent: holdSql,
+    create: createSql,
+    ping: pingSql,
+    dispose: disposeSql,
+    pingTimeoutMs: DATABASE_LIVENESS_TIMEOUT_MS,
+  });
+  return globalForDb.commissionsDb!;
+}
+
 export async function getDb(): Promise<AppDatabase> {
-  if (!globalForDb.commissionsSql) {
-    globalForDb.commissionsSql = createSql();
+  if (!globalForDb.commissionsDbInFlight) {
+    globalForDb.commissionsDbInFlight = openLiveDb().finally(() => {
+      globalForDb.commissionsDbInFlight = undefined;
+    });
   }
-  if (!globalForDb.commissionsDb) {
-    globalForDb.commissionsDb = drizzle(globalForDb.commissionsSql, { schema });
-  }
-  return globalForDb.commissionsDb;
+  return globalForDb.commissionsDbInFlight;
 }
 
 export async function resolveDb(db?: AppDatabase) {

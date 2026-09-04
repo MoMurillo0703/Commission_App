@@ -12,12 +12,12 @@ export function isDatabaseTimeoutError(error: unknown) {
   if (!(error instanceof Error)) return false;
   const code = "code" in error ? String((error as { code?: string }).code) : "";
   return code === "57014"
-    || /CONNECT_TIMEOUT|canceling statement due to statement timeout|statement timeout/i.test(error.message);
+    || /CONNECT_TIMEOUT|DATABASE_LIVENESS_TIMEOUT|canceling statement due to statement timeout|statement timeout/i.test(error.message);
 }
 
 export function isDatabaseUnavailableError(error: unknown) {
   if (!(error instanceof Error)) return false;
-  return /ECONNREFUSED|ENOTFOUND|ECONNRESET|connection terminated|remaining connection slots/i.test(error.message);
+  return /ECONNREFUSED|ENOTFOUND|ECONNRESET|connection terminated|remaining connection slots|temporarily unavailable/i.test(error.message);
 }
 
 export function toErrorResponse(error: unknown) {

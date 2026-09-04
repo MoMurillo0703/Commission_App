@@ -1,3 +1,15 @@
+export const CLIENT_REQUEST_TIMEOUT_MS = 45_000;
+export const CLIENT_TIMEOUT_MESSAGE = "The request timed out. Try again.";
+
+export class RequestTimeoutError extends Error {
+  readonly timedOut = true;
+
+  constructor() {
+    super(CLIENT_TIMEOUT_MESSAGE);
+    this.name = "RequestTimeoutError";
+  }
+}
+
 export function httpFailureMessage(status: number, serverMessage?: string | null) {
   const detailed = serverMessage?.trim();
   if (detailed) return detailed;
@@ -8,13 +20,38 @@ export function httpFailureMessage(status: number, serverMessage?: string | null
   return "Unable to complete that request.";
 }
 
-export async function readApiJson<T extends Record<string, unknown>>(response: Response): Promise<T> {
+export function requestFailureMessage(error: unknown, fallback: string) {
+  if (error instanceof RequestTimeoutError) return error.message;
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return fallback;
+}
+
+export async function readApiJson<T>(response: Response): Promise<T> {
   const text = await response.text();
   if (!text.trim()) return {} as T;
   try {
     return JSON.parse(text) as T;
   } catch {
     throw new Error(httpFailureMessage(response.status));
+  }
+}
+
+export async function fetchWithDeadline(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = CLIENT_REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof RequestTimeoutError) throw error;
+    if (error instanceof DOMException && error.name === "AbortError") throw new RequestTimeoutError();
+    if (error instanceof Error && error.name === "AbortError") throw new RequestTimeoutError();
+    throw error;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
