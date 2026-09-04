@@ -106,6 +106,14 @@ Tom reviews after BUILT when the task has acceptance criteria that must be prove
 
 Do not copy full rule text into multiple files. Link to the owner.
 
+## Authoritative ownership
+
+“Authoritative owner” means that person is responsible for the file’s **accuracy**, **maintenance**, and **approval routing**. It does **not** mean only that owner may edit the file.
+
+- Agents may edit documentation when Alex (or Mo) **explicitly assigns** the edit.
+- Changes to product or business intent still need the appropriate approval (Mo for vision and business rules; Ben review when financial, schema, or historical meaning changes).
+- If two documents or a document and the code contradict each other, **report** the contradiction. Do not silently “resolve” it by changing an authoritative rule.
+
 ## Reports
 
 Every assigned task ends with one copy-ready report. Be concise and factual. No internal reasoning. No multi-phase roadmaps. Recommendations are recommendations only.

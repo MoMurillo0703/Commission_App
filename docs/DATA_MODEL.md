@@ -15,13 +15,23 @@ Row-level security is enabled on application tables. Browser clients do not quer
 | File | Role |
 | --- | --- |
 | `0001_postgres_foundation.sql` | Core reference tables, commissions, import statements, legacy agreements |
-| `0002_deployment_integrity.sql` | Paid-month checks, RLS, tighter integrity |
+| `0002_deployment_integrity.sql` | Paid-month calendar CHECKs (`NOT VALID`), RLS, tighter integrity |
 | `0003_statement_resolve_and_layouts.sql` | Carrier statement layouts, statement layout/extraction columns |
 | `0004_compensation_allocations.sql` | Teams, allocations, entries, payouts; copies legacy agreements without inferring Agency remainder |
 | `0005_direct_person_limit.sql` | Active allocation: at most five direct Person entries |
 | `0006_carrier_coverage_aliases.sql` | Carrier-scoped statement coverage label → LOB |
 
 Do not rewrite an applied migration. Add a new numbered file. Runtime code must not apply these files. See [`DEPLOYMENT.md`](DEPLOYMENT.md).
+
+### Migration 0002 calendar constraints are `NOT VALID`
+
+`0002` added YYYY-MM calendar `CHECK` constraints on paid month, agreement/allocation effective dates, statement month, and premium month using `NOT VALID`.
+
+- They apply to **new and future writes** that would violate the pattern.
+- PostgreSQL **did not** retroactively validate every existing row when the constraint was added.
+- The presence of these constraints therefore does **not** prove every preexisting row satisfied them at migration time.
+
+Do not modify `0002`. If existing rows must be proven valid, that is a separate, assigned data-integrity task.
 
 Historical SQLite SQL under `migrations/sqlite/` is reference only and is not applied.
 
@@ -81,7 +91,7 @@ Header `agent_id` is a leftover single-producer slot. Pay is in `commission_payo
 
 ### `commission_payouts`
 
-Posted snapshot per recipient, including expanded team members. Later term or assignment changes do not rewrite these rows. Canonical Agency Net is the Agency payout when a complete allocation existed at post.
+Posted snapshot per recipient, including expanded team members. **Business rule:** these rows are historical truth and must not be silently rewritten. **Current mechanism:** application posting and update paths avoid rewriting them. There is **no** database immutability trigger on this table. Canonical Agency Net is the Agency payout when a complete allocation existed at post.
 
 ### `import_statements`
 
@@ -98,6 +108,28 @@ Carrier-scoped normalized source coverage label → `line_of_business_id`. Uniqu
 ### `schema_migrations`
 
 Filename + applied_at. Written only by `npm run db:migrate` / `db:setup`.
+
+## Enforcement boundaries
+
+**Business requirement (unchanged):** posted payout snapshots are authoritative historical truth and must not be silently rewritten. That requirement is not the same as a database guarantee. See [`BUSINESS_RULES.md`](BUSINESS_RULES.md).
+
+### Database-enforced integrity
+
+Examples the schema currently enforces:
+
+- Conventional foreign keys such as `commission_records.group_id` → `groups`, `commission_payouts.commission_id` → `commission_records`, allocation `group_id` / `line_of_business_id`, and `team_id` when the recipient is a team
+- Header identity `agency_net_cents = gross_commission_cents - agent_compensation_cents`
+- Unique posted import identity on (`import_statement_id`, `source_row_key`) when both are present
+- Unique carrier coverage alias per (`carrier_id`, `source_value`)
+- `0002` calendar `CHECK`s on **new/future** writes only (`NOT VALID`; see above)
+
+### Application-enforced integrity
+
+These are **not** fully covered by conventional database foreign keys or triggers:
+
+- Polymorphic `person_kind` + `person_id` (allocation entries, team memberships, payouts) has no single FK that covers every recipient type. Recipient existence and kind matching are enforced in application/service logic.
+- Active allocation totals (10,000 bps), five-direct-Person limit, overlap of active Group+LOB periods, and active team-member share totals have application-enforced components (plus some CHECKs where present).
+- Preservation of historical `commission_payouts` depends on application behavior. **`commission_payouts` does not currently have a database immutability trigger.**
 
 ## Concept coverage
 
