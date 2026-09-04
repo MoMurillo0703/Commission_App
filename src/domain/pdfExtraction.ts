@@ -19,7 +19,7 @@ export type PdfExtractionResult = {
 const totalLine = /^(subtotal|sub-total|total|grand total|amount due|page total|commission total)\b/i;
 const pageLine = /^page\s+\d+(\s+of\s+\d+)?$/i;
 const footerLine = /^(confidential|continued|please remit|thank you|questions\?)/i;
-export const moneyToken = /^-?\$?\d{1,3}(?:,\d{3})*(?:\.\d{2})%?$|^-?\d+\.\d{2}$/;
+export const moneyToken = /^-?\$?\d{1,3}(?:,\d{3})*(?:\.\d{2})%?$|^-?\d+\.\d{2}$|^\(\$?\d{1,3}(?:,\d{3})*(?:\.\d{2})\)$/;
 const headerSignals = /^(current|gross|total)?\s*commission|^comm(ission)?\s*amount$|^premium( received)?$|^paid(\s*month)?$|^fee$|^carrier$|^product( type| code| line)?$|^line of business$|^lob$|^coverage( code| type)?$|^plan$|^member$|^company(\s*name)?$|^producer name$|^group(\s*(name|number|#))?$|^name\s*\/\s*group name$/i;
 
 export type PdfTextItem = {

@@ -7,7 +7,8 @@ function unsignedToCents(unsigned: string) {
 }
 
 export function parseDollarsToCents(value: string) {
-  const trimmed = value.trim().replace(/[$,\s]/g, "");
+  let trimmed = value.trim().replace(/[$,\s]/g, "");
+  if (/^\(.*\)$/.test(trimmed)) trimmed = `-${trimmed.slice(1, -1)}`;
   if (!trimmed) throw new Error("Amount is required.");
   if (!moneyPattern.test(trimmed)) throw new Error("Enter a valid dollar amount with up to two decimal places.");
   const negative = trimmed.startsWith("-");

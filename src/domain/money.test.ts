@@ -7,6 +7,7 @@ describe("currency handling", () => {
     expect(parseDollarsToCents("$10.20")).toBe(1020);
     expect(parseDollarsToCents("2.27")).toBe(227);
     expect(parseDollarsToCents("-40.50")).toBe(-4050);
+    expect(parseDollarsToCents("($0.89)")).toBe(-89);
     expect(parseDollarsToCents("500")).toBe(50000);
   });
 

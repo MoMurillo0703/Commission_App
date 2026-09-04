@@ -4,6 +4,7 @@ import {
   candidateRowsFromPdfPages,
   isIgnoredPdfLine,
   lineCells,
+  looksLikeHeader,
   moneyToken,
   type ExtractedPdfPage,
 } from "./pdfExtraction";
@@ -207,7 +208,9 @@ export function inferPdfStatementStructure(
 
   type ClusterItem =
     | { kind: "policy"; pageNumber: number; lineNumber: number; policyNumber: string }
+    | { kind: "wrap"; text: string }
     | { kind: "data"; pageNumber: number; lineNumber: number; cells: string[] };
+  const nameWrap = /^(llc|inc\.?|agency|co\.?|corp\.?|ltd\.?|[A-Z0-9][A-Z0-9.'-]{0,20})$/;
   const clusters: Array<{ headerCells: string[]; items: ClusterItem[] }> = [];
   let current: { headerCells: string[]; items: ClusterItem[] } | null = null;
 
@@ -220,7 +223,25 @@ export function inferPdfStatementStructure(
     }
     if (isIgnoredPdfLine(line.text, current?.headerCells ?? [])) continue;
     const moneyCount = line.cells.filter((cell) => isMoney(cell)).length;
-    const headerLike = line.cells.length >= 3 && moneyCount === 0 && line.cells.every((cell) => cell.length <= 24);
+    if (
+      current
+      && current.headerCells.length > 0
+      && current.items.some((item) => item.kind === "data")
+      && line.cells.length === 1
+      && moneyCount === 0
+      && nameWrap.test(line.cells[0] ?? "")
+    ) {
+      current.items.push({ kind: "wrap", text: line.cells[0] ?? "" });
+      continue;
+    }
+    const headerLike = moneyCount === 0 && (
+      looksLikeHeader(line.cells)
+      || (
+        line.cells.length >= 3
+        && line.cells.every((cell) => cell.length <= 24)
+        && !line.cells.some((cell) => isMonthValue(cell) || isMoney(cell) || coverageWord.test(cell))
+      )
+    );
     if (headerLike) {
       if (current && current.headerCells.length > 0 && current.items.some((item) => item.kind === "data")) {
         clusters.push(current);
@@ -240,7 +261,17 @@ export function inferPdfStatementStructure(
     clusters.push(current);
   }
 
-  const ranked = clusters
+  const merged: typeof clusters = [];
+  for (const cluster of clusters) {
+    const previous = merged[merged.length - 1];
+    if (previous && previous.headerCells.join("|").toLowerCase() === cluster.headerCells.join("|").toLowerCase()) {
+      previous.items.push(...cluster.items);
+      continue;
+    }
+    merged.push(cluster);
+  }
+
+  const ranked = merged
     .map((cluster) => {
       const positional = cluster.items.filter((item) => item.kind === "data").map((item) => item.cells);
       const mapping = completeMapping(cluster.headerCells, positional);
@@ -270,6 +301,12 @@ export function inferPdfStatementStructure(
   for (const item of best.items) {
     if (item.kind === "policy") {
       lastNumber = item.policyNumber;
+      continue;
+    }
+    if (item.kind === "wrap") {
+      lastName = `${lastName} ${item.text}`.trim();
+      const previous = assigned[assigned.length - 1];
+      if (previous && mapping.groupName) previous.values[mapping.groupName] = lastName;
       continue;
     }
     const values = assignRowValues(headers, item.cells, mapping);
@@ -306,13 +343,26 @@ export function inferPdfStatementStructure(
   };
 }
 
+function firstPassHasMisalignedNames(preview: StatementPreview) {
+  return preview.sheets.some((sheet) =>
+    sheet.rows.some((row) => {
+      const name = sheet.groupNameHeader ? row.values[sheet.groupNameHeader] ?? "" : "";
+      return parseFlexibleMonth(name) != null;
+    }),
+  );
+}
+
 export function interpretExtractedPdfPages(
   pages: ExtractedPdfPage[],
   groups: GroupCandidate[] = [],
 ) {
   const firstPass = candidateRowsFromPdfPages(pages, groups);
   const inferred = inferPdfStatementStructure(pages, groups);
-  if (inferred && inferred.preview.rowCount > 0 && inferred.preview.rowCount >= firstPass.rowCount) {
+  if (
+    inferred
+    && inferred.preview.rowCount > 0
+    && (inferred.preview.rowCount >= firstPass.rowCount || firstPassHasMisalignedNames(firstPass))
+  ) {
     return {
       preview: inferred.preview,
       mapping: inferred.mapping,
