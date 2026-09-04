@@ -7,11 +7,15 @@ import { createCarrier } from "./carriers";
 import { createCommission } from "./commissions";
 import { createGroup } from "./groups";
 import { createLineOfBusiness } from "./linesOfBusiness";
+import { postImportStatement } from "./importPosting";
 import { exportReportDocument } from "./reportExport";
 import { buildAgencyReport, buildIndividualReport, buildTeamReport } from "./reports";
+import { createImportStatement } from "./statements";
 import { createTeam } from "./teams";
 import { createTestDb } from "@/db/test-db";
-import { agencyReportDocument, printableReportHtml } from "@/domain/reportDocuments";
+import { agencyReportDocument, individualReportDocument } from "@/domain/reportDocuments";
+import { fingerprintBuffer } from "@/domain/fingerprint";
+import { previewWorkbook } from "@/domain/workbook";
 
 async function seed() {
   const db = await createTestDb();
@@ -120,13 +124,135 @@ describe("posted commission reports", () => {
     expect(text).toMatch(/Murillo Insurance/);
     expect(text).toMatch(/Total Agency Net/);
 
-    const printable = await exportReportDocument(document, "pdf");
+    const printable = await exportReportDocument(document, "print");
     expect(printable.contentType).toMatch(/html/);
-    expect(String(printable.body)).toBe(printableReportHtml(document));
     expect(String(printable.body)).toMatch(/Murillo Insurance/);
     expect(String(printable.body)).toMatch(/Generated/);
+
+    const pdf = await exportReportDocument(document, "pdf");
+    expect(pdf.contentType).toBe("application/pdf");
+    expect(pdf.filename).toMatch(/\.pdf$/);
+    expect(Buffer.from(pdf.body as Uint8Array).subarray(0, 4).toString()).toBe("%PDF");
     expect(document.totals.map((total) => total.value)).toEqual([
       ...agencyReportDocument(report.rows, report.totals, report.filters, report.names).totals.map((total) => total.value),
     ]);
+  });
+
+  it("aggregates three posted statements into one recipient payable statement", async () => {
+    const db = await createTestDb();
+    const john = await createAgent(db, { name: "John Elizando" });
+    const groupA = await createGroup(db, { name: "Acme Benefits", groupNumber: "A1", primaryAgentId: john.id });
+    const groupB = await createGroup(db, { name: "Beta Health", groupNumber: "B1", primaryAgentId: john.id });
+    const carrier = await createCarrier(db, { name: "Principal" });
+    const dental = await createLineOfBusiness(db, { name: "Dental" });
+    await createAllocation(db, {
+      groupId: groupA.id,
+      lineOfBusinessId: dental.id,
+      effectiveStart: "2026-08",
+      entries: [
+        { recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 7000 },
+        { recipientType: "agency", compensationBps: 3000 },
+      ],
+    });
+    await createAllocation(db, {
+      groupId: groupB.id,
+      lineOfBusinessId: dental.id,
+      effectiveStart: "2026-08",
+      entries: [
+        { recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 4000 },
+        { recipientType: "agency", compensationBps: 6000 },
+      ],
+    });
+
+    const mapping = {
+      groupName: "Group Name",
+      groupNumber: "Group Number",
+      carrier: "Carrier",
+      lineOfBusiness: "LOB",
+      agent: null,
+      premium: "Premium",
+      grossCommission: "Commission",
+      premiumMonth: null,
+    };
+    async function postStatement(fileName: string, rows: string[][]) {
+      const book = new ExcelJS.Workbook();
+      const sheet = book.addWorksheet("Commissions");
+      sheet.addRow(["Group Name", "Group Number", "Carrier", "LOB", "Premium", "Commission"]);
+      for (const row of rows) sheet.addRow(row);
+      const buffer = new Uint8Array(await book.xlsx.writeBuffer());
+      const statement = await createImportStatement(db, {
+        originalFilename: fileName,
+        paidMonth: "2026-08",
+        carrierId: carrier.id,
+        sourceType: "excel",
+        status: "ready_to_map",
+        fingerprint: fingerprintBuffer(buffer),
+        preview: await previewWorkbook(buffer, [groupA, groupB]),
+      });
+      return postImportStatement(db, statement.id, mapping);
+    }
+
+    const first = await postStatement("carrier-a.xlsx", [["Acme Benefits", "A1", "Principal", "Dental", "1000.00", "100.00"]]);
+    const second = await postStatement("carrier-b.xlsx", [["Acme Benefits", "A1", "Principal", "Dental", "500.00", "50.00"]]);
+    const third = await postStatement("carrier-c.xlsx", [["Beta Health", "B1", "Principal", "Dental", "250.00", "25.00"]]);
+    expect(first.postedCount + second.postedCount + third.postedCount).toBe(3);
+
+    const statement = await buildIndividualReport(db, {
+      kind: "recipient",
+      paidMonth: "2026-08",
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(statement.filters.kind).toBe("recipient");
+    expect(statement.payable?.payableReady).toBe(true);
+    expect(statement.totals.compensationCents).toBe(11500);
+    expect(statement.rows.map((row) => row.commissionId).filter(Boolean)).toHaveLength(3);
+    expect(statement.rows.reduce((sum, row) => sum + row.grossCommissionCents, 0)).toBe(17500);
+
+    const document = individualReportDocument(
+      statement.rows,
+      statement.totals,
+      statement.filters,
+      statement.names,
+      "John Elizando",
+    );
+    expect(document.title).toBe("Commission Statement");
+    expect(document.totals[1]?.label).toBe("TOTAL PAYABLE TO RECIPIENT");
+    expect(document.totals[1]?.value).toBe("$115.00");
+    expect(document.notes?.join(" ")).toMatch(/does not mean the recipient has been paid/);
+    expect(document.sourceCommissionIds).toEqual(statement.rows.map((row) => row.commissionId).sort((left, right) => (left ?? 0) - (right ?? 0)));
+
+    const pdf = await exportReportDocument(document, "pdf");
+    expect(pdf.contentType).toBe("application/pdf");
+    const { extractText, getDocumentProxy } = await import("unpdf");
+    const parsed = await getDocumentProxy(new Uint8Array(pdf.body as Uint8Array));
+    const extracted = await extractText(parsed, { mergePages: true });
+    const text = Array.isArray(extracted.text) ? extracted.text.join(" ") : extracted.text;
+    expect(text).toMatch(/Commission Statement/);
+    expect(text).toMatch(/John Elizando|TOTAL PAYABLE/i);
+  });
+
+  it("does not call a recipient statement payable-ready when assigned-group commissions lack an allocation", async () => {
+    const db = await createTestDb();
+    const john = await createAgent(db, { name: "John Elizando" });
+    const group = await createGroup(db, { name: "Need Plan", primaryAgentId: john.id });
+    const carrier = await createCarrier(db, { name: "Principal" });
+    const dental = await createLineOfBusiness(db, { name: "Dental" });
+    await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: dental.id,
+      grossCommissionCents: 8000,
+    });
+    const report = await buildIndividualReport(db, {
+      kind: "recipient",
+      paidMonth: "2026-08",
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(report.payable?.payableReady).toBe(false);
+    expect(report.payable?.message).toMatch(/no complete allocation/);
+    expect(report.rows).toHaveLength(0);
   });
 });

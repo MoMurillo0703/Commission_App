@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 function filtersFrom(url: URL) {
   const kind = (url.searchParams.get("kind") ?? "agency") as ReportKind;
   return {
-    kind: kind === "individual" || kind === "team" ? kind : "agency" as ReportKind,
+    kind: kind === "individual" || kind === "team" || kind === "recipient" ? kind : "agency" as ReportKind,
     paidMonth: url.searchParams.get("paidMonth"),
     startMonth: url.searchParams.get("startMonth"),
     endMonth: url.searchParams.get("endMonth"),
@@ -35,7 +35,7 @@ function filtersFrom(url: URL) {
 async function reportPayload(url: URL) {
   const db = await getDb();
   const filters = filtersFrom(url);
-  if (filters.kind === "individual") {
+  if (filters.kind === "individual" || filters.kind === "recipient") {
     const report = await buildIndividualReport(db, filters);
     const document = individualReportDocument(report.rows, report.totals, report.filters, report.names, report.names.personName || "Recipient");
     return { ...report, document, emptyMessage: reportEmptyMessage(report.filters, report.availability) };
@@ -61,7 +61,7 @@ export async function GET(request: Request) {
       return new NextResponse(body, {
         headers: {
           "Content-Type": exported.contentType,
-          "Content-Disposition": `${format === "print" || format === "pdf" ? "inline" : "attachment"}; filename="${exported.filename}"`,
+          "Content-Disposition": `${format === "print" ? "inline" : "attachment"}; filename="${exported.filename}"`,
         },
       });
     }

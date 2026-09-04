@@ -25,9 +25,10 @@ export function reportEmptyMessage(filters: ReportFilters, availability: ReportA
   const months = availability.availablePaidMonths;
   const periodIsFiltered = Boolean(filters.paidMonth || filters.ytd || filters.startMonth || filters.endMonth);
   const entityFiltered = Boolean(filters.groupId || filters.carrierId || filters.lineOfBusinessId || filters.personId || filters.teamId || filters.accountManagerId || filters.primaryAgentId);
-  if (!periodIsFiltered && !entityFiltered && (filters.kind === "individual" || filters.kind === "team")) {
+  if (!periodIsFiltered && !entityFiltered && (filters.kind === "individual" || filters.kind === "recipient" || filters.kind === "team")) {
     const count = availability.postedCommissionCount;
-    return `${count} posted commission${count === 1 ? "" : "s"} ${count === 1 ? "is" : "are"} on file, but ${filters.kind === "individual" ? "Individual" : "Team"} reporting only uses stored payout snapshots. Older commissions posted before payout snapshots existed are not invented here. Open the Agency report to review those commissions. New posts made after allocations are in place will appear on this report.`;
+    const label = filters.kind === "team" ? "Team" : "Recipient";
+    return `${count} posted commission${count === 1 ? "" : "s"} ${count === 1 ? "is" : "are"} on file, but ${label} reporting only uses stored payout snapshots. Older commissions posted before payout snapshots existed are not invented here. Open the Agency report to review those commissions. New posts made after allocations are in place will appear on this report.`;
   }
   if (periodIsFiltered && months.length > 0) {
     const sample = months.length <= 4 ? months.join(", ") : `${months[0]} – ${months[months.length - 1]}`;

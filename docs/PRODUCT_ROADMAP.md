@@ -30,7 +30,7 @@ Build on the existing Agency report. Still planned:
 
 ### Agent / Account Manager compensation statement
 
-A formal statement (not only the current Individual/Team tables) showing applicable accounts, agency commission received, applicable compensation percent, compensation amount, chargebacks, and recipient payout total.
+Sprint 1 implements the recipient commission statement (person + paid month, posted payouts, PDF). Still planned later: email delivery and secure sharing links.
 
 ## Priority 3 — Compensation
 

@@ -14,11 +14,12 @@ import {
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import { agents, carriers, commissionRecords, groups, linesOfBusiness } from "@/db/schema";
+import { recipientPayableReadiness } from "@/domain/recipientStatement";
 import { listAllPayouts } from "./payouts";
 import { getAccountManager } from "./accountManagers";
 import { getAgent } from "./agents";
 import { getCarrier } from "./carriers";
-import { getGroup } from "./groups";
+import { getGroup, listGroups } from "./groups";
 import { getLineOfBusiness } from "./linesOfBusiness";
 import { getTeam } from "./teams";
 
@@ -54,6 +55,7 @@ async function postedCommissions(db: AppDatabase, filters: ReportFilters) {
       agentId: commissionRecords.agentId,
       agentName: agents.name,
       premiumCents: commissionRecords.premiumCents,
+      importStatementId: commissionRecords.importStatementId,
       grossCommissionCents: commissionRecords.grossCommissionCents,
       compensationDistributedCents: commissionRecords.agentCompensationCents,
       agencyNetCents: commissionRecords.agencyNetCents,
@@ -122,7 +124,7 @@ export async function buildAgencyReport(db: AppDatabase | undefined, input: Repo
 
 export async function buildIndividualReport(db: AppDatabase | undefined, input: ReportFilters) {
   const database = await resolveDb(db);
-  const filters = normalizeReportFilters({ ...input, kind: "individual" });
+  const filters = normalizeReportFilters({ ...input, kind: input.kind === "recipient" ? "recipient" : "individual" });
   const commissions = await postedCommissions(database, filters);
   const payouts = await listAllPayouts(database);
   const byCommission = new Map(commissions.map((row) => [row.id, row]));
@@ -149,14 +151,41 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
       grossCommissionCents: commission.grossCommissionCents,
       allocationBps: payout.allocationBps,
       compensationCents: payout.compensationCents,
+      commissionId: commission.id,
+      allocationId: payout.allocationId,
+      premiumCents: commission.premiumCents,
+      importStatementId: commission.importStatementId,
     });
   }
+  const groups = await listGroups(database);
+  const assignedGroupIds = groups
+    .filter((group) => (
+      (filters.personKind === "agent" && group.primaryAgentId === filters.personId)
+      || (filters.personKind === "account_manager" && group.accountManagerId === filters.personId)
+    ))
+    .map((group) => group.id);
+  const commissionsWithAllocation = new Set(
+    payouts.filter((payout) => payout.allocationId != null).map((payout) => payout.commissionId),
+  );
+  const payable = recipientPayableReadiness({
+    assignedGroupIds,
+    postedCommissions: commissions.map((commission) => ({
+      id: commission.id,
+      groupId: commission.groupId,
+      groupName: commission.groupName,
+      lineOfBusinessName: commission.lineOfBusinessName,
+      paidMonth: commission.paidMonth,
+      grossCommissionCents: commission.grossCommissionCents,
+      hasAllocation: commissionsWithAllocation.has(commission.id),
+    })),
+  });
   return {
     filters,
     names: await reportNameLookup(database, filters),
     rows,
     totals: sumIndividualReport(rows),
     availability: await reportAvailability(database, rows.length),
+    payable,
   };
 }
 

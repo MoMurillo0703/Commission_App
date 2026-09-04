@@ -58,7 +58,7 @@ Carrier learning today: versioned `carrier_statement_layouts` plus `0006` covera
 
 ## Compensation and reports
 
-Posting resolves the allocation (or legacy settlement) for the paid month and writes `commission_payouts`. Reports read posted commissions and payouts. See [`BUSINESS_RULES.md`](BUSINESS_RULES.md).
+Posting resolves the allocation (or legacy settlement) for the paid month and writes `commission_payouts`. Reports read posted commissions and payouts. The recipient commission statement is that same snapshot data, downloadable as a binary PDF. It does not create a separate financial ledger or payment status. See [`BUSINESS_RULES.md`](BUSINESS_RULES.md).
 
 ## Auth
 

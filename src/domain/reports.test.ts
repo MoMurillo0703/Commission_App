@@ -120,6 +120,28 @@ describe("report documents", () => {
       compensationCents: 7000,
     }], { compensationCents: 7000 }, { ...filters, kind: "individual" }, names, "John Elizando");
     expect(individual.rows[0]?.[5]).toBe("70%");
+    const payable = individualReportDocument([{
+      paidMonth: "2026-09",
+      groupId: 1,
+      groupName: "H R LABOR CONTRACTING",
+      carrierId: 1,
+      carrierName: "Choice Builder",
+      lineOfBusinessId: 1,
+      lineOfBusinessName: "Group Medical",
+      recipientName: "John Elizando",
+      personKind: "agent",
+      personId: 1,
+      teamName: null,
+      grossCommissionCents: 10000,
+      allocationBps: 7000,
+      compensationCents: 7000,
+      commissionId: 44,
+      premiumCents: 100000,
+    }], { compensationCents: 7000, grossCommissionCents: 10000 }, { ...filters, kind: "recipient", personId: 1, personKind: "agent" }, names, "John Elizando");
+    expect(payable.title).toBe("Commission Statement");
+    expect(payable.totals[1]).toEqual({ label: "TOTAL PAYABLE TO RECIPIENT", value: "$70.00" });
+    expect(payable.rows[0]?.[8]).toBe("44");
+    expect(payable.notes?.join(" ")).toMatch(/does not mean the recipient has been paid/);
     const team = teamReportDocument([{
       paidMonth: "2026-09",
       teamId: 1,

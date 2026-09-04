@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { printableReportHtml, reportDocumentCsv, type ReportDocument } from "@/domain/reportDocuments";
+import { reportDocumentPdf } from "@/domain/reportPdf";
 
 export type ReportExportFormat = "csv" | "xlsx" | "pdf" | "print";
 
@@ -20,6 +21,7 @@ export async function exportReportDocument(document: ReportDocument, format: Rep
     sheet.addRow([`Generated ${document.generatedAt}`]);
     sheet.addRow([]);
     for (const line of document.filtersUsed) sheet.addRow([line]);
+    for (const line of document.notes ?? []) sheet.addRow([line]);
     sheet.addRow([]);
     for (const total of document.totals) {
       const row = sheet.addRow([total.label, currencyNumber(total.value) ?? total.value]);
@@ -28,7 +30,7 @@ export async function exportReportDocument(document: ReportDocument, format: Rep
     sheet.addRow([]);
     sheet.addRow(document.headers);
     const moneyColumns = new Set(document.headers.flatMap((header, index) => (
-      /premium|gross|compensation|agency net/i.test(header) && !/%/.test(header) ? [index] : []
+      /premium|gross|compensation|agency net|payable|amount/i.test(header) && !/%/.test(header) ? [index] : []
     )));
     for (const values of document.rows) {
       const row = sheet.addRow(values.map((value, index) => moneyColumns.has(index) ? currencyNumber(value) ?? value : value));
@@ -41,6 +43,13 @@ export async function exportReportDocument(document: ReportDocument, format: Rep
       filename: `${slug(document.title)}.xlsx`,
       contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       body: Buffer.from(buffer),
+    };
+  }
+  if (format === "pdf") {
+    return {
+      filename: `${slug(document.title)}.pdf`,
+      contentType: "application/pdf",
+      body: Buffer.from(await reportDocumentPdf(document)),
     };
   }
   const html = printableReportHtml(document);

@@ -2,6 +2,11 @@ import { printableSuiteStyles } from "@/theme/tokens";
 import { formatCents } from "./money";
 import { formatStatementMonth } from "./dates";
 import {
+  formatAllocationPercent,
+  recipientStatementDisclaimer,
+  sourceCommissionIds,
+} from "./recipientStatement";
+import {
   reportPeriodLabel,
   type AgencyReportRow,
   type IndividualReportRow,
@@ -23,6 +28,8 @@ export type ReportDocument = {
   totals: Array<{ label: string; value: string }>;
   headers: string[];
   rows: string[][];
+  notes?: string[];
+  sourceCommissionIds?: number[];
 };
 
 function filterLines(filters: ReportFilters, names: {
@@ -38,15 +45,20 @@ function filterLines(filters: ReportFilters, names: {
   lines.push(`Group: ${names.groupName || "All"}`);
   lines.push(`Carrier: ${names.carrierName || "All"}`);
   lines.push(`Line of business: ${names.lineName || "All"}`);
-  if (filters.kind === "individual") lines.push(`Recipient: ${names.personName || "All people"}`);
+  if (filters.kind === "individual" || filters.kind === "recipient") lines.push(`Recipient: ${names.personName || "All people"}`);
   if (filters.kind === "team") lines.push(`Team: ${names.teamName || "All teams"}`);
   lines.push(`Account manager: ${names.accountManagerName || "All"}`);
   lines.push(`Primary agent: ${names.primaryAgentName || "All"}`);
   return lines;
 }
 
-function reportTitle(kind: ReportKind) {
+function isRecipientStatement(filters: ReportFilters) {
+  return filters.kind === "recipient" || Boolean(filters.kind === "individual" && filters.personId);
+}
+
+function reportTitle(kind: ReportKind, filters?: ReportFilters) {
   if (kind === "agency") return "Agency Commission Report";
+  if (kind === "recipient" || (kind === "individual" && filters && isRecipientStatement(filters))) return "Commission Statement";
   if (kind === "individual") return "Individual Compensation Report";
   return "Team Compensation Report";
 }
@@ -86,29 +98,52 @@ export function agencyReportDocument(
 
 export function individualReportDocument(
   rows: IndividualReportRow[],
-  totals: { compensationCents: number },
+  totals: { compensationCents: number; grossCommissionCents?: number },
   filters: ReportFilters,
   names: Parameters<typeof filterLines>[1],
   recipientName: string,
   generatedAt = new Date(),
 ): ReportDocument {
+  const recipient = isRecipientStatement({ ...filters, kind: filters.kind === "recipient" ? "recipient" : "individual" });
+  const commissionIds = sourceCommissionIds(rows);
+  const agencyGross = totals.grossCommissionCents ?? rows.reduce((sum, row) => sum + row.grossCommissionCents, 0);
   return {
     agencyName: AGENCY_NAME,
-    title: reportTitle("individual"),
+    title: reportTitle(recipient ? "recipient" : "individual", filters),
     period: reportPeriodLabel(filters),
-    filtersUsed: filterLines({ ...filters, kind: "individual" }, { ...names, personName: recipientName }),
+    filtersUsed: filterLines({ ...filters, kind: recipient ? "recipient" : "individual" }, { ...names, personName: recipientName }),
     generatedAt: generatedAt.toISOString(),
-    totals: [
+    notes: recipient ? [
+      recipientStatementDisclaimer(),
+      commissionIds.length ? `Source commission IDs: ${commissionIds.join(", ")}` : "No posted payout rows matched this recipient and period.",
+    ] : undefined,
+    sourceCommissionIds: commissionIds,
+    totals: recipient ? [
+      { label: "Total agency commission represented", value: formatCents(agencyGross) },
+      { label: "TOTAL PAYABLE TO RECIPIENT", value: formatCents(totals.compensationCents) },
+    ] : [
       { label: `Total ${recipientName} Compensation`, value: formatCents(totals.compensationCents) },
     ],
-    headers: ["Paid Month", "Group", "Carrier", "LOB", "Gross Commission", "Applicable %", "Compensation Earned"],
-    rows: rows.map((row) => [
+    headers: recipient
+      ? ["Paid Month", "Group", "Carrier", "LOB", "Premium", "Agency Gross", "Applicable %", "Recipient Amount", "Commission ID"]
+      : ["Paid Month", "Group", "Carrier", "LOB", "Gross Commission", "Applicable %", "Compensation Earned"],
+    rows: rows.map((row) => recipient ? [
+      formatStatementMonth(row.paidMonth),
+      row.groupName,
+      row.carrierName,
+      row.lineOfBusinessName,
+      row.premiumCents == null ? "—" : formatCents(row.premiumCents),
+      formatCents(row.grossCommissionCents),
+      formatAllocationPercent(row.allocationBps),
+      formatCents(row.compensationCents),
+      row.commissionId == null ? "—" : String(row.commissionId),
+    ] : [
       formatStatementMonth(row.paidMonth),
       row.groupName,
       row.carrierName,
       row.lineOfBusinessName,
       formatCents(row.grossCommissionCents),
-      `${(row.allocationBps / 100).toFixed(row.allocationBps % 100 === 0 ? 0 : 2)}%`,
+      formatAllocationPercent(row.allocationBps),
       formatCents(row.compensationCents),
     ]),
   };
@@ -153,6 +188,7 @@ export function reportDocumentCsv(document: ReportDocument) {
     [document.period],
     [`Generated ${document.generatedAt}`],
     ...document.filtersUsed.map((line) => [line]),
+    ...(document.notes ?? []).map((line) => [line]),
     [],
     ...document.totals.map((total) => [total.label, total.value]),
     [],
@@ -171,7 +207,7 @@ function escapeHtml(value: string) {
 }
 
 export function isNumericReportHeader(header: string) {
-  return /premium|gross|compensation|agency net|applicable %|team %|earned/i.test(header);
+  return /premium|gross|compensation|agency net|applicable %|team %|earned|payable|amount|id/i.test(header);
 }
 
 export function isNegativeReportCell(value: string) {
@@ -226,6 +262,7 @@ export function printableReportHtml(document: ReportDocument) {
     <p class="meta">${escapeHtml(document.period)} · Generated ${escapeHtml(generated)}</p>
   </header>
   <div class="filters">${document.filtersUsed.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}</div>
+  ${document.notes?.length ? `<div class="filters">${document.notes.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}</div>` : ""}
   <div class="summary">${document.totals.map((total) => `<div><span>${escapeHtml(total.label)}</span><strong>${escapeHtml(total.value)}</strong></div>`).join("")}</div>
   <table>
     <thead><tr>${document.headers.map((header, index) => `<th${numeric[index] ? ' class="num"' : ""}>${escapeHtml(header)}</th>`).join("")}</tr></thead>

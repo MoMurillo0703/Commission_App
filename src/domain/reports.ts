@@ -1,6 +1,6 @@
 import { currentPaidMonth, isPaidMonth } from "./dates";
 
-export type ReportKind = "agency" | "individual" | "team";
+export type ReportKind = "agency" | "individual" | "team" | "recipient";
 
 export type ReportFilters = {
   kind: ReportKind;
@@ -47,6 +47,10 @@ export type IndividualReportRow = {
   grossCommissionCents: number;
   allocationBps: number;
   compensationCents: number;
+  commissionId?: number;
+  allocationId?: number | null;
+  premiumCents?: number | null;
+  importStatementId?: number | null;
 };
 
 export type TeamReportRow = {

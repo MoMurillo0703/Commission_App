@@ -22,7 +22,7 @@ export default async function ReportsPage() {
         <div>
           <p className="eyebrow">Reporting</p>
           <h1>Reports</h1>
-          <p>Posted commission reports by paid month, group, carrier, line of business, recipient, and team. Totals use historical snapshots, not today’s current splits.</p>
+          <p>Generate a recipient commission statement from posted payouts. Choose a person and paid month, then download the PDF. Generating a statement does not mark anyone paid.</p>
         </div>
       </header>
       <ReportsWorkspace

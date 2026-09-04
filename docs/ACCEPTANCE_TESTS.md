@@ -88,6 +88,34 @@ Deployed ≠ Done.
 - **Verifier:** Cleo `src/db/index.test.ts` and liveness tests; Ben on architecture change.
 - **Gate:** BUILT.
 
+### Posted statement review copy (KD-001)
+
+- **Workflow:** Reopen a statement whose rows are all already posted.
+- **Expected:** The screen reads as posted. It does not say the statement needs review or that Continue Import is unavailable.
+- **Verifier:** Cleo `statementReadiness` tests; Tom on a posted statement without creating new rows.
+- **Gate:** BUILT + QA PASSED.
+
+### Recipient payable commission statement
+
+- **Workflow:** Post at least three statements for the same paid month. Choose an Agent or Account Manager and that paid month. Generate the recipient statement and download PDF.
+- **Expected:** Line items come from posted `commission_payouts`. Totals show agency commission represented and TOTAL PAYABLE TO RECIPIENT. Negative amounts remain visible. Commission IDs are listed. The statement says it is not a payment. PDF is a downloadable binary file.
+- **Verifier:** Cleo `reports` / `recipientStatement` tests; Tom local QA with fixtures, not production financial writes.
+- **Gate:** BUILT + QA PASSED.
+
+### Missing allocation is not payable-ready
+
+- **Workflow:** Post a commission for a Group where the recipient is assigned, but no complete allocation exists.
+- **Expected:** The recipient statement is not labeled payable-ready. The app does not invent producer compensation.
+- **Verifier:** Cleo automated; Tom QA.
+- **Gate:** BUILT.
+
+### Group assignment during statement review
+
+- **Workflow:** After groups on a statement are identified, assign Account Manager and Primary Agent from the statement review.
+- **Expected:** Assignment saves on the Group. No allocation or payout is created by the assignment.
+- **Verifier:** Cleo existing assignment tests; Tom QA.
+- **Gate:** BUILT + QA PASSED.
+
 ## Release smoke (non-destructive)
 
 - **Workflow:** Open production unsigned.

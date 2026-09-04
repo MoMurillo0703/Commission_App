@@ -12,9 +12,10 @@ type ReportResponse = {
   names: Record<string, string | null | undefined>;
   rows: AgencyReportRow[] | IndividualReportRow[] | TeamReportRow[];
   totals: Record<string, number>;
-  document?: { title: string; period: string; totals: Array<{ label: string; value: string }>; filtersUsed?: string[]; generatedAt?: string };
+  document?: { title: string; period: string; totals: Array<{ label: string; value: string }>; filtersUsed?: string[]; generatedAt?: string; notes?: string[] };
   emptyMessage?: string | null;
   availability?: { postedCommissionCount: number; availablePaidMonths: string[] };
+  payable?: { payableReady: boolean; message: string | null };
 };
 
 export function ReportsWorkspace({
@@ -34,7 +35,7 @@ export function ReportsWorkspace({
   teams: TeamView[];
   initialReport?: ReportResponse | null;
 }) {
-  const [kind, setKind] = useState<ReportKind>("agency");
+  const [kind, setKind] = useState<ReportKind>("recipient");
   const [paidMonth, setPaidMonth] = useState("");
   const [startMonth, setStartMonth] = useState("");
   const [endMonth, setEndMonth] = useState("");
@@ -78,6 +79,10 @@ export function ReportsWorkspace({
 
   async function run(event?: FormEvent) {
     event?.preventDefault();
+    if (kind === "recipient" && (!personKey || !paidMonth)) {
+      setError("Choose a recipient and a paid month to generate a commission statement.");
+      return;
+    }
     setBusy(true);
     setError("");
     const response = await fetch(`/api/reports?${queryString()}`);
@@ -97,6 +102,7 @@ export function ReportsWorkspace({
           <label>
             Report
             <select value={kind} onChange={(event) => setKind(event.target.value as ReportKind)}>
+              <option value="recipient">Recipient commission statement</option>
               <option value="agency">Agency commission</option>
               <option value="individual">Individual compensation</option>
               <option value="team">Team compensation</option>
@@ -174,7 +180,8 @@ export function ReportsWorkspace({
               <>
                 <a className="secondary" href={`/api/reports?${queryString("csv")}`}>CSV</a>
                 <a className="secondary" href={`/api/reports?${queryString("xlsx")}`}>XLSX</a>
-                <a className="secondary" href={`/api/reports?${queryString("print")}`} target="_blank" rel="noreferrer">Print / PDF</a>
+                <a className="secondary" href={`/api/reports?${queryString("pdf")}`}>Download PDF</a>
+                <a className="secondary" href={`/api/reports?${queryString("print")}`} target="_blank" rel="noreferrer">Print</a>
               </>
             )}
           </div>
@@ -193,6 +200,15 @@ export function ReportsWorkspace({
             {report.document?.filtersUsed && (
               <p className="report-filters">{report.document.filtersUsed.join(" · ")}</p>
             )}
+            {report.document?.notes?.map((note) => (
+              <p key={note} className="report-filters">{note}</p>
+            ))}
+            {report.payable?.message && (
+              <p className="form-error">{report.payable.message}</p>
+            )}
+            {kind === "recipient" && report.payable?.payableReady && !report.emptyMessage && (
+              <p className="form-success">Payable from posted commissions. This is not a payment record.</p>
+            )}
           </div>
           <div className="stats report-summary">
             {(report.document?.totals ?? []).map((total) => (
@@ -204,7 +220,7 @@ export function ReportsWorkspace({
           </div>
           {report.emptyMessage && <p className="empty">{report.emptyMessage}</p>}
           {!report.emptyMessage && kind === "agency" && <AgencyTable rows={report.rows as AgencyReportRow[]} />}
-          {!report.emptyMessage && kind === "individual" && <IndividualTable rows={report.rows as IndividualReportRow[]} />}
+          {!report.emptyMessage && (kind === "individual" || kind === "recipient") && <IndividualTable rows={report.rows as IndividualReportRow[]} recipient={kind === "recipient"} />}
           {!report.emptyMessage && kind === "team" && <TeamTable rows={report.rows as TeamReportRow[]} />}
         </section>
       )}
@@ -251,7 +267,7 @@ function AgencyTable({ rows }: { rows: AgencyReportRow[] }) {
   );
 }
 
-function IndividualTable({ rows }: { rows: IndividualReportRow[] }) {
+function IndividualTable({ rows, recipient = false }: { rows: IndividualReportRow[]; recipient?: boolean }) {
   if (rows.length === 0) return <p className="empty">No posted commissions match the current filters.</p>;
   return (
     <table className="report-table">
@@ -262,22 +278,26 @@ function IndividualTable({ rows }: { rows: IndividualReportRow[] }) {
           <th>Group</th>
           <th>Carrier</th>
           <th>LOB</th>
-          <th>Gross Commission</th>
-          <th>Applicable %</th>
-          <th>Compensation Earned</th>
+          {recipient ? <th className="num">Premium</th> : null}
+          <th className="num">Agency Gross</th>
+          <th className="num">Applicable %</th>
+          <th className="num">{recipient ? "Recipient Amount" : "Compensation Earned"}</th>
+          {recipient ? <th>Commission ID</th> : null}
         </tr>
       </thead>
       <tbody>
         {rows.map((row, index) => (
-          <tr key={`${row.personKind}-${row.personId}-${row.groupId}-${index}`}>
+          <tr key={`${row.personKind}-${row.personId}-${row.groupId}-${row.commissionId ?? index}`}>
             <td>{formatStatementMonth(row.paidMonth)}</td>
             <td>{row.recipientName}{row.teamName ? ` · ${row.teamName}` : ""}</td>
             <td>{row.groupName}</td>
             <td>{row.carrierName}</td>
             <td>{row.lineOfBusinessName}</td>
+            {recipient ? moneyCell(row.premiumCents ?? null) : null}
             {moneyCell(row.grossCommissionCents)}
             <td className="num">{`${(row.allocationBps / 100).toFixed(row.allocationBps % 100 === 0 ? 0 : 2)}%`}</td>
             {moneyCell(row.compensationCents)}
+            {recipient ? <td>{row.commissionId ?? "—"}</td> : null}
           </tr>
         ))}
       </tbody>
