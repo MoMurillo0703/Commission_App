@@ -199,10 +199,12 @@ export async function inspectStatementUpload(
     let sourceType: StatementFileKind;
     let status: string;
     let pdfExtraction: Awaited<ReturnType<typeof previewPdfStatement>>["extraction"] | null = null;
+    let inferredPdfMapping = null as Awaited<ReturnType<typeof inspectPdfPreview>>["mapping"];
     if (isPdf) {
       const extracted = await inspectPdfPreview(bytes, groups);
       preview = extracted.preview;
       pdfExtraction = extracted.extraction;
+      inferredPdfMapping = extracted.mapping;
       sourceType = "pdf";
       status = extracted.extraction.classification === "readable"
         ? (preview.rowCount > 0 ? "ready_to_map" : "needs_layout")
@@ -256,6 +258,8 @@ export async function inspectStatementUpload(
         };
         reusedMapping = true;
         statement = await saveImportPreview(db, statement.id, preview);
+      } else if (inferredPdfMapping) {
+        statement = await saveImportColumnMapping(db, statement.id, inferredPdfMapping);
       }
     } else if (status === "ready_to_map") {
       const prior = await findLatestColumnMappingForCarrier(resolved.carrier.id, db);

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recoverAutomaticPdfRead } from "@/data/pdfAutomaticRead";
 import { deleteImportStatement, getImportStatement, renameImportStatement, saveImportColumnMapping } from "@/data/statements";
 import { getDb } from "@/db";
 import { parseId, toErrorResponse } from "@/lib/http";
@@ -12,7 +13,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     if (!id) return NextResponse.json({ message: "Statement not found." }, { status: 404 });
     const row = await getImportStatement(await getDb(), id);
     if (!row) return NextResponse.json({ message: "Statement not found." }, { status: 404 });
-    return NextResponse.json(row);
+    return NextResponse.json(await recoverAutomaticPdfRead(await getDb(), row));
   } catch (error) {
     return toErrorResponse(error);
   }

@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ImportStatementView } from "@/data/statements";
-import { collectPreviewHeaders, mappingFieldLabels, mappingFields, mappingLooksAutomatic, suggestColumnMapping, type ColumnMapping } from "@/domain/columnMapping";
-import { calculateAgentCompensationCents, calculateAgencyNetCents } from "@/domain/compensation";
+import { collectPreviewHeaders, mappingFieldLabels, mappingFields, mappingLooksAutomatic, omitStatementCompensationMapping, suggestColumnMapping, type ColumnMapping } from "@/domain/columnMapping";
 import type { UnmatchedImportGroup, GroupImportDecision } from "@/domain/importGroups";
 import type { ValidatedImportRow } from "@/domain/importRows";
 import { formatCents } from "@/domain/money";
@@ -35,15 +34,29 @@ function defaultNamedDecisions(items: UnmatchedNamedImport[]) {
   return Object.fromEntries(items.map((item) => [item.key, { key: item.key, action: "create" as const }]));
 }
 
+function intakeMapping(mapping: ColumnMapping, extractedConfirm: boolean): ColumnMapping {
+  if (!extractedConfirm) return normalizeSpreadsheetMapping(mapping);
+  return omitStatementCompensationMapping(mapping);
+}
+
+function normalizeSpreadsheetMapping(mapping: ColumnMapping): ColumnMapping {
+  const { compensationPercent: _split, ...rest } = mapping;
+  return rest;
+}
+
 export function StatementPosting({
   statement,
   preview,
+  variant = "spreadsheet",
 }: {
   statement: ImportStatementView;
   preview: StatementPreview;
+  variant?: "spreadsheet" | "extracted-confirm";
 }) {
   const headers = useMemo(() => collectPreviewHeaders(preview.sheets), [preview.sheets]);
-  const [mapping, setMapping] = useState<ColumnMapping>(statement.columnMapping ?? suggestColumnMapping(headers));
+  const [mapping, setMapping] = useState<ColumnMapping>(
+    intakeMapping(statement.columnMapping ?? suggestColumnMapping(headers), variant === "extracted-confirm"),
+  );
   const [review, setReview] = useState<PreviewResponse | null>(null);
   const [groups, setGroups] = useState<NamedOption[]>([]);
   const [lines, setLines] = useState<NamedOption[]>([]);
@@ -54,7 +67,13 @@ export function StatementPosting({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [layoutMessage, setLayoutMessage] = useState("");
-  const [showMappingHelp, setShowMappingHelp] = useState(() => !mappingLooksAutomatic(statement.columnMapping ?? suggestColumnMapping(headers)));
+  const extractedConfirm = variant === "extracted-confirm";
+  const postingMapping = intakeMapping(mapping, extractedConfirm);
+  const [showMappingHelp, setShowMappingHelp] = useState(() => (
+    extractedConfirm
+      ? false
+      : !mappingLooksAutomatic(statement.columnMapping ?? suggestColumnMapping(headers))
+  ));
 
   useEffect(() => {
     void Promise.all([
@@ -69,7 +88,7 @@ export function StatementPosting({
     setGroupDecisions(Object.fromEntries((body.unmatchedGroups ?? []).map((group) => [group.key, { key: group.key, action: "create" }])));
     setLineDecisions(defaultNamedDecisions(body.unmatchedLines ?? []));
     setAgentDecisions(defaultNamedDecisions(body.unmatchedAgents ?? []));
-    if (body.readiness?.blockers.some((blocker) => blocker.kind === "mapping")) {
+    if (variant !== "extracted-confirm" && body.readiness?.blockers.some((blocker) => blocker.kind === "mapping")) {
       setShowMappingHelp(true);
     }
   }
@@ -80,7 +99,7 @@ export function StatementPosting({
     const response = await fetch(`/api/imports/statements/${statement.id}/preview`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ columnMapping: mapping }),
+      body: JSON.stringify({ columnMapping: postingMapping }),
     });
     const body = (await response.json()) as PreviewResponse;
     setBusy(false);
@@ -97,7 +116,7 @@ export function StatementPosting({
       const response = await fetch(`/api/imports/statements/${statement.id}/preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ columnMapping: mapping }),
+        body: JSON.stringify({ columnMapping: postingMapping }),
       });
       const body = (await response.json()) as PreviewResponse;
       if (cancelled) return;
@@ -143,7 +162,7 @@ export function StatementPosting({
     const response = await fetch(`/api/imports/statements/${statement.id}/${path}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ columnMapping: mapping, decisions }),
+      body: JSON.stringify({ columnMapping: postingMapping, decisions }),
     });
     const body = (await response.json()) as PreviewResponse;
     if (response.ok) {
@@ -163,7 +182,7 @@ export function StatementPosting({
     const response = await fetch(`/api/imports/statements/${statement.id}/post`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ columnMapping: mapping }),
+      body: JSON.stringify({ columnMapping: postingMapping }),
     });
     const body = await response.json();
     setBusy(false);
@@ -181,7 +200,7 @@ export function StatementPosting({
     const response = await fetch(`/api/imports/statements/${statement.id}/layout`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ columnMapping: mapping }),
+      body: JSON.stringify({ columnMapping: postingMapping }),
     });
     const body = await response.json();
     setBusy(false);
@@ -198,6 +217,7 @@ export function StatementPosting({
   const readiness = review?.readiness ?? null;
   const continueBlocked = continueImportBlockedReason(readiness);
   const mappingFieldsToShow = mappingFields.filter((field) => !(field === "carrier" && statement.carrierName));
+  const showCarrierMapping = extractedConfirm ? false : !statement.carrierName;
   const recognizedLayout = preview.pdf?.layoutName;
   const resolveActive = unmatchedGroups.length + unmatchedLines.length + unmatchedAgents.length > 0;
   const workflowStep = review?.postedCount ? "post" : review && !resolveActive && readiness?.canContinue ? "review" : review ? "resolve" : "read";
@@ -210,13 +230,17 @@ export function StatementPosting({
         <li className={workflowStep === "resolve" ? "active" : resolveActive || review ? "done" : ""}>Confirm</li>
         <li className={workflowStep === "review" || workflowStep === "post" ? "active" : review && readiness?.canContinue ? "done" : ""}>Post</li>
       </ol>
-      <strong>Confirm the extracted commission data, then post</strong>
+      <strong>
+        {extractedConfirm
+          ? `We found ${review?.rows.length ?? preview.rowCount} commission record${(review?.rows.length ?? preview.rowCount) === 1 ? "" : "s"}`
+          : "Confirm the extracted commission data, then post"}
+      </strong>
       <p>
         Paid month is {statement.paidMonth}
         {statement.carrierName ? ` · statement carrier is ${statement.carrierName}` : ""}.
-        The app already read this file and identified likely groups, coverage values, premium, and commission.
-        Correct any field that looks wrong, then post.
-        Recipient compensation and Agency net come from the Compensation allocation for the Group, line of business, and paid month.
+        {extractedConfirm
+          ? " Review what the app read. Correct only exceptions, then confirm and post. Compensation comes from the Group + line of business allocation for this paid month, not from this statement."
+          : " The app already read this file and identified likely groups, coverage values, premium, and commission. Correct any field that looks wrong, then post. Recipient compensation comes from the Compensation allocation, not from statement columns."}
       </p>
       {recognizedLayout && (
         <p><strong>Recognized carrier layout:</strong> {recognizedLayout}{preview.pdf?.layoutVersion ? ` · version ${preview.pdf.layoutVersion}` : ""}</p>
@@ -225,8 +249,8 @@ export function StatementPosting({
         <div className="blocker-summary" id="statement-blockers">
           {readiness?.canContinue ? (
             <>
-              <strong>Ready to continue</strong>
-              <p>Required mappings and unmatched items are resolved. Review the financial rows below, then post the ready rows.</p>
+              <strong>{extractedConfirm ? "Ready to confirm" : "Ready to continue"}</strong>
+              <p>{extractedConfirm ? "The extracted records are ready. Confirm and post the ready rows." : "Required mappings and unmatched items are resolved. Review the financial rows below, then post the ready rows."}</p>
             </>
           ) : (
             <>
@@ -253,7 +277,7 @@ export function StatementPosting({
       {statement.carrierName && (
         <div className="related-block">
           <p><strong>Carrier: {statement.carrierName}</strong></p>
-          <p>Imported rows use this carrier unless a row names a different carrier.</p>
+          <p>This statement uses the selected carrier. A Carrier column is not needed unless the file contains more than one carrier.</p>
         </div>
       )}
       {!showMappingHelp && (
@@ -262,18 +286,18 @@ export function StatementPosting({
             Help the app read this statement
           </button>
           <button type="button" disabled={busy || !readiness?.canContinue} onClick={postReady}>
-            {review ? `Confirm and post ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Confirm and post"}
+            {review ? `Confirm & Post ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Confirm & Post"}
           </button>
         </div>
       )}
       {showMappingHelp && (
         <>
           <p className="muted-note">Advanced recovery: choose columns only if automatic reading missed them.</p>
-          {statement.carrierName && (
+          {showCarrierMapping && (
             <label>
-              Carrier column (optional)
+              Carrier column
               <select value={mapping.carrier ?? ""} onChange={(event) => setField("carrier", event.target.value)}>
-                <option value="">Use statement carrier</option>
+                <option value="">Not mapped</option>
                 {headers.map((header) => (
                   <option key={header} value={header}>{header}</option>
                 ))}
@@ -303,7 +327,7 @@ export function StatementPosting({
               </button>
             )}
             <button type="button" disabled={busy || !readiness?.canContinue} onClick={postReady}>
-              {review ? `Confirm and post ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Confirm and post"}
+              {review ? `Confirm & Post ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Confirm & Post"}
             </button>
           </div>
         </>
@@ -353,7 +377,7 @@ export function StatementPosting({
           onConfirm={() => confirm("lines", Object.values(lineDecisions))}
         />
       )}
-      {review && unmatchedAgents.length > 0 && (
+      {review && !extractedConfirm && unmatchedAgents.length > 0 && (
         <ResolveTable
           id="resolve-agents"
           title={`${unmatchedAgents.length} Agent${unmatchedAgents.length === 1 ? "" : "s"} need review`}
@@ -381,49 +405,42 @@ export function StatementPosting({
           {review.postedCount > 0 && <p className="form-success">Posted rows are now commission records. Reopening this statement will not post them twice.</p>}
           <div id="statement-rows">
             <p>
-              {review.readyCount} ready · {review.blockedCount} blocked · {review.postedCount} already posted
+              {review.readyCount} ready · {review.blockedCount} {extractedConfirm ? "needs review" : "blocked"} · {review.postedCount} already posted
               {" "}· paid month {statement.paidMonth}
             </p>
             <table>
               <thead>
                 <tr>
-                  <th>Row</th>
                   <th>Group</th>
-                  <th>Carrier</th>
-                  <th>Line</th>
-                  <th>Agent</th>
+                  <th>Group #</th>
+                  {extractedConfirm ? null : <th>Carrier</th>}
+                  <th>Coverage</th>
                   <th>Premium</th>
-                  <th>Gross</th>
-                  <th>Compensation</th>
-                  <th>Agency net</th>
+                  <th>Commission</th>
                   <th>Coverage month</th>
                   <th>Status</th>
                 </tr>
               </thead>
               <tbody>
                 {review.rows.map((row) => {
-                  const distributed = row.compensationDistributedCents
-                    ?? (row.grossCommissionCents == null ? null : calculateAgentCompensationCents(row.grossCommissionCents, row.compensationBps ?? 0));
-                  const agencyNet = row.agencyNetCents
-                    ?? (row.grossCommissionCents == null || distributed == null ? null : calculateAgencyNetCents(row.grossCommissionCents, distributed));
+                  const statusLabel = row.status === "ready" ? "READY" : row.status === "posted" ? "POSTED" : row.exceptions.some((item) => /Unmatched|Ambiguous/.test(item)) ? "NEEDS REVIEW" : "BLOCKED";
                   return (
                     <tr key={row.sourceRowKey}>
-                      <td>{row.rowNumber}</td>
-                      <td>{row.groupLabel || "—"}</td>
-                      <td>
-                        {row.carrierLabel || "—"}
-                        {row.carrierSource === "statement" ? <small> · statement carrier</small> : null}
-                      </td>
-                      <td>{row.lineOfBusinessLabel || "—"}</td>
-                      <td>{row.agentLabel || "Unassigned"}</td>
+                      <td>{row.groupLabel || row.importedGroupName || "—"}</td>
+                      <td>{row.importedGroupNumber || "—"}</td>
+                      {extractedConfirm ? null : (
+                        <td>
+                          {row.carrierLabel || "—"}
+                          {row.carrierSource === "statement" ? <small> · statement carrier</small> : null}
+                        </td>
+                      )}
+                      <td>{row.lineOfBusinessLabel || row.importedLineName || "—"}</td>
                       <td>{row.premiumCents == null ? "—" : formatCents(row.premiumCents)}</td>
                       <td>{row.grossCommissionCents == null ? "—" : formatCents(row.grossCommissionCents)}</td>
-                      <td>{distributed == null ? "—" : formatCents(distributed)}</td>
-                      <td>{agencyNet == null ? "—" : formatCents(agencyNet)}</td>
                       <td>{row.premiumMonth || "—"}</td>
                       <td>
                         <span className={`pill ${row.status === "ready" ? "ready_to_map" : row.status === "posted" ? "posted" : "review"}`}>
-                          {row.status}
+                          {statusLabel}
                         </span>
                         {row.exceptions.length > 0 && <small> {row.exceptions.join(" ")}</small>}
                       </td>

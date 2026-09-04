@@ -5,34 +5,36 @@ export const mappingFields = [
   "groupNumber",
   "carrier",
   "lineOfBusiness",
-  "agent",
   "premium",
   "grossCommission",
   "premiumMonth",
   "notes",
 ] as const;
 
+export const statementIntakeHiddenFields = ["agent", "compensationPercent"] as const;
+
 export type MappingField = (typeof mappingFields)[number];
 export type ColumnMapping = Partial<Record<MappingField, string | null>> & {
+  /** Spreadsheet-only leftover. PDF intake does not map Agent or splits. */
+  agent?: string | null;
   /** Ignored leftover from older statement mappings. Compensation comes from agreements. */
   compensationPercent?: string | null;
 };
 
 const headerPatterns: Record<Exclude<MappingField, "groupName" | "groupNumber" | "premiumMonth">, RegExp> = {
   carrier: /^(carrier|company|insurer)$/i,
-  lineOfBusiness: /^(line of business|lob|product( line| type| code)?|coverage( code| type)?|plan( type| code)?)$/i,
-  agent: /^(agent|producer( name)?|broker)$/i,
-  premium: /^(premium|billed premium|premium received)$/i,
-  grossCommission: /^(gross |current )?commission|comm\.?$/i,
+  lineOfBusiness: /^(line of business|lob|product( line| type| code)?|coverage( code| type)?|plan( type| code)?|benefit)$/i,
+  premium: /^(premium|billed premium|premium received|paid)$/i,
+  grossCommission: /^(gross |current )?commission|comm\.?$|^fee$/i,
   notes: /^(notes?|comments?)$/i,
 };
+const agentHeader = /^(agent|producer( name)?|broker)$/i;
 
 export const mappingFieldLabels: Record<MappingField, string> = {
   groupName: "Group name",
   groupNumber: "Group number",
   carrier: "Carrier",
   lineOfBusiness: "Line of business",
-  agent: "Agent",
   premium: "Premium",
   grossCommission: "Gross commission",
   premiumMonth: "Premium / coverage month",
@@ -48,6 +50,12 @@ export function normalizeColumnMapping(mapping: ColumnMapping): ColumnMapping {
   return rest;
 }
 
+/** Statement intake never maps compensation. PDF interpretation also drops leftover Agent columns. */
+export function omitStatementCompensationMapping(mapping: ColumnMapping): ColumnMapping {
+  const { agent: _agent, compensationPercent: _split, ...rest } = normalizeColumnMapping(mapping);
+  return rest;
+}
+
 export function suggestColumnMapping(headers: string[]): ColumnMapping {
   const detected = detectGroupHeaders(headers);
   return normalizeColumnMapping({
@@ -56,7 +64,7 @@ export function suggestColumnMapping(headers: string[]): ColumnMapping {
     premiumMonth: detected.premiumMonthHeader,
     carrier: findHeader(headers, headerPatterns.carrier),
     lineOfBusiness: findHeader(headers, headerPatterns.lineOfBusiness),
-    agent: findHeader(headers, headerPatterns.agent),
+    agent: findHeader(headers, agentHeader),
     premium: findHeader(headers, headerPatterns.premium),
     grossCommission: findHeader(headers, headerPatterns.grossCommission),
     notes: findHeader(headers, headerPatterns.notes),

@@ -52,6 +52,28 @@ export async function readableHiddenTablePdf() {
   return new Uint8Array(await pdf.save());
 }
 
+export async function unrecognizedHeaderTablePdf() {
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([720, 420]);
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  page.drawText("Readable commission statement with unrecognized column titles.", {
+    x: 36,
+    y: 380,
+    size: 11,
+    font,
+    color: rgb(0, 0, 0),
+    maxWidth: 640,
+  });
+  const headers = ["Customer", "Offering", "CompFee"];
+  const first = ["Acme Benefits", "Dental", "80.00"];
+  const second = ["Smith Farms", "Vision", "62.00"];
+  const xs = [36, 240, 420];
+  headers.forEach((header, column) => page.drawText(header, { x: xs[column]!, y: 330, size: 9, font }));
+  first.forEach((value, column) => page.drawText(value, { x: xs[column]!, y: 310, size: 9, font }));
+  second.forEach((value, column) => page.drawText(value, { x: xs[column]!, y: 290, size: 9, font }));
+  return new Uint8Array(await pdf.save());
+}
+
 export async function imageOnlyPdf() {
   const pdf = await PDFDocument.create();
   const page = pdf.addPage([300, 300]);

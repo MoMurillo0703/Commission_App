@@ -82,7 +82,7 @@ describe("PDF layout confirmation", () => {
       persist: true,
     }, db);
     expect(result.status).toBe(200);
-    expect(result.body.status).toBe("ready_to_map");
+    expect(["ready_to_map", "mapped"]).toContain(result.body.status);
     expect((result.body.preview as { rowCount?: number }).rowCount).toBeGreaterThan(0);
   });
 
@@ -221,7 +221,7 @@ describe("PDF layout confirmation", () => {
     })).rejects.toThrow(/PDF statements/i);
   });
 
-  it("confirms a real extracted hidden-table PDF when automatic detection finds no rows", async () => {
+  it("automatically extracts a Choice Builder-style PDF and does not post until confirmation", async () => {
     const db = await createTestDb();
     const carrier = await createCarrier(db, { name: "Choice Builder" });
     const buffer = await readableHiddenTablePdf();
@@ -234,7 +234,8 @@ describe("PDF layout confirmation", () => {
       carrierId: String(carrier.id),
       persist: true,
     }, db);
-    expect(inspected.body.status).toBe("needs_layout");
+    expect(["ready_to_map", "mapped"]).toContain(inspected.body.status);
+    expect((inspected.body.preview as { rowCount?: number }).rowCount).toBeGreaterThan(0);
     const statement = inspected.body.statement as { id: number };
     const extraction = await getStatementExtraction(db, statement.id);
     expect(extraction.pages.some((page) => page.lines.length > 0)).toBe(true);

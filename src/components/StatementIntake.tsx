@@ -7,6 +7,7 @@ import type { ImportStatementView } from "@/data/statements";
 import type { Carrier } from "@/db/schema";
 import type { StatementPreview } from "@/domain/workbook";
 import { acceptedStatementFiles, pdfNeedsLayoutConfirmation, STATEMENT_INTAKE_FORMATS, STATEMENT_INTAKE_LEAD, statementListActions } from "@/domain/statementActions";
+import { pdfShouldUseExtractedConfirmation } from "@/domain/pdfIntakeSurface";
 import { canReviewRows, isUnparsedStatement, statementCanBeDeleted, statementCanOpenReview, statementGuidance, statementHasExtractedText, statementStatusLabel } from "@/domain/statementWorkflow";
 import { PdfLayoutReview } from "./PdfLayoutReview";
 import { StatementPosting } from "./StatementPosting";
@@ -130,7 +131,7 @@ export function StatementIntake({
     if (response.ok) {
       setPreview(body.preview ?? null);
       setActiveStatement(body);
-      setManualReadHelp(pdfNeedsLayoutConfirmation(body, body.preview) && !canReviewRows(body.preview));
+      setManualReadHelp(false);
       setResult({
         fileName: body.originalFilename,
         fileType: body.sourceType,
@@ -146,6 +147,7 @@ export function StatementIntake({
           pdfClassification: body.preview?.pdf?.classification,
         }).next,
       });
+      await loadStatements(paidMonth);
     } else {
       setResult({ status: "review", message: body.message ?? "Unable to open that statement." });
     }
@@ -306,10 +308,10 @@ export function StatementIntake({
       )}
       {preview && !isUnparsedStatement(activeStatement ?? {}, canReviewRows(preview)) && canReviewRows(preview) && (
         <div className="result">
-          <strong>Import preview</strong>
+          <strong>We found {preview.rowCount} commission record{preview.rowCount === 1 ? "" : "s"}</strong>
           <p>
-            {preview.rowCount} row{preview.rowCount === 1 ? "" : "s"} read
-            {preview.newGroupCount ? ` · ${preview.newGroupCount} unmatched group name${preview.newGroupCount === 1 ? "" : "s"} to review` : ""}
+            Confirm the extracted groups, coverage, premium, and commission below.
+            {preview.newGroupCount ? ` ${preview.newGroupCount} unmatched group name${preview.newGroupCount === 1 ? "" : "s"} need review.` : ""}
           </p>
           {preview.unmatchedGroups.length > 0 && (
             <p>
@@ -322,7 +324,7 @@ export function StatementIntake({
       {activeStatement && pdfNeedsLayoutConfirmation(activeStatement, preview) && !manualReadHelp && (
         <div className="result">
           <strong>Automatic reading needs a little help</strong>
-          <p>The file was read, but the app could not confidently identify the commission table. Mapping or page/line selection is a fallback, not the normal workflow.</p>
+          <p>The app extracted the text but could not confidently identify the commission table. This is an advanced fallback, not the normal workflow.</p>
           <div className="form-actions" style={{ marginTop: 12 }}>
             <button type="button" onClick={() => setManualReadHelp(true)}>
               Help the app read this statement
@@ -359,7 +361,11 @@ export function StatementIntake({
         />
       )}
       {activeStatement && preview && canReviewRows(preview) && statementCanOpenReview(activeStatement.status, true, activeStatement.sourceType) && (
-        <StatementPosting statement={activeStatement} preview={preview} />
+        <StatementPosting
+          statement={activeStatement}
+          preview={preview}
+          variant={pdfShouldUseExtractedConfirmation(activeStatement) ? "extracted-confirm" : "spreadsheet"}
+        />
       )}
       {availablePaidMonths.length > 0 && (
         <div className="month-links" aria-label="Statement paid months">

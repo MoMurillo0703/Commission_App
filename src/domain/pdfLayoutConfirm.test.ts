@@ -17,9 +17,9 @@ function page(pageNumber: number, lines: string[]) {
 }
 
 describe("confirmed PDF layout candidate rows", () => {
-  it("does not auto-detect a readable table with unrecognized column names", () => {
+  it("auto-detects Choice Builder Member/Plan/Paid/Fee tables", () => {
     const pages = [page(1, [title, hiddenHeader, hiddenRow, "Total    80.00"])];
-    expect(candidateRowsFromPdfPages(pages, []).rowCount).toBe(0);
+    expect(candidateRowsFromPdfPages(pages, []).rowCount).toBeGreaterThan(0);
   });
 
   it("builds deterministic candidate rows from a confirmed header and data range", () => {
@@ -90,7 +90,7 @@ describe("confirmed PDF layout candidate rows", () => {
       dataEndLineNumber: 3,
     }, [{ id: 1, name: "Other Group", groupNumber: "Z9" }]);
 
-    expect(result.preview.sheets[0]?.rows[0]?.group.status).toBe("missing");
+    expect(result.preview.sheets[0]?.rows[0]?.group.status).toBe("new_group");
     expect(result.preview.sheets[0]?.rows[0]?.values.Fee).toBe("80.00");
   });
 

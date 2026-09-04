@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mappingFieldLabels, mappingFields, mappingLooksAutomatic, normalizeColumnMapping, suggestColumnMapping } from "./columnMapping";
+import { mappingFieldLabels, mappingFields, mappingLooksAutomatic, normalizeColumnMapping, omitStatementCompensationMapping, suggestColumnMapping } from "./columnMapping";
 
 describe("column mapping", () => {
   it("suggests commission import columns from common headers without Agent split %", () => {
@@ -23,6 +23,13 @@ describe("column mapping", () => {
     expect(mapping.lineOfBusiness).toBe("Coverage");
     expect(mappingLooksAutomatic(mapping)).toBe(true);
     expect(mappingLooksAutomatic({ groupName: "Group Name" })).toBe(false);
+    expect(suggestColumnMapping(["Member", "Plan", "Paid", "Fee"])).toMatchObject({
+      groupName: "Member",
+      lineOfBusiness: "Plan",
+      premium: "Paid",
+      grossCommission: "Fee",
+    });
+    expect(mappingFields).not.toContain("agent");
   });
 
   it("clears a leftover Agent split mapping so it cannot override compensation", () => {
@@ -31,6 +38,15 @@ describe("column mapping", () => {
       compensationPercent: "Split",
     })).toEqual({
       groupName: "Group Name",
+    });
+    expect(omitStatementCompensationMapping({
+      groupName: "Member",
+      agent: "Agent",
+      compensationPercent: "Split",
+      grossCommission: "Fee",
+    })).toEqual({
+      groupName: "Member",
+      grossCommission: "Fee",
     });
   });
 });
