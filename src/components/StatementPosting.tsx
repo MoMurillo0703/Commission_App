@@ -96,35 +96,44 @@ export function StatementPosting({
   async function runPreview() {
     setBusy(true);
     setError("");
-    const response = await fetch(`/api/imports/statements/${statement.id}/preview`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ columnMapping: postingMapping }),
-    });
-    const body = (await response.json()) as PreviewResponse;
-    setBusy(false);
-    if (!response.ok) {
-      setError((body as { message?: string }).message ?? "Unable to preview rows.");
-      return;
-    }
-    applyReview(body);
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
+    try {
       const response = await fetch(`/api/imports/statements/${statement.id}/preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ columnMapping: postingMapping }),
       });
       const body = (await response.json()) as PreviewResponse;
-      if (cancelled) return;
       if (!response.ok) {
         setError((body as { message?: string }).message ?? "Unable to preview rows.");
         return;
       }
       applyReview(body);
+    } catch {
+      setError("Unable to preview rows.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/imports/statements/${statement.id}/preview`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ columnMapping: postingMapping }),
+        });
+        const body = (await response.json()) as PreviewResponse;
+        if (cancelled) return;
+        if (!response.ok) {
+          setError((body as { message?: string }).message ?? "Unable to preview rows.");
+          return;
+        }
+        applyReview(body);
+      } catch {
+        if (!cancelled) setError("Unable to preview rows.");
+      }
     })();
     return () => {
       cancelled = true;

@@ -96,62 +96,72 @@ export function StatementIntake({
       return;
     }
     setBusy(true);
-    const results: IntakeResult[] = [];
-    let lastReviewable: IntakeResult | null = null;
-    for (const file of selectedFiles) {
-      const form = new FormData();
-      form.set("statement", file);
-      form.set("paidMonth", paidMonth);
-      if (carrierId) form.set("carrierId", carrierId);
-      if (carrierName.trim()) form.set("carrierName", carrierName.trim());
-      const response = await fetch("/api/imports/inspect", { method: "POST", body: form });
-      const body = (await response.json()) as IntakeResult;
-      const statement = body.statement ?? body.existing ?? null;
-      const normalized = { ...body, fileName: body.fileName ?? file.name, status: body.status ?? statement?.status ?? "review", statement };
-      results.push(normalized);
-      if (statement && (canReviewRows(statement.preview ?? body.preview) || statement.status === "needs_layout")) {
-        lastReviewable = normalized;
+    try {
+      const results: IntakeResult[] = [];
+      let lastReviewable: IntakeResult | null = null;
+      for (const file of selectedFiles) {
+        const form = new FormData();
+        form.set("statement", file);
+        form.set("paidMonth", paidMonth);
+        if (carrierId) form.set("carrierId", carrierId);
+        if (carrierName.trim()) form.set("carrierName", carrierName.trim());
+        const response = await fetch("/api/imports/inspect", { method: "POST", body: form });
+        const body = (await response.json()) as IntakeResult;
+        const statement = body.statement ?? body.existing ?? null;
+        const normalized = { ...body, fileName: body.fileName ?? file.name, status: body.status ?? statement?.status ?? "review", statement };
+        results.push(normalized);
+        if (statement && (canReviewRows(statement.preview ?? body.preview) || statement.status === "needs_layout")) {
+          lastReviewable = normalized;
+        }
       }
+      setBatchResults(results);
+      setResult(results.length === 1 ? results[0] : null);
+      setPreview(lastReviewable?.preview ?? lastReviewable?.statement?.preview ?? null);
+      setActiveStatement(lastReviewable?.statement ?? null);
+      setManualReadHelp(false);
+      await Promise.all([loadStatements(paidMonth), refreshCarriers()]);
+      setCarrierName("");
+      setSelectedFiles([]);
+    } catch {
+      setResult({ status: "review", message: "Unable to finish reading and saving that statement." });
+    } finally {
+      setBusy(false);
     }
-    setBatchResults(results);
-    setResult(results.length === 1 ? results[0] : null);
-    setPreview(lastReviewable?.preview ?? lastReviewable?.statement?.preview ?? null);
-    setActiveStatement(lastReviewable?.statement ?? null);
-    setManualReadHelp(false);
-    await Promise.all([loadStatements(paidMonth), refreshCarriers()]);
-    setCarrierName("");
-    setSelectedFiles([]);
-    setBusy(false);
   }
 
   async function inspectSaved(id: number) {
     setBusy(true);
-    const response = await fetch(`/api/imports/statements/${id}`);
-    const body = await response.json();
-    if (response.ok) {
-      setPreview(body.preview ?? null);
-      setActiveStatement(body);
-      setManualReadHelp(false);
-      setResult({
-        fileName: body.originalFilename,
-        fileType: body.sourceType,
-        status: body.status,
-        preview: body.preview,
-        statement: body,
-        message: statementGuidance({
+    try {
+      const response = await fetch(`/api/imports/statements/${id}`);
+      const body = await response.json();
+      if (response.ok) {
+        setPreview(body.preview ?? null);
+        setActiveStatement(body);
+        setManualReadHelp(false);
+        setResult({
+          fileName: body.originalFilename,
+          fileType: body.sourceType,
           status: body.status,
-          sourceType: body.sourceType,
-          unmatchedGroupCount: body.preview?.newGroupCount,
-          hasReadableRows: canReviewRows(body.preview),
-          hasExtractedText: statementHasExtractedText(body),
-          pdfClassification: body.preview?.pdf?.classification,
-        }).next,
-      });
-      await loadStatements(paidMonth);
-    } else {
-      setResult({ status: "review", message: body.message ?? "Unable to open that statement." });
+          preview: body.preview,
+          statement: body,
+          message: statementGuidance({
+            status: body.status,
+            sourceType: body.sourceType,
+            unmatchedGroupCount: body.preview?.newGroupCount,
+            hasReadableRows: canReviewRows(body.preview),
+            hasExtractedText: statementHasExtractedText(body),
+            pdfClassification: body.preview?.pdf?.classification,
+          }).next,
+        });
+        await loadStatements(paidMonth);
+      } else {
+        setResult({ status: "review", message: body.message ?? "Unable to open that statement." });
+      }
+    } catch {
+      setResult({ status: "review", message: "Unable to open that statement." });
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   }
 
   async function rename(id: number) {

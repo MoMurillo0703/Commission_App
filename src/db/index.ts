@@ -21,8 +21,12 @@ function databaseUrl() {
 
 function createSql() {
   return postgres(databaseUrl(), {
-    max: 1,
+    // Supabase transaction pooler (6543) hangs if one postgres.js client pipelines 4+ queries.
+    // After inspect the browser fires statements/carriers/preview/groups/LOBs/agents together.
+    max: 10,
     prepare: false,
+    idle_timeout: 20,
+    connect_timeout: 10,
     ssl: process.env.DATABASE_SSL === "disable" ? false : "require",
   });
 }
