@@ -76,9 +76,9 @@ Deployed ≠ Done.
 
 ### Compensation allocation save busy-state (QA-001)
 
-- **Workflow:** Save a complete 100% Group + LOB allocation from Compensation or the work-queue modal.
-- **Expected:** Saving… ends after success or failure. Success confirms the persisted allocation, shows a success message, and updates the work queue. Failure shows a useful error. The button never stays on Saving… indefinitely.
-- **Verifier:** Cleo `allocationSaveFlow` / allocations queue tests; Tom on the live Compensation modal.
+- **Workflow:** Save a complete 100% Group + LOB allocation from Compensation or the work-queue modal. Save a Team from the same Compensation page.
+- **Expected:** Saving… ends after success or failure. Success confirms the persisted allocation or Team, shows a success message, updates the work queue or makes the Team available for allocation, and lets the user continue. Failure shows a useful error. The button never stays on Saving… indefinitely.
+- **Verifier:** Cleo `allocationSaveFlow` / `teamSaveFlow` / allocations queue tests; Tom on the live Compensation modal and Team form.
 - **Gate:** BUILT + QA PASSED.
 
 ### Request timeout / no automatic mutation retry

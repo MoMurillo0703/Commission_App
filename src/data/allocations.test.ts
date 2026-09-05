@@ -8,7 +8,7 @@ import { createCommission, getCommission } from "./commissions";
 import { createGroup } from "./groups";
 import { createLineOfBusiness } from "./linesOfBusiness";
 import { listPayoutsForCommission } from "./payouts";
-import { createTeam, replaceTeamMembers } from "./teams";
+import { createTeam, listTeams, replaceTeamMembers } from "./teams";
 import { createTestDb } from "@/db/test-db";
 import { ValidationError } from "@/lib/errors";
 
@@ -130,6 +130,8 @@ describe("compensation allocations", () => {
         { personKind: "agent", personId: nancy.id, shareBps: 5000, effectiveStart: "2026-01" },
       ],
     });
+    const listed = await listTeams(db);
+    expect(listed.some((row) => row.id === team.id && row.status === "active")).toBe(true);
     await createAllocation(db, {
       groupId: group.id,
       lineOfBusinessId: medical.id,

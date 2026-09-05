@@ -16,6 +16,7 @@ import {
 import { allocationProgressLabel, allocationTotals } from "@/domain/allocations";
 import { closeQueue, queueBannerLabel, skipQueueIndex } from "@/domain/compensationQueue";
 import { allocationSavedMessage, runAllocationSaveFlow } from "@/domain/allocationSaveFlow";
+import { runTeamSaveFlow, teamSavedMessage } from "@/domain/teamSaveFlow";
 import { linesForGroupSelection, type GroupLineEvidence } from "@/domain/activeGroupLines";
 import { formatStatementMonth } from "@/domain/dates";
 import { bpsToPercentString, parsePercentToBps } from "@/domain/money";
@@ -73,7 +74,7 @@ export function CompensationWorkspace({
     }
   }));
 
-  async function refresh() {
+  async function refresh(failureMessage = "Allocation saved, but the page could not refresh. Reload Compensation to continue.") {
     const [allocationsResponse, teamsResponse, queueResponse] = await Promise.all([
       fetchWithDeadline("/api/allocations"),
       fetchWithDeadline("/api/teams"),
@@ -83,12 +84,12 @@ export function CompensationWorkspace({
     const nextTeams = await readApiJson<TeamView[]>(teamsResponse);
     const nextQueue = await readApiJson<CompensationQueueItem[]>(queueResponse);
     if (!allocationsResponse.ok || !teamsResponse.ok || !queueResponse.ok) {
-      throw new Error("Allocation saved, but the page could not refresh. Reload Compensation to continue.");
+      throw new Error(failureMessage);
     }
     setAllocations(nextAllocations);
     setTeams(nextTeams);
     setQueue(nextQueue);
-    return { allocations: nextAllocations, queue: nextQueue };
+    return { allocations: nextAllocations, queue: nextQueue, teams: nextTeams };
   }
 
   function resetDraft() {
@@ -229,32 +230,44 @@ export function CompensationWorkspace({
 
   async function saveTeam(event: FormEvent) {
     event.preventDefault();
-    setBusy(true);
     setError("");
+    setSuccess("");
     const start = draft.effectiveStart || new Date().toISOString().slice(0, 7);
-    const response = await fetch("/api/teams", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: teamName,
-        status: "active",
-        members: teamMembers.map((member) => ({
-          personKind: member.personKind,
-          personId: Number(member.personId),
-          compensationPercent: member.percent,
-          effectiveStart: start,
-        })),
-      }),
-    });
-    const body = await response.json();
-    setBusy(false);
-    if (!response.ok) {
-      setError(body.message ?? "Unable to save team.");
-      return;
+    try {
+      await runBusyAction(setBusy, async () => {
+        const result = await runTeamSaveFlow({
+          request: async () => {
+            const response = await fetchWithDeadline("/api/teams", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                name: teamName,
+                status: "active",
+                members: teamMembers.map((member) => ({
+                  personKind: member.personKind,
+                  personId: Number(member.personId),
+                  compensationPercent: member.percent,
+                  effectiveStart: start,
+                })),
+              }),
+            });
+            const body = await readApiJson<{ message?: string }>(response);
+            return { ok: response.ok, message: httpFailureMessage(response.status, body.message) };
+          },
+          refresh: async () => refresh("Team saved, but the page could not refresh. Reload Compensation to continue."),
+          savedName: teamName,
+        });
+        if (result.error) {
+          setError(result.error);
+          return;
+        }
+        setSuccess(result.success ?? teamSavedMessage());
+        setTeamName("");
+        setTeamMembers([{ personKind: "agent", personId: "", percent: "" }]);
+      });
+    } catch (error) {
+      setError(requestFailureMessage(error, "Unable to save team."));
     }
-    await refresh();
-    setTeamName("");
-    setTeamMembers([{ personKind: "agent", personId: "", percent: "" }]);
   }
 
   const visible = allocations.filter((row) => {
@@ -425,6 +438,8 @@ export function CompensationWorkspace({
               <input value={member.percent} onChange={(event) => setTeamMembers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, percent: event.target.value } : item))} placeholder="50" />
             </label>
           ))}
+          {error && <p className="form-error">{error}</p>}
+          {success && <p className="form-success">{success}</p>}
           <div className="form-actions">
             <button type="button" className="secondary" onClick={() => setTeamMembers((current) => [...current, { personKind: "agent", personId: "", percent: "" }])}>Add member</button>
             <button disabled={busy}>{busy ? "Saving…" : "Save team"}</button>

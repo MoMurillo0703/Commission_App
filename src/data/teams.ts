@@ -106,7 +106,32 @@ export async function listTeams(db?: AppDatabase): Promise<TeamView[]> {
 }
 
 export async function getTeam(db: AppDatabase | undefined, id: number) {
-  return (await listTeams(db)).find((team) => team.id === id) ?? null;
+  const database = await resolveDb(db);
+  const [team] = await database.select().from(teams).where(eq(teams.id, id));
+  if (!team) return null;
+  const membershipRows = await database
+    .select()
+    .from(teamMemberships)
+    .where(eq(teamMemberships.teamId, id))
+    .orderBy(desc(teamMemberships.effectiveStart), teamMemberships.id);
+  return {
+    id: team.id,
+    name: team.name,
+    status: asStatus(team.status),
+    createdAt: team.createdAt,
+    updatedAt: team.updatedAt,
+    members: await Promise.all(membershipRows.map(async (member) => ({
+      id: member.id,
+      teamId: member.teamId,
+      personKind: member.personKind as PersonKind,
+      personId: member.personId,
+      personName: await personName(database, member.personKind as PersonKind, member.personId),
+      shareBps: member.shareBps,
+      effectiveStart: member.effectiveStart,
+      effectiveEnd: member.effectiveEnd,
+      status: asStatus(member.status),
+    }))),
+  };
 }
 
 export function currentTeamMembers(team: TeamView, paidMonth: string) {
