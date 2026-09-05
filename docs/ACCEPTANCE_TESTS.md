@@ -79,6 +79,21 @@ Deployed ≠ Done.
 - **Workflow:** Save a complete 100% Group + LOB allocation from Compensation or the work-queue modal. Save a Team from the same Compensation page.
 - **Expected:** Saving… ends after success or failure. Success confirms the persisted allocation or Team, shows a success message, updates the work queue or makes the Team available for allocation, and lets the user continue. Failure shows a useful error. The button never stays on Saving… indefinitely.
 - **Verifier:** Cleo `allocationSaveFlow` / `teamSaveFlow` / allocations queue tests; Tom on the live Compensation modal and Team form.
+- **Queue advance:** Save & Next on item 1 loads item 2’s Group, LOB, counter, and draft. The counter advances (example: 1 of 44 → 2 of 44). “Allocation saved” is not shown against the next item’s empty 0% draft. Skip does not create compensation. Close does not mutate unsaved data.
+- **Gate:** BUILT + QA PASSED.
+
+### CaliforniaChoice continuation rows (QA-003)
+
+- **Workflow:** Upload a genuine CaliforniaChoice statement whose continuation rows omit Group Number and Company Name (Group row → Medical → Chiro → Vision; Group row → Dental rows → Medical → Vision).
+- **Expected:** Continuation rows stay on the current Group. Product/LOB is not treated as a Group. Medical, Dental, Vision, and Chiro never appear under Groups need review. Paid month, premium, carrier rate, commission amount, and negatives are preserved. A known Group Number resolves; an unknown number goes to review; an explicit match is remembered on the existing Group Number field when that is safe.
+- **Verifier:** Cleo `californiaChoice` / `groupMatch` / `importGroups` tests; Tom on the genuine August 2026 statement.
+- **Gate:** BUILT + QA PASSED.
+
+### Group-first Compensation home (UX-003)
+
+- **Workflow:** Open Compensation. Search a Group. Select it. Open Change Allocation. Also open Edit Allocation from People → Compensation / Splits.
+- **Expected:** The home page lists Groups compactly, not the whole book’s allocation history. Group detail shows current LOB allocations, with history available there. Work queue remains a separate missing-setup tool. Both navigation paths edit the same canonical Group + LOB allocation.
+- **Verifier:** Cleo `compensationHome` / `personCompensation` tests; Tom Compensation home and People splits.
 - **Gate:** BUILT + QA PASSED.
 
 ### Request timeout / no automatic mutation retry

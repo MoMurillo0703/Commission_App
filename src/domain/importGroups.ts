@@ -1,7 +1,8 @@
+import { isCoverageLabel } from "./coverageLabels";
 import { displayGroupText, unmatchedGroupIdentity, type GroupCandidate } from "./groupMatch";
 import type { ValidatedImportRow } from "./importRows";
 
-export type GroupImportAction = "create" | "match";
+export type GroupImportAction = "create" | "match" | "ignore";
 
 export type UnmatchedImportGroup = {
   key: string;
@@ -24,6 +25,7 @@ export function collectUnmatchedImportGroups(rows: Array<Pick<ValidatedImportRow
     const sourceNumber = displayGroupText(row.importedGroupNumber);
     const key = unmatchedGroupIdentity(sourceName, sourceNumber);
     if (key === "missing") continue;
+    if (isCoverageLabel(sourceName) && !sourceNumber) continue;
     const existing = byKey.get(key);
     if (existing) {
       existing.rowCount += 1;

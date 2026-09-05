@@ -393,7 +393,7 @@ export function StatementPosting({
         <ResolveTable
           id="resolve-groups"
           title={`${unmatchedGroups.length} Group${unmatchedGroups.length === 1 ? "" : "s"} need review`}
-          help="These names are not on file. They stay as Create New Group unless you match one to an existing group. Nothing is created until you confirm. Creating a group does not create compensation or assignments."
+          help="These names are not on file. Match an existing group, create a new group, or ignore. Ignore skips posting those rows and does not create a group. Parser errors such as Medical, Dental, Vision, or Chiro should not appear here. Creating a group does not create compensation or assignments."
           rows={unmatchedGroups.map((group) => ({
             key: group.key,
             label: group.sourceName || group.sourceNumber || group.key,
@@ -404,9 +404,10 @@ export function StatementPosting({
           options={groups.map((option) => ({ id: option.id, label: `${option.name}${option.groupNumber ? ` · ${option.groupNumber}` : ""}` }))}
           createLabel="Create new group"
           matchLabel="Match existing group"
+          ignoreLabel="Ignore"
           confirmLabel="Confirm group decisions"
           busy={busy}
-          onDecision={(key, action, existingId) => setGroupDecision(key, { action: action as "create" | "match", existingGroupId: existingId ?? null })}
+          onDecision={(key, action, existingId) => setGroupDecision(key, { action: action as "create" | "match" | "ignore", existingGroupId: existingId ?? null })}
           onConfirm={() => confirm("groups", Object.values(groupDecisions))}
         />
       )}
@@ -427,7 +428,10 @@ export function StatementPosting({
           matchLabel="Match existing line of business"
           confirmLabel="Confirm line of business decisions"
           busy={busy}
-          onDecision={(key, action, existingId) => setNamedDecision(setLineDecisions, key, { action, existingId: existingId ?? null })}
+          onDecision={(key, action, existingId) => {
+            if (action === "ignore") return;
+            setNamedDecision(setLineDecisions, key, { action, existingId: existingId ?? null });
+          }}
           onConfirm={() => confirm("lines", Object.values(lineDecisions))}
         />
       )}
@@ -448,7 +452,10 @@ export function StatementPosting({
           matchLabel="Match existing agent"
           confirmLabel="Confirm agent decisions"
           busy={busy}
-          onDecision={(key, action, existingId) => setNamedDecision(setAgentDecisions, key, { action, existingId: existingId ?? null })}
+          onDecision={(key, action, existingId) => {
+            if (action === "ignore") return;
+            setNamedDecision(setAgentDecisions, key, { action, existingId: existingId ?? null });
+          }}
           onConfirm={() => confirm("agents", Object.values(agentDecisions))}
         />
       )}
@@ -665,6 +672,7 @@ function ResolveTable({
   options,
   createLabel,
   matchLabel,
+  ignoreLabel,
   confirmLabel,
   busy,
   onDecision,
@@ -673,13 +681,14 @@ function ResolveTable({
   id: string;
   title: string;
   help: string;
-  rows: Array<{ key: string; label: string; detail: string | null; rowCount: number; decision: { action: "create" | "match" } }>;
+  rows: Array<{ key: string; label: string; detail: string | null; rowCount: number; decision: { action: "create" | "match" | "ignore" } }>;
   options: Array<{ id: number; label: string }>;
   createLabel: string;
   matchLabel: string;
+  ignoreLabel?: string;
   confirmLabel: string;
   busy: boolean;
-  onDecision: (key: string, action: "create" | "match", existingId?: number | null) => void;
+  onDecision: (key: string, action: "create" | "match" | "ignore", existingId?: number | null) => void;
   onConfirm: () => void;
 }) {
   return (
@@ -709,10 +718,11 @@ function ResolveTable({
                     <select
                       aria-label={`Decision for ${row.label}`}
                       value={decision.action}
-                      onChange={(event) => onDecision(row.key, event.target.value as "create" | "match", null)}
+                      onChange={(event) => onDecision(row.key, event.target.value as "create" | "match" | "ignore", null)}
                     >
                       <option value="create">{createLabel}</option>
                       <option value="match">{matchLabel}</option>
+                      {ignoreLabel && <option value="ignore">{ignoreLabel}</option>}
                     </select>
                     {decision.action === "match" && (
                       <select

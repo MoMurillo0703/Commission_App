@@ -154,7 +154,7 @@ export const importMappingSchema = z.object({
 
 export const importGroupDecisionSchema = z.object({
   key: z.string().min(1),
-  action: z.enum(["create", "match"]),
+  action: z.enum(["create", "match", "ignore"]),
   existingGroupId: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
 });
 

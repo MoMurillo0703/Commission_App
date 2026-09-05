@@ -48,6 +48,7 @@ export type PdfPreviewMeta = {
   layoutName?: string | null;
   extractionPath?: string | null;
   layoutConfirmed?: boolean;
+  groupMatchStrategy?: "carrier_group_number";
   confirmedLayout?: PdfConfirmedLayout;
 };
 

@@ -20,6 +20,9 @@ End-to-end payable commission workflow:
 8. Fix KD-001 if the statement-review path is touched.
 9. Compensation allocation and Team save must clear Saving… on success or failure (QA-001).
 10. Person-first Compensation / Splits view from People, editing the complete Group + LOB allocation (UX-002).
+11. Compensation work queue Save & Next must advance without stale success/draft state (QA-001).
+12. CaliforniaChoice continuation rows must stay on the current Group; LOB names are not Groups (QA-003).
+13. Compensation home is Group-first; work queue remains a separate operational tool (UX-003).
 
 ## Not authorized
 

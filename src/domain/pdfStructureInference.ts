@@ -1,3 +1,5 @@
+import { interpretCaliforniaChoiceStatement } from "./californiaChoice";
+import { isCoverageLabel } from "./coverageLabels";
 import { parseFlexibleMonth } from "./dates";
 import { detectGroupHeaders, matchImportedGroup, type GroupCandidate } from "./groupMatch";
 import {
@@ -11,7 +13,7 @@ import {
 import { suggestColumnMapping, type ColumnMapping } from "./columnMapping";
 import { previewFromSheets, type PreviewRow, type PreviewSheet, type StatementPreview } from "./workbook";
 
-const coverageWord = /^(medical|dental|vision|life|disability|pharmacy|rx|stop[\s-]?loss|vol(\.|untary)?|acc(ident)?|std|ltd|vis|med|den|chiropractic)$/i;
+const coverageWord = /^(medical|dental|vision|life|disability|pharmacy|rx|stop[\s-]?loss|vol(\.|untary)?|acc(ident)?|std|ltd|vis|med|den|chiro|chiropractic)$/i;
 const commissionHeader = /^(fee|commission|comm\.?|earned|comm(ission)?\s*amount|comm amt)$/i;
 const premiumHeader = /^(paid|premium|billed|volume)$/i;
 const groupNameHeader = /^(member|group(\s*name)?|company(\s*name)?|client|employer|account|subscriber|customer|name)$/i;
@@ -132,14 +134,14 @@ function assignRowValues(headers: string[], cells: string[], mapping: ColumnMapp
   }
   if (mapping.lineOfBusiness) {
     const current = values[mapping.lineOfBusiness] ?? "";
-    const coverage = take((cell) => coverageWord.test(cell) || (/^[A-Za-z]{2,16}$/.test(cell) && !isMonthValue(cell) && !isMoney(cell)));
+    const coverage = take((cell) => isCoverageLabel(cell) || coverageWord.test(cell) || (/^[A-Za-z]{2,16}$/.test(cell) && !isMonthValue(cell) && !isMoney(cell)));
     if (coverage && (!current || isMoney(current) || isMonthValue(current))) {
       values[mapping.lineOfBusiness] = coverage;
     }
   }
   if (mapping.groupName) {
     const current = values[mapping.groupName] ?? "";
-    const misplaced = !current || isMonthValue(current) || isMoney(current) || coverageWord.test(current);
+    const misplaced = !current || isMonthValue(current) || isMoney(current) || isCoverageLabel(current) || coverageWord.test(current);
     if (misplaced) {
       const leftover = unused.filter((cell) => cell && !isMoney(cell) && !isMonthValue(cell) && cell !== values[mapping.lineOfBusiness ?? ""]);
       values[mapping.groupName] = leftover.join(" ");
@@ -356,6 +358,8 @@ export function interpretExtractedPdfPages(
   pages: ExtractedPdfPage[],
   groups: GroupCandidate[] = [],
 ) {
+  const californiaChoice = interpretCaliforniaChoiceStatement(pages, groups);
+  if (californiaChoice) return californiaChoice;
   const firstPass = candidateRowsFromPdfPages(pages, groups);
   const inferred = inferPdfStatementStructure(pages, groups);
   if (

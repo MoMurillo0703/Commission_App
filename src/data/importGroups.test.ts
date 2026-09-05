@@ -260,4 +260,53 @@ describe("statement import group onboarding", () => {
     expect(commissions.every((row) => row.agentCompensationCents === 0)).toBe(true);
     expect(commissions.every((row) => (row.notes ?? "").includes("Source group: EXAMPLE"))).toBe(true);
   });
+
+  it("ignores a group without creating it or posting those rows", async () => {
+    const { db } = await seed();
+    const statement = await savedStatement(db, [
+      ["Skip Me", "Z9", "Principal", "Dental", "Alex Morgan", "1000.00", "80.00", "", "2026-07"],
+    ]);
+    const review = await reviewImportGroups(db, statement.id, mapping);
+    const confirmed = await confirmImportGroups(db, statement.id, mapping, [
+      { key: review.unmatchedGroups[0]!.key, action: "ignore" },
+    ]);
+    expect(confirmed.createdCount).toBe(0);
+    expect(confirmed.remainingUnmatchedCount).toBe(0);
+    expect((await listGroups(db)).map((group) => group.name)).toEqual(["Acme Benefits"]);
+    const preview = await previewImportPosting(db, statement.id, mapping);
+    expect(preview.rows[0]?.status).toBe("blocked");
+    expect(preview.rows[0]?.exceptions.join(" ")).toMatch(/ignored/i);
+    await expect(postImportStatement(db, statement.id, mapping)).rejects.toThrow(/blocked/);
+    expect((await listCommissions(db))).toHaveLength(0);
+  });
+
+  it("learns a safe Group Number on explicit match so a later statement can resolve it", async () => {
+    const { db } = await seed();
+    const chimay = await createGroup(db, { name: "Chimay Enterprise" });
+    const first = await savedStatement(db, [
+      ["CHIMAY ENTERPRISE LLC", "83746", "Principal", "Medical", "Alex Morgan", "1000.00", "80.00", "", "2026-08"],
+    ]);
+    const review = await reviewImportGroups(db, first.id, mapping);
+    await confirmImportGroups(db, first.id, mapping, [
+      { key: review.unmatchedGroups[0]!.key, action: "match", existingGroupId: chimay.id },
+    ]);
+    expect((await listGroups(db)).find((group) => group.id === chimay.id)?.groupNumber).toBe("83746");
+
+    const california = await createCarrier(db, { name: "CaliforniaChoice" });
+    const buffer = await workbook([
+      ["CHIMAY ENTERPRISE LLC", "83746", "CaliforniaChoice", "Vision", "Alex Morgan", "50.00", "6.00", "", "2026-09"],
+    ]);
+    const later = await createImportStatement(db, {
+      originalFilename: "californiachoice.xlsx",
+      paidMonth: "2026-09",
+      carrierId: california.id,
+      sourceType: "excel",
+      status: "ready_to_map",
+      fingerprint: fingerprintBuffer(buffer),
+      preview: await previewWorkbook(buffer, await listGroups(db)),
+    });
+    const laterReview = await reviewImportGroups(db, later.id, mapping);
+    expect(laterReview.unmatchedGroups).toHaveLength(0);
+    expect(laterReview.rows[0]?.groupId).toBe(chimay.id);
+  });
 });

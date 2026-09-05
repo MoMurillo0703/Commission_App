@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyGroupResolutions, detectGroupHeaders, findNormalizedGroup, matchImportedGroup } from "./groupMatch";
+import { applyGroupResolutions, detectGroupHeaders, findNormalizedGroup, matchCarrierGroupNumberFirst, matchImportedGroup } from "./groupMatch";
 
 const groups = [
   { id: 1, name: "Acme Benefits", groupNumber: "A1" },
@@ -48,6 +48,30 @@ describe("imported group matching", () => {
     expect(matchImportedGroup(candidates, null, "B1").status).toBe("ambiguous");
     expect(matchImportedGroup(candidates, "Acme", "B1").status).toBe("ambiguous");
     expect(matchImportedGroup(candidates, "Acme", "A2")).toMatchObject({ status: "matched", groupId: 2 });
+  });
+
+  it("matches CaliforniaChoice by unique Group Number without silently merging ambiguous names", () => {
+    expect(matchCarrierGroupNumberFirst(groups, "CHIMAY ENTERPRISE LLC", "A1")).toMatchObject({
+      status: "matched",
+      groupId: 1,
+      groupName: "Acme Benefits",
+    });
+    expect(matchCarrierGroupNumberFirst([
+      { id: 1, name: "Acme", groupNumber: "83746" },
+      { id: 2, name: "Other", groupNumber: "83746" },
+    ], "CHIMAY ENTERPRISE LLC", "83746").status).toBe("ambiguous");
+    expect(matchCarrierGroupNumberFirst(groups, "Unknown Shop", "99999").status).toBe("new_group");
+  });
+
+  it("applies an ignore decision without creating or matching a group", () => {
+    const unmatched = matchImportedGroup(groups, "Skip Me", "Z9");
+    expect(applyGroupResolutions(unmatched, [{
+      key: "name:skip me|number:z9",
+      groupId: null,
+      sourceName: "Skip Me",
+      sourceNumber: "Z9",
+      action: "ignore",
+    }], groups).status).toBe("ignored");
   });
 
   it("detects group and premium-month columns without treating premium month as the paid month", () => {

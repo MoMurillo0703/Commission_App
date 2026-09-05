@@ -9,7 +9,7 @@ import {
 } from "./allocations";
 import { mappingValue, type ColumnMapping } from "./columnMapping";
 import { calculateAgentCompensationCents } from "./compensation";
-import { applyGroupResolutions, matchImportedGroup, type GroupCandidate, type GroupImportResolution } from "./groupMatch";
+import { applyGroupResolutions, matchCarrierGroupNumberFirst, matchImportedGroup, type GroupCandidate, type GroupImportResolution } from "./groupMatch";
 import { parseFlexibleMonth } from "./dates";
 import { parseDollarsToCents } from "./money";
 import { applyCarrierCoverageAlias, type CarrierCoverageAlias } from "./carrierCoverage";
@@ -63,6 +63,7 @@ export type ImportReferenceData = {
   lineResolutions?: NamedImportResolution[];
   agentResolutions?: NamedImportResolution[];
   carrierCoverageAliases?: CarrierCoverageAlias[];
+  preferCarrierGroupNumber?: boolean;
 };
 
 export function resolveImportedCarrier(
@@ -121,7 +122,9 @@ export function validateMappedRows(
       const groupSourceName = mappingValue(row.values, mapping.groupName);
       const groupSourceNumber = mappingValue(row.values, mapping.groupNumber);
       const group = applyGroupResolutions(
-        matchImportedGroup(references.groups, groupSourceName, groupSourceNumber),
+        references.preferCarrierGroupNumber
+          ? matchCarrierGroupNumberFirst(references.groups, groupSourceName, groupSourceNumber)
+          : matchImportedGroup(references.groups, groupSourceName, groupSourceNumber),
         references.groupResolutions,
         references.groups,
       );
@@ -149,6 +152,7 @@ export function validateMappedRows(
       if (!mapping.lineOfBusiness) exceptions.push("Map a line of business column.");
       if (!mapping.grossCommission) exceptions.push("Map a gross commission column.");
 
+      if (group.status === "ignored") exceptions.push("Group ignored. It will not be posted.");
       if (group.status === "missing") exceptions.push("Group is missing.");
       if (group.status === "new_group") {
         exceptions.push(`Unmatched group: ${group.sourceName || group.sourceNumber}. Confirm it as a new group or match an existing group.`);

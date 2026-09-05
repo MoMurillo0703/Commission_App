@@ -132,6 +132,11 @@ export function queueBannerLabel(items: Array<{ groupId: number }>) {
   return count === 1 ? "1 group needs compensation setup" : `${count} groups need compensation setup`;
 }
 
+export function queueSessionProgressLabel(position: number, total: number) {
+  if (total <= 0) return "0 of 0";
+  return `${Math.min(position + 1, total)} of ${total}`;
+}
+
 export function skipQueueIndex(index: number, length: number) {
   if (length === 0) return { index: 0, done: true };
   const next = index + 1;

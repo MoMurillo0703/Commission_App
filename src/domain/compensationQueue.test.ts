@@ -4,6 +4,7 @@ import {
   closeQueue,
   identifyCompensationQueue,
   queueBannerLabel,
+  queueSessionProgressLabel,
   skipQueueIndex,
 } from "./compensationQueue";
 
@@ -76,6 +77,8 @@ describe("compensation work queue", () => {
     expect(skipQueueIndex(1, items.length)).toEqual({ index: 1, done: true });
     expect(afterSaveQueue(items, 0, "1:10")).toEqual({ items: [items[1]], index: 0, done: false });
     expect(afterSaveQueue([items[1]!], 0, "2:10")).toEqual({ items: [], index: 0, done: true });
+    expect(queueSessionProgressLabel(0, 44)).toBe("1 of 44");
+    expect(queueSessionProgressLabel(1, 44)).toBe("2 of 44");
     expect(closeQueue()).toEqual({ open: false });
   });
 });

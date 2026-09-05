@@ -1,4 +1,4 @@
-export type GroupMatchStatus = "matched" | "new_group" | "missing" | "ambiguous";
+export type GroupMatchStatus = "matched" | "new_group" | "missing" | "ambiguous" | "ignored";
 
 export type GroupCandidate = {
   id: number;
@@ -110,11 +110,34 @@ export function findNormalizedGroup(
 
 export type GroupImportResolution = {
   key: string;
-  groupId: number;
+  groupId: number | null;
   sourceName: string | null;
   sourceNumber: string | null;
-  action?: "create" | "match";
+  action?: "create" | "match" | "ignore";
 };
+
+export function matchCarrierGroupNumberFirst(
+  groups: GroupCandidate[],
+  sourceName: string | null | undefined,
+  sourceNumber: string | null | undefined,
+): GroupMatch {
+  const name = displayGroupText(sourceName);
+  const number = displayGroupText(sourceNumber);
+  if (!name && !number) {
+    return { status: "missing", groupId: null, groupName: null, sourceName: name, sourceNumber: number };
+  }
+  const normalizedNumber = normalizeGroupText(number);
+  const numberMatches = normalizedNumber
+    ? groups.filter((group) => normalizeGroupText(group.groupNumber) === normalizedNumber)
+    : [];
+  if (numberMatches.length === 1) {
+    return { status: "matched", groupId: numberMatches[0]!.id, groupName: numberMatches[0]!.name, sourceName: name, sourceNumber: number };
+  }
+  if (numberMatches.length > 1) {
+    return { status: "ambiguous", groupId: null, groupName: null, sourceName: name, sourceNumber: number };
+  }
+  return matchImportedGroup(groups, sourceName, sourceNumber);
+}
 
 export function applyGroupResolutions(
   match: GroupMatch,
@@ -123,6 +146,15 @@ export function applyGroupResolutions(
 ): GroupMatch {
   const key = unmatchedGroupIdentity(match.sourceName, match.sourceNumber);
   const resolution = resolutions?.find((item) => item.key === key);
+  if (resolution?.action === "ignore") {
+    return {
+      status: "ignored",
+      groupId: null,
+      groupName: null,
+      sourceName: match.sourceName,
+      sourceNumber: match.sourceNumber,
+    };
+  }
   if (resolution) {
     const group = groups.find((item) => item.id === resolution.groupId);
     if (group) {

@@ -1,11 +1,11 @@
-import { createGroup, listGroups } from "./groups";
+import { createGroup, listGroups, updateGroup } from "./groups";
 import { listAgreements } from "./agreements";
 import { previewImportPosting } from "./importPosting";
 import { saveImportGroupResolutions } from "./statements";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import type { ColumnMapping } from "@/domain/columnMapping";
-import { findNormalizedGroup, type GroupImportResolution } from "@/domain/groupMatch";
+import { findNormalizedGroup, normalizeGroupText, type GroupImportResolution } from "@/domain/groupMatch";
 import { collectUnmatchedImportGroups, groupNumberConflict, proposedGroupName, type GroupImportDecision } from "@/domain/importGroups";
 import { ValidationError } from "@/lib/errors";
 
@@ -31,6 +31,7 @@ export async function confirmImportGroups(
 
   for (const proposed of review.unmatchedGroups) {
     const decision = decisionsByKey.get(proposed.key) ?? { key: proposed.key, action: "create" as const };
+    if (decision.action === "ignore") continue;
     if (decision.action === "match") {
       if (!groups.find((group) => group.id === decision.existingGroupId)) {
         throw new ValidationError(`Select an existing group for ${proposed.sourceName || proposed.sourceNumber}.`);
@@ -54,11 +55,36 @@ export async function confirmImportGroups(
     let currentGroups = await listGroups(tx);
     for (const proposed of review.unmatchedGroups) {
       const decision = decisionsByKey.get(proposed.key) ?? { key: proposed.key, action: "create" as const };
+      if (decision.action === "ignore") {
+        resolutions.set(proposed.key, {
+          key: proposed.key,
+          groupId: null,
+          sourceName: proposed.sourceName,
+          sourceNumber: proposed.sourceNumber,
+          action: "ignore",
+        });
+        continue;
+      }
       if (decision.action === "match") {
         const existing = currentGroups.find((group) => group.id === decision.existingGroupId);
         if (!existing) throw new ValidationError(`Select an existing group for ${proposed.sourceName || proposed.sourceNumber}.`);
         if (groupNumberConflict(existing, proposed.sourceNumber)) {
           conflicts.push(`${proposed.sourceName || proposed.sourceNumber} matched ${existing.name}, which already has a different group number. The existing group was not changed.`);
+        } else if (proposed.sourceNumber && !existing.groupNumber) {
+          const taken = currentGroups.some((group) => (
+            group.id !== existing.id && normalizeGroupText(group.groupNumber) === normalizeGroupText(proposed.sourceNumber)
+          ));
+          if (!taken) {
+            const updated = await updateGroup(tx, existing.id, {
+              name: existing.name,
+              groupNumber: proposed.sourceNumber,
+              notes: existing.notes,
+              accountManagerId: existing.accountManagerId,
+              primaryAgentId: existing.primaryAgentId,
+              defaultCompensationBps: existing.defaultCompensationBps,
+            });
+            currentGroups = currentGroups.map((group) => group.id === updated.id ? updated : group);
+          }
         }
         matchedIds.push(existing.id);
         resolutions.set(proposed.key, {

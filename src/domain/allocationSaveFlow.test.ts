@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { runBusyAction } from "@/lib/apiClient";
-import { allocationSaveErrorMessage, allocationSavedMessage, runAllocationSaveFlow } from "./allocationSaveFlow";
+import {
+  allocationSaveErrorMessage,
+  allocationSavedMessage,
+  allocationStillQueuedMessage,
+  nextQueueItemNotice,
+  runAllocationSaveFlow,
+} from "./allocationSaveFlow";
 
 describe("allocation save flow", () => {
   it("clears a failed save without treating it as success or changing the queue", async () => {
@@ -15,24 +21,57 @@ describe("allocation save flow", () => {
     expect(result.error).toMatch(/100 percent/);
     expect(result.success).toBeNull();
     expect(result.refreshed).toBe(false);
+    expect(result.loadNext).toBe(false);
     expect(allocationSaveErrorMessage({})).toMatch(/Unable to save allocation/);
   });
 
-  it("records success and updates the work queue after a persisted save", async () => {
+  it("advances from item 1 to item 2 without keeping the previous success on the next draft", async () => {
     const result = await runAllocationSaveFlow({
       request: async () => ({ ok: true }),
       refresh: async () => ({
-        queue: [{ key: "2:20" }],
+        queue: [{ key: "2:20", groupId: 2 }, { key: "3:30", groupId: 3 }],
       }),
       savedKey: "1:10",
       queueIndex: 0,
     });
     expect(result.error).toBeNull();
-    expect(result.success).toBe(allocationSavedMessage());
-    expect(result.refreshed).toBe(true);
-    expect(result.queue.map((item) => item.key)).toEqual(["2:20"]);
+    expect(result.success).toBeNull();
+    expect(result.notice).toBe(nextQueueItemNotice());
+    expect(result.queue.map((item) => item.key)).toEqual(["2:20", "3:30"]);
+    expect(result.queueIndex).toBe(0);
+    expect(result.loadNext).toBe(true);
     expect(result.queueDone).toBe(false);
-    expect(result.queueOpen).toBe(true);
+    expect(result.persistConfirmed).toBe(true);
+    expect(result.stillQueued).toBe(false);
+  });
+
+  it("does not advance when the saved pair is still in the refreshed queue", async () => {
+    const result = await runAllocationSaveFlow({
+      request: async () => ({ ok: true }),
+      refresh: async () => ({
+        queue: [{ key: "1:10" }, { key: "2:20" }],
+      }),
+      savedKey: "1:10",
+      queueIndex: 0,
+    });
+    expect(result.success).toBe(allocationStillQueuedMessage());
+    expect(result.loadNext).toBe(false);
+    expect(result.stillQueued).toBe(true);
+    expect(result.queueIndex).toBe(0);
+    expect(result.queue.map((item) => item.key)).toEqual(["1:10", "2:20"]);
+  });
+
+  it("closes the queue after the final remaining item is saved", async () => {
+    const result = await runAllocationSaveFlow({
+      request: async () => ({ ok: true }),
+      refresh: async () => ({ queue: [] }),
+      savedKey: "2:20",
+      queueIndex: 0,
+    });
+    expect(result.success).toBe(allocationSavedMessage());
+    expect(result.queueDone).toBe(true);
+    expect(result.queueOpen).toBe(false);
+    expect(result.loadNext).toBe(false);
   });
 
   it("clears Saving busy state after a successful or failed allocation save", async () => {

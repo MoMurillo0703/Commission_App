@@ -25,7 +25,7 @@ export default async function CompensationPage({
         <div>
           <p className="eyebrow">Compensation allocations</p>
           <h1>Compensation</h1>
-          <p>Manage complete 100% allocations by group and line of business. Agency, people, and teams are recipients. Historical posted snapshots stay unchanged.</p>
+          <p>Browse compensation by Group. Use the work queue for missing Group + LOB setup. Posted payout snapshots stay unchanged.</p>
         </div>
       </header>
       <CompensationWorkspace
