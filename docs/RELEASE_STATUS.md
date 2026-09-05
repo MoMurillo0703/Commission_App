@@ -7,10 +7,10 @@ Authoritative owner: **Alex**. Update this file when a release is deployed or ac
 | Field | Value |
 | --- | --- |
 | URL | https://commissionapp-iota.vercel.app |
-| SHA | `bb5701f316f3405a7322fee571004673169a463a` |
-| Migrations | **0001–0006** applied (none required for this release) |
+| SHA | `11a640c98d834ea3ec7f486191c59eff36c483ed` |
+| Migrations | **0001–0007** applied (`0007_carrier_group_identities.sql` applied this release) |
 | Release state | **Deployed** |
-| Product acceptance | Pending Mo smoke test |
+| Product acceptance | Pending Mo live retest |
 
 This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 
@@ -29,7 +29,7 @@ This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 - Auth allow-list
 - Reliability: global `postgres.js` client, pooler `prepare: false`, bounded lifetimes, DB liveness + one recycle, 45s client deadline, no automatic mutation retry; allocation and Team save clear Saving… on success or failure
 
-Carrier-specific learning is **partial** (layouts + `0006` coverage aliases). The full teach-once experience is not finished.
+Carrier-specific learning includes layouts, `0006` coverage aliases (label → LOB), and `0007` carrier Group identities (carrier + external Group Number → Group). The full teach-once experience is not finished.
 
 ## Production data caution
 

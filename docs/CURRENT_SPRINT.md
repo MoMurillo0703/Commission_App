@@ -4,7 +4,7 @@ Authoritative owner: **Alex**.
 
 ## Phase
 
-Commission App 1.0 Sprint 1 — **DEPLOYED**. Product Acceptance is pending Mo smoke test. This is not Done.
+Commission App 1.0 Sprint 1 — **DEPLOYED**. Product Acceptance is pending Mo live retest of the acceptance-correction build. This is not Done. Do not mark Product Accepted or Done until Mo completes that workflow.
 
 ## Authorized work
 
