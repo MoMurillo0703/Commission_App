@@ -18,6 +18,8 @@ End-to-end payable commission workflow:
 6. Generate a recipient commission statement for an Agent or Account Manager + paid month from posted payouts.
 7. Download that statement as a PDF.
 8. Fix KD-001 if the statement-review path is touched.
+9. Compensation save must clear Saving… on success or failure (QA-001).
+10. Person-first Compensation / Splits view from People, editing the complete Group + LOB allocation (UX-002).
 
 ## Not authorized
 

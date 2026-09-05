@@ -8,10 +8,14 @@ import { allocationInputSchema, emptyToNull } from "@/lib/validation";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const groupId = parseId(url.searchParams.get("groupId") ?? "");
-  const rows = await listAllocations();
-  return NextResponse.json(groupId ? rows.filter((row) => row.groupId === groupId) : rows);
+  try {
+    const url = new URL(request.url);
+    const groupId = parseId(url.searchParams.get("groupId") ?? "");
+    const rows = await listAllocations(await getDb());
+    return NextResponse.json(groupId ? rows.filter((row) => row.groupId === groupId) : rows);
+  } catch (error) {
+    return toErrorResponse(error);
+  }
 }
 
 export async function POST(request: Request) {

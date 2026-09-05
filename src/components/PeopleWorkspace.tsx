@@ -2,7 +2,11 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import type { AgreementView } from "@/data/agreements";
+import type { AllocationView } from "@/data/allocations";
+import type { TeamView } from "@/data/teams";
 import type { AccountManager, Agent, Group } from "@/db/schema";
+import { bpsToPercentString } from "@/domain/money";
+import { editAllocationHref, personCompensationPeriod, personCompensationRows } from "@/domain/personCompensation";
 import { buildPeopleDirectory, filterPeopleDirectory, personRoleLabel } from "@/domain/peopleDirectory";
 import { AccountManagersManager } from "./AccountManagersManager";
 import { AgentsManager } from "./AgentsManager";
@@ -12,11 +16,15 @@ export function PeopleWorkspace({
   accountManagers,
   groups,
   agreements,
+  allocations = [],
+  teams = [],
 }: {
   agents: Agent[];
   accountManagers: AccountManager[];
   groups: Group[];
   agreements: AgreementView[];
+  allocations?: AllocationView[];
+  teams?: TeamView[];
 }) {
   const [agentRows, setAgentRows] = useState(agents);
   const [managerRows, setManagerRows] = useState(accountManagers);
@@ -27,6 +35,7 @@ export function PeopleWorkspace({
   const [asManager, setAsManager] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   const directory = useMemo(() => {
     const agreementGroupNamesByAgentId = Object.fromEntries(
@@ -41,6 +50,22 @@ export function PeopleWorkspace({
       role,
     );
   }, [agentRows, agreements, groups, managerRows, query, role]);
+
+  const selectedPerson = directory.find((person) => person.key === selectedKey) ?? null;
+  const selectedKind = selectedPerson?.roles.includes("account_manager") && selectedPerson.accountManagerId
+    ? "account_manager" as const
+    : "agent" as const;
+  const selectedPersonId = selectedKind === "account_manager"
+    ? selectedPerson?.accountManagerId
+    : selectedPerson?.agentId;
+  const selectedSplits = selectedPerson && selectedPersonId
+    ? personCompensationRows({
+      allocations,
+      teams,
+      personKind: selectedKind,
+      personId: selectedPersonId,
+    })
+    : [];
 
   async function refresh() {
     const [nextAgents, nextManagers] = await Promise.all([
@@ -122,14 +147,58 @@ export function PeopleWorkspace({
             </thead>
             <tbody>
               {directory.map((person) => (
-                <tr key={person.key}>
-                  <td><strong>{person.name}</strong></td>
+                <tr key={person.key} className={person.key === selectedKey ? "selected-row" : undefined}>
+                  <td>
+                    <button type="button" className="linkish" onClick={() => setSelectedKey(person.key)}>
+                      <strong>{person.name}</strong>
+                    </button>
+                  </td>
                   <td>{personRoleLabel(person.roles)}</td>
                   <td>{person.groupNames.join(", ") || "—"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+        )}
+        {selectedPerson && (
+          <div className="related-block" id="person-compensation">
+            <strong>Compensation / splits · {selectedPerson.name}</strong>
+            <p>These are existing Group + line of business allocations. Edit opens the complete 100% plan. Changing one person still requires the allocation to total 100%.</p>
+            {selectedSplits.length === 0 ? (
+              <p className="empty">This person has no compensation allocation rows. Assignment to a group does not create pay.</p>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Group</th>
+                    <th>LOB</th>
+                    <th>Role</th>
+                    <th>Split</th>
+                    <th>Effective</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedSplits.map((row) => (
+                    <tr key={`${row.allocationId}-${row.recipientType}-${row.teamName ?? "direct"}`}>
+                      <td>{row.groupName}</td>
+                      <td>{row.lineOfBusinessName}</td>
+                      <td>{row.roleLabel}{row.teamName ? ` · ${row.teamName}` : ""}</td>
+                      <td>{bpsToPercentString(row.allocationBps)}%</td>
+                      <td>{personCompensationPeriod(row)}</td>
+                      <td>{row.status}</td>
+                      <td>
+                        <a className="secondary" href={editAllocationHref(row.allocationId)} style={{ display: "inline-block", textDecoration: "none" }}>
+                          Edit Allocation
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         )}
       </section>
       <div className="grid recent">

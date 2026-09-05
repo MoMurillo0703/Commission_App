@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createAccountManager } from "./accountManagers";
 import { createAgent } from "./agents";
 import { createAllocation, listAllocations } from "./allocations";
+import { listCompensationQueue } from "./compensationQueue";
 import { createCarrier } from "./carriers";
 import { createCommission, getCommission } from "./commissions";
 import { createGroup } from "./groups";
@@ -157,5 +158,29 @@ describe("compensation allocations", () => {
     const historical = await listPayoutsForCommission(db, posted.id);
     expect(historical.find((row) => row.personName === "Laura Montoya")?.compensationCents).toBe(1000);
     expect(historical.find((row) => row.personName === "Nancy")?.compensationCents).toBe(1000);
+  });
+
+  it("removes a saved complete allocation from the compensation work queue", async () => {
+    const { db, john, group, carrier, medical } = await seed();
+    await createCommission(db, {
+      statementMonth: "2026-09",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: medical.id,
+      grossCommissionCents: 10000,
+    });
+    const before = await listCompensationQueue(db);
+    expect(before.some((item) => item.groupId === group.id && item.lineOfBusinessId === medical.id)).toBe(true);
+    await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: medical.id,
+      effectiveStart: "2026-09",
+      entries: [
+        { recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 7000 },
+        { recipientType: "agency", compensationBps: 3000 },
+      ],
+    });
+    const after = await listCompensationQueue(db);
+    expect(after.some((item) => item.groupId === group.id && item.lineOfBusinessId === medical.id)).toBe(false);
   });
 });

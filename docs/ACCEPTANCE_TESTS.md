@@ -74,6 +74,13 @@ Deployed ≠ Done.
 - **Verifier:** Cleo `apiClient` hung-fetch test; Tom if a live timeout is reproduced.
 - **Gate:** BUILT.
 
+### Compensation allocation save busy-state (QA-001)
+
+- **Workflow:** Save a complete 100% Group + LOB allocation from Compensation or the work-queue modal.
+- **Expected:** Saving… ends after success or failure. Success confirms the persisted allocation, shows a success message, and updates the work queue. Failure shows a useful error. The button never stays on Saving… indefinitely.
+- **Verifier:** Cleo `allocationSaveFlow` / allocations queue tests; Tom on the live Compensation modal.
+- **Gate:** BUILT + QA PASSED.
+
 ### Request timeout / no automatic mutation retry
 
 - **Workflow:** Hung inspect, preview, confirm, or post.
@@ -105,9 +112,16 @@ Deployed ≠ Done.
 ### Missing allocation is not payable-ready
 
 - **Workflow:** Post a commission for a Group where the recipient is assigned, but no complete allocation exists.
-- **Expected:** The recipient statement is not labeled payable-ready. The app does not invent producer compensation.
+- **Expected:** The recipient statement is not labeled payable-ready. The app does not invent producer compensation. Missing payout snapshots are explained; they are not shown as a $0 payroll statement. A $0 total is shown only when stored payouts actually net to $0.
 - **Verifier:** Cleo automated; Tom QA.
 - **Gate:** BUILT.
+
+### Person compensation / splits (UX-002)
+
+- **Workflow:** Find an Agent or Account Manager on People. Open Compensation / splits. Choose Edit Allocation.
+- **Expected:** The person sees Group, LOB, role, allocated %, effective dates, and status from existing allocations. Edit opens the complete Group + LOB allocation. Changing one person still requires the plan to total 10,000 bps. Posted payout snapshots are not rewritten.
+- **Verifier:** Cleo `personCompensation` / `allocationEditor` tests; Tom People → Compensation.
+- **Gate:** BUILT + QA PASSED.
 
 ### Group assignment during statement review
 

@@ -254,5 +254,112 @@ describe("posted commission reports", () => {
     expect(report.payable?.payableReady).toBe(false);
     expect(report.payable?.message).toMatch(/no complete allocation/);
     expect(report.rows).toHaveLength(0);
+    expect(report.matchingCommissionCount).toBe(1);
+    expect(report.names.personName).toBe("John Elizando");
+  });
+
+  it("uses stored Agent and Account Manager payout identities and names", async () => {
+    const { db, john, laura } = await seed();
+    const agent = await buildIndividualReport(db, {
+      kind: "recipient",
+      paidMonth: "2026-09",
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(agent.names.personName).toBe("John Elizando");
+    expect(agent.rows[0]?.recipientName).toBe("John Elizando");
+    expect(agent.rows.every((row) => row.personKind === "agent" && row.personId === john.id)).toBe(true);
+
+    const manager = await buildIndividualReport(db, {
+      kind: "recipient",
+      paidMonth: "2026-09",
+      personKind: "account_manager",
+      personId: laura.id,
+    });
+    expect(manager.names.personName).toBe("Laura Montoya");
+    expect(manager.rows[0]?.recipientName).toBe("Laura Montoya");
+    expect(manager.rows.every((row) => row.personKind === "account_manager")).toBe(true);
+  });
+
+  it("adds direct and team-member payouts for the same person and excludes the team parent", async () => {
+    const db = await createTestDb();
+    const john = await createAgent(db, { name: "John Elizando" });
+    const nancy = await createAgent(db, { name: "Nancy" });
+    const group = await createGroup(db, { name: "Split Group", primaryAgentId: john.id });
+    const carrier = await createCarrier(db, { name: "Principal" });
+    const dental = await createLineOfBusiness(db, { name: "Dental" });
+    const team = await createTeam(db, {
+      name: "Valley",
+      members: [
+        { personKind: "agent", personId: john.id, shareBps: 5000, effectiveStart: "2026-01" },
+        { personKind: "agent", personId: nancy.id, shareBps: 5000, effectiveStart: "2026-01" },
+      ],
+    });
+    await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: dental.id,
+      effectiveStart: "2026-08",
+      entries: [
+        { recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 5000 },
+        { recipientType: "team", teamId: team.id, compensationBps: 2000 },
+        { recipientType: "agency", compensationBps: 3000 },
+      ],
+    });
+    await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: dental.id,
+      grossCommissionCents: 10000,
+    });
+    const report = await buildIndividualReport(db, {
+      kind: "recipient",
+      paidMonth: "2026-08",
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(report.totals.compensationCents).toBe(6000);
+    expect(report.rows).toHaveLength(2);
+    expect(report.rows.map((row) => row.compensationCents).sort((left, right) => left - right)).toEqual([1000, 5000]);
+    expect(report.totals.grossCommissionCents).toBe(10000);
+  });
+
+  it("includes negative payouts and treats a net-zero snapshot as legitimate zero", async () => {
+    const db = await createTestDb();
+    const john = await createAgent(db, { name: "John Elizando" });
+    const group = await createGroup(db, { name: "Chargeback Group", primaryAgentId: john.id });
+    const carrier = await createCarrier(db, { name: "Principal" });
+    const dental = await createLineOfBusiness(db, { name: "Dental" });
+    await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: dental.id,
+      effectiveStart: "2026-08",
+      entries: [
+        { recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 },
+      ],
+    });
+    await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: dental.id,
+      grossCommissionCents: 5000,
+    });
+    await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: dental.id,
+      grossCommissionCents: -5000,
+    });
+    const report = await buildIndividualReport(db, {
+      kind: "recipient",
+      paidMonth: "2026-08",
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(report.rows).toHaveLength(2);
+    expect(report.totals.compensationCents).toBe(0);
+    expect(report.rows.some((row) => row.compensationCents < 0)).toBe(true);
   });
 });

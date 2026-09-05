@@ -43,3 +43,5 @@ A recipient commission statement is generated from posted payouts for a person a
 ## Groups and People (planned UX)
 
 Do not dump the entire book into one People table row. Dedicated add, search, and filters are planned; they are not required to document current screens as broken if they are merely sparse.
+
+People can open a person’s existing Group + LOB compensation relationships and edit the complete allocation. That view must not become a second compensation system or a dump of unrelated Groups.

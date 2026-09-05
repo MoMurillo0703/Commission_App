@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { AllocationRecipientEditor } from "@/components/AllocationRecipientEditor";
 import type { AllocationView } from "@/data/allocations";
 import type { CompensationQueueItem } from "@/domain/compensationQueue";
@@ -14,15 +14,12 @@ import {
   personRoleLabel,
 } from "@/domain/allocationEditor";
 import { allocationProgressLabel, allocationTotals } from "@/domain/allocations";
-import {
-  afterSaveQueue,
-  closeQueue,
-  queueBannerLabel,
-  skipQueueIndex,
-} from "@/domain/compensationQueue";
+import { closeQueue, queueBannerLabel, skipQueueIndex } from "@/domain/compensationQueue";
+import { allocationSavedMessage, runAllocationSaveFlow } from "@/domain/allocationSaveFlow";
 import { linesForGroupSelection, type GroupLineEvidence } from "@/domain/activeGroupLines";
 import { formatStatementMonth } from "@/domain/dates";
 import { bpsToPercentString, parsePercentToBps } from "@/domain/money";
+import { fetchWithDeadline, httpFailureMessage, readApiJson, requestFailureMessage, runBusyAction } from "@/lib/apiClient";
 
 export function CompensationWorkspace({
   groups,
@@ -33,6 +30,7 @@ export function CompensationWorkspace({
   initialTeams,
   initialQueue = [],
   groupLineEvidence = [],
+  focusAllocationId = null,
 }: {
   groups: Group[];
   agents: Agent[];
@@ -42,11 +40,13 @@ export function CompensationWorkspace({
   initialTeams: TeamView[];
   initialQueue?: CompensationQueueItem[];
   groupLineEvidence?: GroupLineEvidence[];
+  focusAllocationId?: number | null;
 }) {
   const [allocations, setAllocations] = useState(initialAllocations);
   const [teams, setTeams] = useState(initialTeams);
   const [draft, setDraft] = useState(defaultAllocationDraft());
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [teamName, setTeamName] = useState("");
@@ -74,15 +74,21 @@ export function CompensationWorkspace({
   }));
 
   async function refresh() {
-    const [nextAllocations, nextTeams, nextQueue] = await Promise.all([
-      fetch("/api/allocations").then((response) => response.json()),
-      fetch("/api/teams").then((response) => response.json()),
-      fetch("/api/allocations/queue").then((response) => response.json()),
+    const [allocationsResponse, teamsResponse, queueResponse] = await Promise.all([
+      fetchWithDeadline("/api/allocations"),
+      fetchWithDeadline("/api/teams"),
+      fetchWithDeadline("/api/allocations/queue"),
     ]);
+    const nextAllocations = await readApiJson<AllocationView[]>(allocationsResponse);
+    const nextTeams = await readApiJson<TeamView[]>(teamsResponse);
+    const nextQueue = await readApiJson<CompensationQueueItem[]>(queueResponse);
+    if (!allocationsResponse.ok || !teamsResponse.ok || !queueResponse.ok) {
+      throw new Error("Allocation saved, but the page could not refresh. Reload Compensation to continue.");
+    }
     setAllocations(nextAllocations);
     setTeams(nextTeams);
     setQueue(nextQueue);
-    return { allocations: nextAllocations as AllocationView[], queue: nextQueue as CompensationQueueItem[] };
+    return { allocations: nextAllocations, queue: nextQueue };
   }
 
   function resetDraft() {
@@ -92,43 +98,58 @@ export function CompensationWorkspace({
 
   async function saveAllocation(event?: FormEvent, advanceQueue = false) {
     event?.preventDefault();
-    setBusy(true);
     setError("");
-    const response = await fetch("/api/allocations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        groupId: Number(draft.groupId),
-        lineOfBusinessId: Number(draft.lineOfBusinessId),
-        effectiveStart: draft.effectiveStart,
-        effectiveEnd: draft.effectiveEnd,
-        status: "active",
-        entries: allocationEntryPayload(draft.entries),
-      }),
-    });
-    const body = await response.json();
-    setBusy(false);
-    if (!response.ok) {
-      setError(body.message ?? "Unable to save allocation.");
-      return false;
+    setSuccess("");
+    try {
+      await runBusyAction(setBusy, async () => {
+        const result = await runAllocationSaveFlow({
+          request: async () => {
+            const response = await fetchWithDeadline("/api/allocations", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                groupId: Number(draft.groupId),
+                lineOfBusinessId: Number(draft.lineOfBusinessId),
+                effectiveStart: draft.effectiveStart,
+                effectiveEnd: draft.effectiveEnd,
+                status: "active",
+                entries: allocationEntryPayload(draft.entries),
+              }),
+            });
+            const body = await readApiJson<{ message?: string }>(response);
+            return { ok: response.ok, message: httpFailureMessage(response.status, body.message) };
+          },
+          refresh,
+          savedKey: advanceQueue && currentQueueItem ? currentQueueItem.key : null,
+          queueIndex,
+        });
+        if (result.error) {
+          setError(result.error);
+          return;
+        }
+        setSuccess(result.success ?? allocationSavedMessage());
+        setQueue(result.queue);
+        setQueueIndex(result.queueIndex);
+        setQueueDone(result.queueDone);
+        setQueueOpen(result.queueOpen);
+        if (result.queueOpen) {
+          loadQueueItem(result.queue[result.queueIndex] ?? null);
+        } else {
+          resetDraft();
+        }
+      });
+    } catch (error) {
+      setError(requestFailureMessage(error, "Unable to save allocation."));
     }
-    const refreshed = await refresh();
-    if (advanceQueue && currentQueueItem) {
-      const remaining = refreshed.queue;
-      const advanced = afterSaveQueue(remaining, Math.min(queueIndex, remaining.length), currentQueueItem.key);
-      setQueueIndex(advanced.index);
-      setQueueDone(advanced.done);
-      if (advanced.done) {
-        setQueueOpen(false);
-        resetDraft();
-      } else {
-        loadQueueItem(advanced.items[advanced.index] ?? remaining[advanced.index] ?? null);
-      }
-    } else {
-      resetDraft();
-    }
-    return true;
   }
+
+  useEffect(() => {
+    if (!focusAllocationId) return;
+    const row = allocations.find((allocation) => allocation.id === focusAllocationId);
+    if (row) changeAllocation(row);
+    // Load the complete allocation once when arriving from People.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusAllocationId]);
 
   function loadQueueItem(item: typeof currentQueueItem) {
     if (!item) return;
@@ -184,19 +205,26 @@ export function CompensationWorkspace({
   }
 
   async function deactivate(id: number) {
-    setBusy(true);
-    const response = await fetch(`/api/allocations/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "inactive" }),
-    });
-    const body = await response.json();
-    setBusy(false);
-    if (!response.ok) {
-      setError(body.message ?? "Unable to deactivate.");
-      return;
+    setError("");
+    setSuccess("");
+    try {
+      await runBusyAction(setBusy, async () => {
+        const response = await fetchWithDeadline(`/api/allocations/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "inactive" }),
+        });
+        const body = await readApiJson<{ message?: string }>(response);
+        if (!response.ok) {
+          setError(httpFailureMessage(response.status, body.message));
+          return;
+        }
+        await refresh();
+        setSuccess("Allocation deactivated.");
+      });
+    } catch (error) {
+      setError(requestFailureMessage(error, "Unable to deactivate."));
     }
-    await refresh();
   }
 
   async function saveTeam(event: FormEvent) {
@@ -323,6 +351,7 @@ export function CompensationWorkspace({
             try { return [{ compensationBps: parsePercentToBps(entry.percent || "0") }]; } catch { return []; }
           }))}</p>
           {error && !queueOpen && <p className="form-error">{error}</p>}
+          {success && !queueOpen && <p className="form-success">{success}</p>}
           <div className="form-actions full">
             <button disabled={busy || !totals.complete}>{busy ? "Saving…" : "Save allocation"}</button>
             <button type="button" className="secondary" onClick={resetDraft}>Cancel</button>
@@ -457,6 +486,7 @@ export function CompensationWorkspace({
                 try { return [{ compensationBps: parsePercentToBps(entry.percent || "0") }]; } catch { return []; }
               }))}</p>
               {error && <p className="form-error">{error}</p>}
+              {success && <p className="form-success">{success}</p>}
               <div className="form-actions full">
                 <button disabled={busy || !totals.complete}>{busy ? "Saving…" : "Save & Next"}</button>
                 <button type="button" className="secondary" onClick={skipCurrent}>Skip for now</button>

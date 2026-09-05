@@ -7,6 +7,7 @@ import {
   teamReportDocument,
 } from "@/domain/reportDocuments";
 import { reportEmptyMessage } from "@/domain/reportDiscovery";
+import { recipientReportReviewState } from "@/domain/recipientStatement";
 import { getDb } from "@/db";
 import { parseId, toErrorResponse } from "@/lib/http";
 import type { ReportKind } from "@/domain/reports";
@@ -37,8 +38,24 @@ async function reportPayload(url: URL) {
   const filters = filtersFrom(url);
   if (filters.kind === "individual" || filters.kind === "recipient") {
     const report = await buildIndividualReport(db, filters);
-    const document = individualReportDocument(report.rows, report.totals, report.filters, report.names, report.names.personName || "Recipient");
-    return { ...report, document, emptyMessage: reportEmptyMessage(report.filters, report.availability) };
+    const review = recipientReportReviewState({
+      personSelected: Boolean(filters.personId && filters.personKind),
+      personName: report.names.personName ?? null,
+      payoutRowCount: report.rows.length,
+      payableCents: report.totals.compensationCents,
+      postedCommissionCount: report.availability.postedCommissionCount,
+      matchingCommissionCount: report.matchingCommissionCount,
+      unallocatedCount: report.payable.unallocated.length,
+    });
+    const recipientName = report.names.personName || (filters.personId ? "Unknown person" : "All people");
+    const document = individualReportDocument(report.rows, report.totals, report.filters, report.names, recipientName);
+    const focusedRecipient = filters.kind === "recipient" || Boolean(filters.personId);
+    return {
+      ...report,
+      document: !focusedRecipient || review.showPayableTotals ? document : { ...document, totals: [] },
+      emptyMessage: focusedRecipient ? review.emptyMessage : reportEmptyMessage(report.filters, report.availability),
+      review: review.kind,
+    };
   }
   if (filters.kind === "team") {
     const report = await buildTeamReport(db, filters);

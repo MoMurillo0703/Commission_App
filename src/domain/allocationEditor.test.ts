@@ -5,11 +5,15 @@ import {
   allocationEntryPayload,
   cancelAllocationDraft,
   defaultAllocationDraft,
+  draftFromAllocationEntries,
   emptyDraftRecipient,
   parsePersonKind,
   personRoleLabel,
   removeDraftRecipient,
 } from "./allocationEditor";
+import { validateAllocationEntries } from "./allocations";
+import { parsePercentToBps } from "./money";
+import { editAllocationHref } from "./personCompensation";
 
 describe("allocation editor recipients", () => {
   it("adds and removes Agent and Account Manager rows without matching by display name", () => {
@@ -58,5 +62,27 @@ describe("allocation editor recipients", () => {
       effectiveStart: "2026-09",
       entries: [{ recipientType: "agency", personKind: "", compensationPercent: "100" }],
     })).not.toThrow();
+  });
+
+  it("opens the complete Group + LOB allocation for edit and still requires 100%", () => {
+    const entries = draftFromAllocationEntries([
+      { recipientType: "person", personKind: "agent", personId: 1, compensationPercent: "70" },
+      { recipientType: "person", personKind: "agent", personId: 2, compensationPercent: "20" },
+      { recipientType: "person", personKind: "account_manager", personId: 9, compensationPercent: "5" },
+      { recipientType: "person", personKind: "account_manager", personId: 10, compensationPercent: "5" },
+    ]);
+    expect(entries).toHaveLength(4);
+    expect(editAllocationHref(44)).toBe("/compensation?allocationId=44");
+    const payload = allocationEntryPayload(entries).map((entry) => ({
+      ...entry,
+      compensationBps: parsePercentToBps(entry.compensationPercent),
+    }));
+    expect(() => validateAllocationEntries(payload, { requireComplete: true })).not.toThrow();
+    entries[2]!.percent = "10";
+    const changed = allocationEntryPayload(entries).map((entry) => ({
+      ...entry,
+      compensationBps: parsePercentToBps(entry.compensationPercent),
+    }));
+    expect(() => validateAllocationEntries(changed, { requireComplete: true })).toThrow(/100/);
   });
 });

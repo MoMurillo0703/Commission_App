@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import {
   closePriorAllocationEnd,
   overlappingActiveAllocations,
@@ -13,7 +13,7 @@ import {
 import { isPaidMonth } from "@/domain/dates";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
-import { compensationAllocationEntries, compensationAllocations, groups, linesOfBusiness } from "@/db/schema";
+import { accountManagers, agents, compensationAllocationEntries, compensationAllocations, groups, linesOfBusiness, teams } from "@/db/schema";
 import { getAccountManager } from "./accountManagers";
 import { getAgent } from "./agents";
 import { getGroup } from "./groups";
@@ -93,63 +93,123 @@ async function recipientLabel(
   return { personName: manager.name, teamName: null as string | null };
 }
 
-async function hydrateEntries(db: AppDatabase, allocationId: number): Promise<AllocationEntryView[]> {
+async function recipientDirectory(db: AppDatabase) {
+  const [agentRows, managerRows, teamRows] = await Promise.all([
+    db.select({ id: agents.id, name: agents.name }).from(agents),
+    db.select({ id: accountManagers.id, name: accountManagers.name }).from(accountManagers),
+    db.select({ id: teams.id, name: teams.name }).from(teams),
+  ]);
+  return {
+    agents: new Map(agentRows.map((row) => [row.id, row.name])),
+    managers: new Map(managerRows.map((row) => [row.id, row.name])),
+    teams: new Map(teamRows.map((row) => [row.id, row.name])),
+  };
+}
+
+function labelsFromDirectory(
+  entry: { recipientType: string; personKind: string | null; personId: number | null; teamId: number | null },
+  directory: Awaited<ReturnType<typeof recipientDirectory>>,
+) {
+  if (entry.recipientType === "agency") return { personName: "Agency", teamName: null as string | null };
+  if (entry.recipientType === "team") {
+    return { personName: null as string | null, teamName: entry.teamId != null ? directory.teams.get(entry.teamId) ?? "Team" : "Team" };
+  }
+  if (entry.personKind === "agent") {
+    return { personName: entry.personId != null ? directory.agents.get(entry.personId) ?? "Person" : "Person", teamName: null as string | null };
+  }
+  return { personName: entry.personId != null ? directory.managers.get(entry.personId) ?? "Person" : "Person", teamName: null as string | null };
+}
+
+const allocationSelect = {
+  id: compensationAllocations.id,
+  groupId: compensationAllocations.groupId,
+  groupName: groups.name,
+  lineOfBusinessId: compensationAllocations.lineOfBusinessId,
+  lineOfBusinessName: linesOfBusiness.name,
+  effectiveStart: compensationAllocations.effectiveStart,
+  effectiveEnd: compensationAllocations.effectiveEnd,
+  status: compensationAllocations.status,
+  sourceAgreementId: compensationAllocations.sourceAgreementId,
+  createdAt: compensationAllocations.createdAt,
+  updatedAt: compensationAllocations.updatedAt,
+};
+
+async function hydrateEntries(db: AppDatabase, allocationId: number, directory: Awaited<ReturnType<typeof recipientDirectory>>): Promise<AllocationEntryView[]> {
   const rows = await db
     .select()
     .from(compensationAllocationEntries)
     .where(eq(compensationAllocationEntries.allocationId, allocationId));
-  const sorted = rows.sort((left, right) => left.sortOrder - right.sortOrder || left.id - right.id);
-  return Promise.all(sorted.map(async (row) => {
-    const labels = await recipientLabel(db, {
-      recipientType: row.recipientType as RecipientType,
-      personKind: row.personKind as PersonKind | null,
-      personId: row.personId,
-      teamId: row.teamId,
-      compensationBps: row.compensationBps,
+  return rows
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.id - right.id)
+    .map((row) => {
+      const labels = labelsFromDirectory(row, directory);
+      return {
+        id: row.id,
+        recipientType: row.recipientType as RecipientType,
+        personKind: (row.personKind as PersonKind | null) ?? null,
+        personId: row.personId,
+        personName: labels.personName,
+        teamId: row.teamId,
+        teamName: labels.teamName,
+        compensationBps: row.compensationBps,
+        sortOrder: row.sortOrder,
+      };
     });
-    return {
-      id: row.id,
-      recipientType: row.recipientType as RecipientType,
-      personKind: (row.personKind as PersonKind | null) ?? null,
-      personId: row.personId,
-      personName: labels.personName,
-      teamId: row.teamId,
-      teamName: labels.teamName,
-      compensationBps: row.compensationBps,
-      sortOrder: row.sortOrder,
-    };
-  }));
+}
+
+type AllocationHeader = {
+  id: number;
+  groupId: number;
+  groupName: string;
+  lineOfBusinessId: number;
+  lineOfBusinessName: string;
+  effectiveStart: string;
+  effectiveEnd: string | null;
+  status: string;
+  sourceAgreementId: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+async function hydrateAllocationRows(db: AppDatabase, rows: AllocationHeader[]): Promise<AllocationView[]> {
+  const directory = await recipientDirectory(db);
+  return Promise.all(rows.map(async (row) => ({
+    ...row,
+    status: asStatus(row.status),
+    entries: await hydrateEntries(db, row.id, directory),
+  })));
 }
 
 export async function listAllocations(db?: AppDatabase): Promise<AllocationView[]> {
   const database = await resolveDb(db);
   const rows = await database
-    .select({
-      id: compensationAllocations.id,
-      groupId: compensationAllocations.groupId,
-      groupName: groups.name,
-      lineOfBusinessId: compensationAllocations.lineOfBusinessId,
-      lineOfBusinessName: linesOfBusiness.name,
-      effectiveStart: compensationAllocations.effectiveStart,
-      effectiveEnd: compensationAllocations.effectiveEnd,
-      status: compensationAllocations.status,
-      sourceAgreementId: compensationAllocations.sourceAgreementId,
-      createdAt: compensationAllocations.createdAt,
-      updatedAt: compensationAllocations.updatedAt,
-    })
+    .select(allocationSelect)
     .from(compensationAllocations)
     .innerJoin(groups, eq(compensationAllocations.groupId, groups.id))
     .innerJoin(linesOfBusiness, eq(compensationAllocations.lineOfBusinessId, linesOfBusiness.id))
     .orderBy(desc(compensationAllocations.effectiveStart), desc(compensationAllocations.id));
-  return Promise.all(rows.map(async (row) => ({
-    ...row,
-    status: asStatus(row.status),
-    entries: await hydrateEntries(database, row.id),
-  })));
+  return hydrateAllocationRows(database, rows);
+}
+
+export async function listAllocationsForPair(db: AppDatabase, groupId: number, lineOfBusinessId: number) {
+  const rows = await db
+    .select(allocationSelect)
+    .from(compensationAllocations)
+    .innerJoin(groups, eq(compensationAllocations.groupId, groups.id))
+    .innerJoin(linesOfBusiness, eq(compensationAllocations.lineOfBusinessId, linesOfBusiness.id))
+    .where(and(eq(compensationAllocations.groupId, groupId), eq(compensationAllocations.lineOfBusinessId, lineOfBusinessId)));
+  return hydrateAllocationRows(db, rows);
 }
 
 export async function getAllocation(db: AppDatabase | undefined, id: number) {
-  return (await listAllocations(db)).find((allocation) => allocation.id === id) ?? null;
+  const database = await resolveDb(db);
+  const rows = await database
+    .select(allocationSelect)
+    .from(compensationAllocations)
+    .innerJoin(groups, eq(compensationAllocations.groupId, groups.id))
+    .innerJoin(linesOfBusiness, eq(compensationAllocations.lineOfBusinessId, linesOfBusiness.id))
+    .where(eq(compensationAllocations.id, id));
+  return (await hydrateAllocationRows(database, rows))[0] ?? null;
 }
 
 export function allocationCandidates(rows: AllocationView[]): AllocationCandidate[] {
@@ -192,10 +252,7 @@ export async function createAllocation(db: AppDatabase | undefined, input: Alloc
   }
   for (const entry of input.entries) await recipientLabel(database, entry);
 
-  const siblings = (await listAllocations(database)).filter((allocation) => (
-    allocation.groupId === input.groupId
-    && allocation.lineOfBusinessId === input.lineOfBusinessId
-  ));
+  const siblings = await listAllocationsForPair(database, input.groupId, input.lineOfBusinessId);
 
   const inserted = await database.transaction(async (tx) => {
     if (status === "active") {
@@ -261,10 +318,8 @@ export async function updateAllocation(
       throw new ValidationError(error instanceof Error ? error.message : "Allocation must total exactly 100 percent.");
     }
     const overlaps = overlappingActiveAllocations(
-      (await listAllocations(database)).filter((allocation) => (
-        allocation.groupId === existing.groupId
-        && allocation.lineOfBusinessId === existing.lineOfBusinessId
-        && allocation.id !== existing.id
+      (await listAllocationsForPair(database, existing.groupId, existing.lineOfBusinessId)).filter((allocation) => (
+        allocation.id !== existing.id
       )),
       existing.effectiveStart,
       period.effectiveEnd,

@@ -8,6 +8,7 @@ import {
 } from "./recipientStatement";
 import {
   reportPeriodLabel,
+  sumIndividualReport,
   type AgencyReportRow,
   type IndividualReportRow,
   type ReportFilters,
@@ -106,7 +107,7 @@ export function individualReportDocument(
 ): ReportDocument {
   const recipient = isRecipientStatement({ ...filters, kind: filters.kind === "recipient" ? "recipient" : "individual" });
   const commissionIds = sourceCommissionIds(rows);
-  const agencyGross = totals.grossCommissionCents ?? rows.reduce((sum, row) => sum + row.grossCommissionCents, 0);
+  const agencyGross = totals.grossCommissionCents ?? sumIndividualReport(rows).grossCommissionCents;
   return {
     agencyName: AGENCY_NAME,
     title: reportTitle(recipient ? "recipient" : "individual", filters),

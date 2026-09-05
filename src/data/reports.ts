@@ -186,6 +186,7 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
     totals: sumIndividualReport(rows),
     availability: await reportAvailability(database, rows.length),
     payable,
+    matchingCommissionCount: commissions.length,
   };
 }
 

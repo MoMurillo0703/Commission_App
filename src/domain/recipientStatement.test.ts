@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatAllocationPercent,
   recipientPayableReadiness,
+  recipientReportReviewState,
   recipientStatementDisclaimer,
   sourceCommissionIds,
 } from "./recipientStatement";
@@ -60,5 +61,50 @@ describe("recipient payable readiness", () => {
     expect(formatAllocationPercent(7000)).toBe("70%");
     expect(formatAllocationPercent(1250)).toBe("12.50%");
     expect(recipientStatementDisclaimer()).toMatch(/does not mean the recipient has been paid/);
+  });
+
+  it("does not present a missing-payout review as a $0 payroll statement", () => {
+    expect(recipientReportReviewState({
+      personSelected: true,
+      personName: "Laura Montoya",
+      payoutRowCount: 0,
+      payableCents: 0,
+      postedCommissionCount: 4,
+      matchingCommissionCount: 4,
+      unallocatedCount: 2,
+    })).toMatchObject({
+      kind: "missing_payouts",
+      showPayableTotals: false,
+    });
+    expect(recipientReportReviewState({
+      personSelected: true,
+      personName: "John Elizando",
+      payoutRowCount: 2,
+      payableCents: 0,
+      postedCommissionCount: 2,
+      matchingCommissionCount: 2,
+      unallocatedCount: 0,
+    }).kind).toBe("legitimate_zero");
+    expect(recipientReportReviewState({
+      personSelected: false,
+      personName: null,
+      payoutRowCount: 0,
+      payableCents: 0,
+      postedCommissionCount: 4,
+      matchingCommissionCount: 0,
+      unallocatedCount: 0,
+    })).toMatchObject({
+      kind: "unknown_person",
+      showPayableTotals: false,
+    });
+    expect(recipientReportReviewState({
+      personSelected: true,
+      personName: "Laura Montoya",
+      payoutRowCount: 0,
+      payableCents: 0,
+      postedCommissionCount: 3,
+      matchingCommissionCount: 0,
+      unallocatedCount: 0,
+    }).emptyMessage).toMatch(/No posted commissions match this paid month/);
   });
 });

@@ -147,8 +147,17 @@ export function sumAgencyReport(rows: AgencyReportRow[]): ReportTotals {
 }
 
 export function sumIndividualReport(rows: IndividualReportRow[]) {
+  const seen = new Set<string>();
+  let grossCommissionCents = 0;
+  for (const row of rows) {
+    const key = row.commissionId != null ? `id:${row.commissionId}` : `${row.paidMonth}:${row.groupId}:${row.carrierId}:${row.lineOfBusinessId}:${row.grossCommissionCents}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      grossCommissionCents += row.grossCommissionCents;
+    }
+  }
   return {
-    grossCommissionCents: rows.reduce((sum, row) => sum + row.grossCommissionCents, 0),
+    grossCommissionCents,
     compensationCents: rows.reduce((sum, row) => sum + row.compensationCents, 0),
   };
 }

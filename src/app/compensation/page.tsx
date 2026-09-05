@@ -12,7 +12,13 @@ import { listTeams } from "@/data/teams";
 
 export const dynamic = "force-dynamic";
 
-export default async function CompensationPage() {
+export default async function CompensationPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ allocationId?: string }>;
+}) {
+  const params = searchParams ? await searchParams : {};
+  const focusAllocationId = Number(params.allocationId);
   return (
     <AppShell active="compensation" reviewCount={await countUnassignedCommissions()}>
       <header>
@@ -31,6 +37,7 @@ export default async function CompensationPage() {
         initialTeams={await listTeams()}
         initialQueue={await listCompensationQueue()}
         groupLineEvidence={await listGroupLineEvidence()}
+        focusAllocationId={Number.isInteger(focusAllocationId) && focusAllocationId > 0 ? focusAllocationId : null}
       />
     </AppShell>
   );

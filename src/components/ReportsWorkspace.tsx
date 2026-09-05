@@ -211,7 +211,7 @@ export function ReportsWorkspace({
             )}
           </div>
           <div className="stats report-summary">
-            {(report.document?.totals ?? []).map((total) => (
+            {!report.emptyMessage && (report.document?.totals ?? []).map((total) => (
               <article key={total.label} className="card">
                 <p>{total.label}</p>
                 <strong>{total.value}</strong>
