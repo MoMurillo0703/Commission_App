@@ -54,7 +54,7 @@ Statement intake and review use a shared `fetchWithDeadline` (AbortController, *
 
 Text PDFs: extract → interpret (including Choice Builder inference when it applies) → review exceptions → confirm → post. Manual mapping and PDF layout are fallback.
 
-Carrier learning today: versioned `carrier_statement_layouts` plus `0006` coverage aliases. This is not the full teach-once product.
+Carrier learning today: versioned `carrier_statement_layouts`, `0006` coverage aliases (label → LOB), and `0007` carrier Group identities (carrier + external Group Number → Group). Coverage aliases are not Group identity. This is not the full teach-once product.
 
 ## Compensation and reports
 

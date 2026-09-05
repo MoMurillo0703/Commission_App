@@ -10,7 +10,7 @@ Money: integer cents. Rates: integer basis points.
 
 Row-level security is enabled on application tables. Browser clients do not query these tables; the Next.js server uses the database URL.
 
-## Migrations (0001–0006)
+## Migrations (0001–0007)
 
 | File | Role |
 | --- | --- |
@@ -20,6 +20,7 @@ Row-level security is enabled on application tables. Browser clients do not quer
 | `0004_compensation_allocations.sql` | Teams, allocations, entries, payouts; copies legacy agreements without inferring Agency remainder |
 | `0005_direct_person_limit.sql` | Active allocation: at most five direct Person entries |
 | `0006_carrier_coverage_aliases.sql` | Carrier-scoped statement coverage label → LOB |
+| `0007_carrier_group_identities.sql` | Carrier + external Group Number → internal Group |
 
 Do not rewrite an applied migration. Add a new numbered file. Runtime code must not apply these files. See [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
@@ -56,7 +57,7 @@ Stable integer ID, case-insensitive unique name.
 
 Stable integer ID, required name, optional group number and notes. Optional current `account_manager_id` and `primary_agent_id`. Assignment does not create compensation.
 
-Names and group numbers are **not** unique. `group_number` is not carrier-scoped and is not a reliable import key.
+Names and group numbers are **not** unique. `group_number` is not carrier-scoped and is not a reliable import key. Learned carrier Group Numbers live in `carrier_group_identities`, not on this column.
 
 Deprecated: `default_compensation_bps`. Not used as a settlement fallback. Not auto-migrated into allocations.
 
@@ -116,7 +117,11 @@ Versioned carrier layout signature + column mapping. Material mapping changes cr
 
 ### `carrier_coverage_aliases`
 
-Carrier-scoped normalized source coverage label → `line_of_business_id`. Unique per (`carrier_id`, `source_value`). This is **partial** teach-once behavior, not complete layout learning.
+Carrier-scoped normalized source coverage label → `line_of_business_id`. Unique per (`carrier_id`, `source_value`). This is **partial** teach-once behavior, not complete layout learning. It is **not** Group identity.
+
+### `carrier_group_identities`
+
+Carrier-scoped external Group Number → internal `group_id`. Unique per (`carrier_id`, `external_group_number`). Created from explicit/import-backed carrier context (match or create on a statement that has a carrier). Existing `groups.group_number` values are not copied here unless that carrier relationship is known. The same external number may map to different Groups under different carriers.
 
 ### `schema_migrations`
 
@@ -135,6 +140,7 @@ Examples the schema currently enforces:
 - Header identity `agency_net_cents = gross_commission_cents - agent_compensation_cents`
 - Unique posted import identity on (`import_statement_id`, `source_row_key`) when both are present
 - Unique carrier coverage alias per (`carrier_id`, `source_value`)
+- Unique carrier Group identity per (`carrier_id`, `external_group_number`)
 - `0002` calendar `CHECK`s on the five columns listed above, for **new/future** writes only (`NOT VALID`)
 - **Allocation triggers** (0004, with the five-person limit updated in 0005). These are the enforcement boundary; application checks exist for UX:
   - active allocation total must be exactly 10,000 bps (`validate_compensation_allocation_activation`)

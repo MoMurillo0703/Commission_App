@@ -85,8 +85,8 @@ Deployed ≠ Done.
 ### CaliforniaChoice continuation rows (QA-003)
 
 - **Workflow:** Upload a genuine CaliforniaChoice statement whose continuation rows omit Group Number and Company Name (Group row → Medical → Chiro → Vision; Group row → Dental rows → Medical → Vision).
-- **Expected:** Continuation rows stay on the current Group. Product/LOB is not treated as a Group. Medical, Dental, Vision, and Chiro never appear under Groups need review. Paid month, premium, carrier rate, commission amount, and negatives are preserved. A known Group Number resolves; an unknown number goes to review; an explicit match is remembered on the existing Group Number field when that is safe.
-- **Verifier:** Cleo `californiaChoice` / `groupMatch` / `importGroups` tests; Tom on the genuine August 2026 statement.
+- **Expected:** Continuation rows stay on the current Group. Product/LOB is not treated as a Group. Medical, Dental, Vision, and Chiro never appear under Groups need review. Premium, carrier rate, commission amount, negatives, and ADJ CD are preserved as source data. The statement paid month remains the app paid month used for compensation. The CaliforniaChoice row Paid Month is source context, not coverage month and not the compensation period. A known carrier + Group Number identity resolves; an unknown number goes to review; an explicit match is stored on `carrier_group_identities` and does not change `groups.group_number`.
+- **Verifier:** Cleo `californiaChoice` / `carrierGroupIdentity` / `importGroups` tests; Tom on the genuine August 2026 statement.
 - **Gate:** BUILT + QA PASSED.
 
 ### Group-first Compensation home (UX-003)

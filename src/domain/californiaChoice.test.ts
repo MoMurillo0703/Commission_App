@@ -13,6 +13,7 @@ const californiaChoiceLines = [
   "$4,776.34",
   "5.0",
   "$238.81",
+  "CR",
   "09-26",
   "Chiro",
   "$45.24",
@@ -26,7 +27,7 @@ const californiaChoiceLines = [
   "65884",
   "JOSES ORNAMENTAL SUPPLY INC",
   "09-26    Dental    $120.00    5.0    $6.00",
-  "09-26    Dental    ($10.00)    5.0    ($0.50)",
+  "09-26    Dental    ($10.00)    5.0    ($0.50)    RV",
   "09-26    Medical    $800.00    5.0    $40.00",
   "09-26    Vision    $50.00    12.0    $6.00",
 ];
@@ -34,16 +35,17 @@ const californiaChoiceLines = [
 describe("CaliforniaChoice continuation parsing", () => {
   it("carries Group Number and Company Name onto continuation LOB rows", () => {
     const rows = parseCaliforniaChoiceLines(californiaChoiceLines);
-    expect(rows.map((row) => [row.groupNumber, row.groupName, row.product, row.commission])).toEqual([
-      ["83746", "CHIMAY ENTERPRISE LLC", "Medical", "$238.81"],
-      ["83746", "CHIMAY ENTERPRISE LLC", "Chiro", "$2.96"],
-      ["83746", "CHIMAY ENTERPRISE LLC", "Vision", "$7.42"],
-      ["65884", "JOSES ORNAMENTAL SUPPLY INC", "Dental", "$6.00"],
-      ["65884", "JOSES ORNAMENTAL SUPPLY INC", "Dental", "($0.50)"],
-      ["65884", "JOSES ORNAMENTAL SUPPLY INC", "Medical", "$40.00"],
-      ["65884", "JOSES ORNAMENTAL SUPPLY INC", "Vision", "$6.00"],
+    expect(rows.map((row) => [row.groupNumber, row.groupName, row.product, row.commission, row.adjustmentCode])).toEqual([
+      ["83746", "CHIMAY ENTERPRISE LLC", "Medical", "$238.81", "CR"],
+      ["83746", "CHIMAY ENTERPRISE LLC", "Chiro", "$2.96", null],
+      ["83746", "CHIMAY ENTERPRISE LLC", "Vision", "$7.42", null],
+      ["65884", "JOSES ORNAMENTAL SUPPLY INC", "Dental", "$6.00", null],
+      ["65884", "JOSES ORNAMENTAL SUPPLY INC", "Dental", "($0.50)", "RV"],
+      ["65884", "JOSES ORNAMENTAL SUPPLY INC", "Medical", "$40.00", null],
+      ["65884", "JOSES ORNAMENTAL SUPPLY INC", "Vision", "$6.00", null],
     ]);
-    expect(rows[0]).toMatchObject({ paidMonth: "2026-09", premium: "$4,776.34", rate: "5.0" });
+    expect(rows[0]).toMatchObject({ paidMonthSource: "09-26", premium: "$4,776.34", rate: "5.0" });
+    expect(rows[4]?.commission).toBe("($0.50)");
     expect(rows.some((row) => /medical|dental|vision|chiro/i.test(row.groupName))).toBe(false);
   });
 
@@ -63,11 +65,29 @@ describe("CaliforniaChoice continuation parsing", () => {
     const pages = [{ pageNumber: 1, text: californiaChoiceLines.join("\n"), lines: californiaChoiceLines }];
     const inferred = interpretCaliforniaChoiceStatement(pages, [
       { id: 9, name: "Chimay Enterprise", groupNumber: "83746" },
-    ]);
+    ], {
+      carrierId: 4,
+      identities: [{ carrierId: 4, externalGroupNumber: "83746", groupId: 9 }],
+    });
     const chimay = inferred?.preview.sheets[0]?.rows.filter((row) => row.values["Group Number"] === "83746") ?? [];
     const joses = inferred?.preview.sheets[0]?.rows.filter((row) => row.values["Group Number"] === "65884") ?? [];
     expect(chimay.every((row) => row.group.status === "matched" && row.group.groupId === 9)).toBe(true);
     expect(joses.every((row) => row.group.status === "new_group")).toBe(true);
+    expect(inferred?.mapping.premiumMonth).toBeUndefined();
+    expect(inferred?.preview.sheets[0]?.rows.every((row) => row.premiumMonth == null)).toBe(true);
+    expect(inferred?.preview.sheets[0]?.rows[0]?.values["Paid Month"]).toBe("09-26");
+    expect(inferred?.preview.sheets[0]?.rows[0]?.values["Source context"]).toContain("Carrier paid month: 09-26");
+    expect(inferred?.preview.sheets[0]?.rows[0]?.values["ADJ CD"]).toBe("CR");
+    expect(inferred?.preview.sheets[0]?.rows[4]?.values["ADJ CD"]).toBe("RV");
+    expect(inferred?.preview.sheets[0]?.rows[4]?.values["Commission Amount"]).toBe("($0.50)");
+  });
+
+  it("does not treat groups.group_number as CaliforniaChoice identity", () => {
+    const pages = [{ pageNumber: 1, text: californiaChoiceLines.join("\n"), lines: californiaChoiceLines }];
+    const inferred = interpretCaliforniaChoiceStatement(pages, [
+      { id: 9, name: "Chimay Enterprise", groupNumber: "83746" },
+    ], { carrierId: 4, identities: [] });
+    expect(inferred?.preview.sheets[0]?.rows.every((row) => row.group.status === "new_group")).toBe(true);
   });
 
   it("does not change Choice Builder interpretation", () => {

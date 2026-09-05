@@ -5,6 +5,7 @@ import { createAgreement, listAgreements } from "./agreements";
 import { createAgent, listAgents } from "./agents";
 import { createCarrier } from "./carriers";
 import { listCommissions } from "./commissions";
+import { listCarrierGroupIdentities } from "./carrierGroupIdentities";
 import { createGroup, listGroups } from "./groups";
 import { confirmImportGroups, reviewImportGroups } from "./importGroups";
 import { postImportStatement, previewImportPosting } from "./importPosting";
@@ -280,33 +281,64 @@ describe("statement import group onboarding", () => {
     expect((await listCommissions(db))).toHaveLength(0);
   });
 
-  it("learns a safe Group Number on explicit match so a later statement can resolve it", async () => {
+  it("learns a carrier-scoped Group Number on explicit match and does not change groups.group_number", async () => {
     const { db } = await seed();
     const chimay = await createGroup(db, { name: "Chimay Enterprise" });
-    const first = await savedStatement(db, [
-      ["CHIMAY ENTERPRISE LLC", "83746", "Principal", "Medical", "Alex Morgan", "1000.00", "80.00", "", "2026-08"],
+    const other = await createGroup(db, { name: "Anthem Chimay", groupNumber: "83746" });
+    const california = await createCarrier(db, { name: "CaliforniaChoice" });
+    const anthem = await createCarrier(db, { name: "Anthem" });
+    const firstBuffer = await workbook([
+      ["CHIMAY ENTERPRISE LLC", "83746", "CaliforniaChoice", "Medical", "Alex Morgan", "1000.00", "80.00", "", "2026-08"],
     ]);
+    const first = await createImportStatement(db, {
+      originalFilename: "californiachoice-aug.xlsx",
+      paidMonth: "2026-08",
+      carrierId: california.id,
+      sourceType: "excel",
+      status: "ready_to_map",
+      fingerprint: fingerprintBuffer(firstBuffer),
+      preview: await previewWorkbook(firstBuffer, await listGroups(db)),
+    });
     const review = await reviewImportGroups(db, first.id, mapping);
+    expect(review.unmatchedGroups).toHaveLength(1);
     await confirmImportGroups(db, first.id, mapping, [
       { key: review.unmatchedGroups[0]!.key, action: "match", existingGroupId: chimay.id },
     ]);
-    expect((await listGroups(db)).find((group) => group.id === chimay.id)?.groupNumber).toBe("83746");
+    expect((await listGroups(db)).find((group) => group.id === chimay.id)?.groupNumber).toBeNull();
+    expect((await listGroups(db)).find((group) => group.id === other.id)?.groupNumber).toBe("83746");
+    expect(await listCarrierGroupIdentities(db, california.id)).toEqual([
+      { carrierId: california.id, externalGroupNumber: "83746", groupId: chimay.id },
+    ]);
 
-    const california = await createCarrier(db, { name: "CaliforniaChoice" });
-    const buffer = await workbook([
-      ["CHIMAY ENTERPRISE LLC", "83746", "CaliforniaChoice", "Vision", "Alex Morgan", "50.00", "6.00", "", "2026-09"],
+    const laterBuffer = await workbook([
+      ["CHIMAY ENTERPRISE L.L.C.", "83746", "CaliforniaChoice", "Vision", "Alex Morgan", "50.00", "6.00", "", "2026-09"],
     ]);
     const later = await createImportStatement(db, {
-      originalFilename: "californiachoice.xlsx",
+      originalFilename: "californiachoice-sep.xlsx",
       paidMonth: "2026-09",
       carrierId: california.id,
       sourceType: "excel",
       status: "ready_to_map",
-      fingerprint: fingerprintBuffer(buffer),
-      preview: await previewWorkbook(buffer, await listGroups(db)),
+      fingerprint: fingerprintBuffer(laterBuffer),
+      preview: await previewWorkbook(laterBuffer, await listGroups(db)),
     });
     const laterReview = await reviewImportGroups(db, later.id, mapping);
     expect(laterReview.unmatchedGroups).toHaveLength(0);
     expect(laterReview.rows[0]?.groupId).toBe(chimay.id);
+
+    const anthemBuffer = await workbook([
+      ["CHIMAY ENTERPRISE LLC", "83746", "Anthem", "Medical", "Alex Morgan", "50.00", "6.00", "", "2026-09"],
+    ]);
+    const anthemStatement = await createImportStatement(db, {
+      originalFilename: "anthem.xlsx",
+      paidMonth: "2026-09",
+      carrierId: anthem.id,
+      sourceType: "excel",
+      status: "ready_to_map",
+      fingerprint: fingerprintBuffer(anthemBuffer),
+      preview: await previewWorkbook(anthemBuffer, await listGroups(db)),
+    });
+    const anthemReview = await reviewImportGroups(db, anthemStatement.id, mapping);
+    expect(anthemReview.rows[0]?.groupId).not.toBe(chimay.id);
   });
 });

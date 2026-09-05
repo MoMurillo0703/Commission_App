@@ -23,6 +23,7 @@ End-to-end payable commission workflow:
 11. Compensation work queue Save & Next must advance without stale success/draft state (QA-001).
 12. CaliforniaChoice continuation rows must stay on the current Group; LOB names are not Groups (QA-003).
 13. Compensation home is Group-first; work queue remains a separate operational tool (UX-003).
+14. Correct CaliforniaChoice carrier Group identity, row Paid Month semantics, and ADJ CD retention (Ben review blockers).
 
 ## Not authorized
 

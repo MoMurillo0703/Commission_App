@@ -6,6 +6,7 @@ import { listAgents } from "./agents";
 import { listGroups } from "./groups";
 import { listLinesOfBusiness } from "./linesOfBusiness";
 import { listCarrierCoverageAliases } from "./carrierCoverage";
+import { listCarrierGroupIdentities } from "./carrierGroupIdentities";
 import { getCarrier, listCarriers } from "./carriers";
 import { currentTeamMembers, listTeams } from "./teams";
 import { getImportStatement, markImportStatementPosted, saveImportColumnMapping } from "./statements";
@@ -52,6 +53,7 @@ async function references(db: AppDatabase, statementCarrierId?: number | null, p
     personNames,
     statementCarrier,
     carrierCoverageAliases: await listCarrierCoverageAliases(db),
+    carrierGroupIdentities: await listCarrierGroupIdentities(db),
   };
 }
 
@@ -80,7 +82,7 @@ export async function previewImportPosting(db: AppDatabase | undefined, statemen
       groupResolutions: statement.preview.groupResolutions,
       lineResolutions: statement.preview.lineResolutions,
       agentResolutions: statement.preview.agentResolutions,
-      preferCarrierGroupNumber: statement.preview.pdf?.groupMatchStrategy === "carrier_group_number"
+      preferCarrierGroupIdentity: statement.preview.pdf?.groupMatchStrategy === "carrier_group_identity"
         || /california\s*choice/i.test(refs.statementCarrier?.name ?? ""),
     },
     postedKeys,

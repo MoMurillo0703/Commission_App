@@ -228,4 +228,67 @@ describe("statement compensation from agreements", () => {
     expect(blocked?.exceptions.join(" ")).toMatch(/coverage month/i);
     expect(invalid?.premiumMonth).toBe("2026-08");
   });
+
+  it("keeps CaliforniaChoice row Paid Month as source notes and selects compensation by statement month", () => {
+    const sheets: PreviewSheet[] = [{
+      name: "Page 1",
+      headerRowNumber: 1,
+      rowCount: 1,
+      headers: ["Group Number", "Company Name", "Paid Month", "Product", "Commission Amount", "Source context"],
+      groupNameHeader: "Company Name",
+      groupNumberHeader: "Group Number",
+      premiumMonthHeader: null,
+      rows: [{
+        rowNumber: 1,
+        values: {
+          "Group Number": "83746",
+          "Company Name": "CHIMAY ENTERPRISE L.L.C.",
+          "Paid Month": "09-26",
+          Product: "Medical",
+          "Commission Amount": "$238.81",
+          "Source context": "Carrier paid month: 09-26 · ADJ CD: CR",
+        },
+        premiumMonth: null,
+        group: { status: "new_group", groupId: null, groupName: null, sourceName: "CHIMAY ENTERPRISE L.L.C.", sourceNumber: "83746" },
+      }],
+    }];
+    const [row] = validateMappedRows(sheets, {
+      groupName: "Company Name",
+      groupNumber: "Group Number",
+      lineOfBusiness: "Product",
+      grossCommission: "Commission Amount",
+      notes: "Source context",
+    }, "2026-08", {
+      groups: [{ id: 9, name: "Chimay Enterprise", groupNumber: "83746" }],
+      carriers: [{ id: 4, name: "CaliforniaChoice" }],
+      linesOfBusiness: [{ id: 3, name: "Medical" }],
+      agents: [],
+      statementCarrier: { id: 4, name: "CaliforniaChoice" },
+      preferCarrierGroupIdentity: true,
+      carrierGroupIdentities: [{ carrierId: 4, externalGroupNumber: "83746", groupId: 9 }],
+      allocations: [{
+        id: 1,
+        groupId: 9,
+        lineOfBusinessId: 3,
+        effectiveStart: "2026-08",
+        effectiveEnd: null,
+        status: "active",
+        entries: [{ recipientType: "agency", compensationBps: 10000 }],
+      }, {
+        id: 2,
+        groupId: 9,
+        lineOfBusinessId: 3,
+        effectiveStart: "2026-09",
+        effectiveEnd: null,
+        status: "inactive",
+        entries: [{ recipientType: "agency", compensationBps: 10000 }],
+      }],
+    });
+    expect(row?.paidMonth).toBe("2026-08");
+    expect(row?.premiumMonth).toBeNull();
+    expect(row?.notes).toBe("Carrier paid month: 09-26 · ADJ CD: CR");
+    expect(row?.groupId).toBe(9);
+    expect(row?.grossCommissionCents).toBe(23881);
+    expect(row?.exceptions.join(" ")).not.toMatch(/coverage month/i);
+  });
 });

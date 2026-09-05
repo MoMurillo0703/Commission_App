@@ -1,11 +1,12 @@
-import { createGroup, listGroups, updateGroup } from "./groups";
+import { createGroup, listGroups } from "./groups";
 import { listAgreements } from "./agreements";
+import { rememberCarrierGroupIdentity } from "./carrierGroupIdentities";
 import { previewImportPosting } from "./importPosting";
 import { saveImportGroupResolutions } from "./statements";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import type { ColumnMapping } from "@/domain/columnMapping";
-import { findNormalizedGroup, normalizeGroupText, type GroupImportResolution } from "@/domain/groupMatch";
+import { findNormalizedGroup, type GroupImportResolution } from "@/domain/groupMatch";
 import { collectUnmatchedImportGroups, groupNumberConflict, proposedGroupName, type GroupImportDecision } from "@/domain/importGroups";
 import { ValidationError } from "@/lib/errors";
 
@@ -70,22 +71,12 @@ export async function confirmImportGroups(
         if (!existing) throw new ValidationError(`Select an existing group for ${proposed.sourceName || proposed.sourceNumber}.`);
         if (groupNumberConflict(existing, proposed.sourceNumber)) {
           conflicts.push(`${proposed.sourceName || proposed.sourceNumber} matched ${existing.name}, which already has a different group number. The existing group was not changed.`);
-        } else if (proposed.sourceNumber && !existing.groupNumber) {
-          const taken = currentGroups.some((group) => (
-            group.id !== existing.id && normalizeGroupText(group.groupNumber) === normalizeGroupText(proposed.sourceNumber)
-          ));
-          if (!taken) {
-            const updated = await updateGroup(tx, existing.id, {
-              name: existing.name,
-              groupNumber: proposed.sourceNumber,
-              notes: existing.notes,
-              accountManagerId: existing.accountManagerId,
-              primaryAgentId: existing.primaryAgentId,
-              defaultCompensationBps: existing.defaultCompensationBps,
-            });
-            currentGroups = currentGroups.map((group) => group.id === updated.id ? updated : group);
-          }
         }
+        await rememberCarrierGroupIdentity(tx, {
+          carrierId: review.statement.carrierId,
+          externalGroupNumber: proposed.sourceNumber,
+          groupId: existing.id,
+        });
         matchedIds.push(existing.id);
         resolutions.set(proposed.key, {
           key: proposed.key,
@@ -104,6 +95,11 @@ export async function confirmImportGroups(
         if (groupNumberConflict(already, proposed.sourceNumber)) {
           conflicts.push(`${name} already exists as ${already.name}. The existing group number was left unchanged.`);
         }
+        await rememberCarrierGroupIdentity(tx, {
+          carrierId: review.statement.carrierId,
+          externalGroupNumber: proposed.sourceNumber,
+          groupId: already.id,
+        });
         reusedIds.push(already.id);
         resolutions.set(proposed.key, {
           key: proposed.key,
@@ -118,6 +114,11 @@ export async function confirmImportGroups(
       const created = await createGroup(tx, {
         name,
         groupNumber: proposed.sourceNumber,
+      });
+      await rememberCarrierGroupIdentity(tx, {
+        carrierId: review.statement.carrierId,
+        externalGroupNumber: proposed.sourceNumber,
+        groupId: created.id,
       });
       createdIds.push(created.id);
       currentGroups = [...currentGroups, created];

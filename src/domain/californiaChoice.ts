@@ -1,7 +1,8 @@
+import { matchCarrierGroupIdentity, type CarrierGroupIdentity } from "./carrierGroupIdentity";
 import type { ColumnMapping } from "./columnMapping";
 import { isCoverageLabel } from "./coverageLabels";
 import { parseFlexibleMonth } from "./dates";
-import { matchCarrierGroupNumberFirst, type GroupCandidate } from "./groupMatch";
+import type { GroupCandidate } from "./groupMatch";
 import { moneyToken, type ExtractedPdfPage } from "./pdfExtraction";
 import { previewFromSheets, type PreviewRow, type StatementPreview } from "./workbook";
 
@@ -24,6 +25,8 @@ export const CALIFORNIA_CHOICE_HEADERS = {
   premium: "Paid Premium",
   rate: "Carrier Commission %",
   commission: "Commission Amount",
+  adjustmentCode: "ADJ CD",
+  sourceContext: "Source context",
 } as const;
 
 const ignoredLine = /^(page\s+\d+|subtotal|total|grand total|commission statement|california\s*choice|adjustment|adj(\.|ustment)?\s*code)/i;
@@ -79,12 +82,35 @@ function tokensFromLine(line: string) {
 export type CaliforniaChoiceRecord = {
   groupNumber: string;
   groupName: string;
-  paidMonth: string;
+  paidMonthSource: string;
   product: string;
   premium: string | null;
   rate: string | null;
   commission: string;
+  adjustmentCode: string | null;
 };
+
+export type CaliforniaChoiceMatchContext = {
+  carrierId?: number | null;
+  identities?: CarrierGroupIdentity[];
+};
+
+function isAdjustmentCode(value: string) {
+  const text = value.trim();
+  if (!text) return false;
+  if (isMoney(text) || isGroupNumber(text) || parseCaliforniaChoiceMonth(text) != null || isCoverageLabel(text) || rateToken.test(text)) {
+    return false;
+  }
+  if (ignoredLine.test(text)) return false;
+  return /^[A-Za-z0-9._/-]{1,12}$/.test(text);
+}
+
+export function californiaChoiceSourceContext(record: Pick<CaliforniaChoiceRecord, "paidMonthSource" | "adjustmentCode">) {
+  return [
+    record.paidMonthSource ? `Carrier paid month: ${record.paidMonthSource}` : null,
+    record.adjustmentCode ? `ADJ CD: ${record.adjustmentCode}` : null,
+  ].filter(Boolean).join(" · ");
+}
 
 export function parseCaliforniaChoiceLines(lines: string[]): CaliforniaChoiceRecord[] {
   const usable = lines.map((line) => line.trim()).filter((line) => line && !ignoredLine.test(line) && !/^page\s+\d+(\s+of\s+\d+)?$/i.test(line));
@@ -139,6 +165,13 @@ export function parseCaliforniaChoiceLines(lines: string[]): CaliforniaChoiceRec
         collected.push(take()!);
       }
       const parsed = parseCommissionTokens(collected);
+      if (parsed && !parsed.adjustmentCode) {
+        const next = peek();
+        const nextTokens = next ? tokensFromLine(next) : [];
+        if (nextTokens.length === 1 && isAdjustmentCode(nextTokens[0]!)) {
+          parsed.adjustmentCode = take() ?? null;
+        }
+      }
       if (parsed && groupNumber && groupName && !isCoverageLabel(groupName)) {
         records.push({ groupNumber, groupName, ...parsed });
       }
@@ -163,18 +196,22 @@ function parseCommissionTokens(tokens: string[]) {
   const premium = money.length > 1 ? money[0]! : null;
   if (!month || !product || !commission) return null;
   if (isCoverageLabel(month) || isGroupNumber(product)) return null;
+  const consumed = new Set([month, product, rate, ...money].filter(Boolean));
+  const adjustmentCode = tokens.find((token) => !consumed.has(token) && isAdjustmentCode(token)) ?? null;
   return {
-    paidMonth: parseCaliforniaChoiceMonth(month) ?? month,
+    paidMonthSource: month,
     product,
     premium,
     rate: rate ?? null,
     commission,
+    adjustmentCode,
   };
 }
 
 export function interpretCaliforniaChoiceStatement(
   pages: ExtractedPdfPage[],
   groups: GroupCandidate[] = [],
+  context: CaliforniaChoiceMatchContext = {},
 ): { preview: StatementPreview; mapping: ColumnMapping; inferred: true } | null {
   if (!looksLikeCaliforniaChoice(pages)) return null;
   const records: Array<CaliforniaChoiceRecord & { pageNumber: number; lineNumber: number }> = [];
@@ -206,22 +243,30 @@ export function interpretCaliforniaChoiceStatement(
     CALIFORNIA_CHOICE_HEADERS.premium,
     CALIFORNIA_CHOICE_HEADERS.rate,
     CALIFORNIA_CHOICE_HEADERS.commission,
+    CALIFORNIA_CHOICE_HEADERS.adjustmentCode,
+    CALIFORNIA_CHOICE_HEADERS.sourceContext,
   ];
   const rows: PreviewRow[] = records.map((record, index) => {
     const values = {
       [CALIFORNIA_CHOICE_HEADERS.groupNumber]: record.groupNumber,
       [CALIFORNIA_CHOICE_HEADERS.groupName]: record.groupName,
-      [CALIFORNIA_CHOICE_HEADERS.paidMonth]: record.paidMonth,
+      [CALIFORNIA_CHOICE_HEADERS.paidMonth]: record.paidMonthSource,
       [CALIFORNIA_CHOICE_HEADERS.product]: record.product,
       [CALIFORNIA_CHOICE_HEADERS.premium]: record.premium ?? "",
       [CALIFORNIA_CHOICE_HEADERS.rate]: record.rate ?? "",
       [CALIFORNIA_CHOICE_HEADERS.commission]: record.commission,
+      [CALIFORNIA_CHOICE_HEADERS.adjustmentCode]: record.adjustmentCode ?? "",
+      [CALIFORNIA_CHOICE_HEADERS.sourceContext]: californiaChoiceSourceContext(record),
     };
     return {
       rowNumber: index + 1,
       values,
-      premiumMonth: record.paidMonth,
-      group: matchCarrierGroupNumberFirst(groups, record.groupName, record.groupNumber),
+      premiumMonth: null,
+      group: matchCarrierGroupIdentity(groups, record.groupName, record.groupNumber, {
+        carrierId: context.carrierId,
+        identities: context.identities,
+        requireNameConfirmation: true,
+      }),
       pageNumber: record.pageNumber,
       sourceIdentity: `pdf:page:${record.pageNumber}:row:${record.lineNumber}`,
     };
@@ -233,7 +278,7 @@ export function interpretCaliforniaChoiceStatement(
     headers,
     groupNameHeader: CALIFORNIA_CHOICE_HEADERS.groupName,
     groupNumberHeader: CALIFORNIA_CHOICE_HEADERS.groupNumber,
-    premiumMonthHeader: CALIFORNIA_CHOICE_HEADERS.paidMonth,
+    premiumMonthHeader: null,
     rows,
   }]);
   return {
@@ -242,7 +287,7 @@ export function interpretCaliforniaChoiceStatement(
       pdf: {
         classification: "readable",
         pageCount: pages.length,
-        groupMatchStrategy: "carrier_group_number",
+        groupMatchStrategy: "carrier_group_identity",
       },
     },
     mapping: {
@@ -251,8 +296,7 @@ export function interpretCaliforniaChoiceStatement(
       lineOfBusiness: CALIFORNIA_CHOICE_HEADERS.product,
       premium: CALIFORNIA_CHOICE_HEADERS.premium,
       grossCommission: CALIFORNIA_CHOICE_HEADERS.commission,
-      premiumMonth: CALIFORNIA_CHOICE_HEADERS.paidMonth,
-      compensationPercent: CALIFORNIA_CHOICE_HEADERS.rate,
+      notes: CALIFORNIA_CHOICE_HEADERS.sourceContext,
     },
     inferred: true,
   };

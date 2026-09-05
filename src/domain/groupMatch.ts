@@ -116,28 +116,6 @@ export type GroupImportResolution = {
   action?: "create" | "match" | "ignore";
 };
 
-export function matchCarrierGroupNumberFirst(
-  groups: GroupCandidate[],
-  sourceName: string | null | undefined,
-  sourceNumber: string | null | undefined,
-): GroupMatch {
-  const name = displayGroupText(sourceName);
-  const number = displayGroupText(sourceNumber);
-  if (!name && !number) {
-    return { status: "missing", groupId: null, groupName: null, sourceName: name, sourceNumber: number };
-  }
-  const normalizedNumber = normalizeGroupText(number);
-  const numberMatches = normalizedNumber
-    ? groups.filter((group) => normalizeGroupText(group.groupNumber) === normalizedNumber)
-    : [];
-  if (numberMatches.length === 1) {
-    return { status: "matched", groupId: numberMatches[0]!.id, groupName: numberMatches[0]!.name, sourceName: name, sourceNumber: number };
-  }
-  if (numberMatches.length > 1) {
-    return { status: "ambiguous", groupId: null, groupName: null, sourceName: name, sourceNumber: number };
-  }
-  return matchImportedGroup(groups, sourceName, sourceNumber);
-}
 
 export function applyGroupResolutions(
   match: GroupMatch,

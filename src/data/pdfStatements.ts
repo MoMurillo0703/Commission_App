@@ -9,6 +9,7 @@ import {
 } from "@/domain/pdfExtraction";
 import { interpretExtractedPdfPages } from "@/domain/pdfStructureInference";
 import { omitStatementCompensationMapping, type ColumnMapping } from "@/domain/columnMapping";
+import type { CaliforniaChoiceMatchContext } from "@/domain/californiaChoice";
 import type { GroupCandidate } from "@/domain/groupMatch";
 import type { StatementPreview } from "@/domain/workbook";
 
@@ -60,6 +61,7 @@ export async function extractPdfPages(contents: ArrayBuffer | Uint8Array): Promi
 export async function previewPdfStatement(
   contents: ArrayBuffer | Uint8Array,
   groups: GroupCandidate[],
+  context: CaliforniaChoiceMatchContext = {},
 ): Promise<{ extraction: PdfExtractionResult; preview: StatementPreview; mapping?: ColumnMapping | null }> {
   const extraction = await extractPdfPages(contents);
   if (extraction.classification !== "readable") {
@@ -78,13 +80,14 @@ export async function previewPdfStatement(
     };
   }
 
-  const interpreted = interpretExtractedPdfPages(extraction.pages, groups);
+  const interpreted = interpretExtractedPdfPages(extraction.pages, groups, context);
   if (interpreted) {
     return {
       extraction,
       preview: {
         ...interpreted.preview,
         pdf: {
+          ...interpreted.preview.pdf,
           classification: "readable",
           pageCount: extraction.pages.length,
         },

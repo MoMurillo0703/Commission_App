@@ -52,6 +52,15 @@ export const carrierCoverageAliases = pgTable("carrier_coverage_aliases", {
   updatedAt: text("updated_at").notNull(),
 });
 
+export const carrierGroupIdentities = pgTable("carrier_group_identities", {
+  id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
+  carrierId: integer("carrier_id").notNull().references(() => carriers.id),
+  externalGroupNumber: text("external_group_number").notNull(),
+  groupId: integer("group_id").notNull().references(() => groups.id),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
 export const carrierStatementLayouts = pgTable("carrier_statement_layouts", {
   id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
   carrierId: integer("carrier_id").notNull().references(() => carriers.id),
@@ -200,6 +209,7 @@ export type GroupCompensationAgreement = typeof groupCompensationAgreements.$inf
 export type CommissionRecord = typeof commissionRecords.$inferSelect;
 export type ImportStatement = typeof importStatements.$inferSelect;
 export type CarrierCoverageAlias = typeof carrierCoverageAliases.$inferSelect;
+export type CarrierGroupIdentityRow = typeof carrierGroupIdentities.$inferSelect;
 export type CarrierStatementLayout = typeof carrierStatementLayouts.$inferSelect;
 export type Team = typeof teams.$inferSelect;
 export type TeamMembership = typeof teamMemberships.$inferSelect;

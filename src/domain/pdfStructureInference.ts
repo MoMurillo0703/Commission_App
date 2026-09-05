@@ -1,4 +1,4 @@
-import { interpretCaliforniaChoiceStatement } from "./californiaChoice";
+import { interpretCaliforniaChoiceStatement, type CaliforniaChoiceMatchContext } from "./californiaChoice";
 import { isCoverageLabel } from "./coverageLabels";
 import { parseFlexibleMonth } from "./dates";
 import { detectGroupHeaders, matchImportedGroup, type GroupCandidate } from "./groupMatch";
@@ -357,8 +357,9 @@ function firstPassHasMisalignedNames(preview: StatementPreview) {
 export function interpretExtractedPdfPages(
   pages: ExtractedPdfPage[],
   groups: GroupCandidate[] = [],
+  context: CaliforniaChoiceMatchContext = {},
 ) {
-  const californiaChoice = interpretCaliforniaChoiceStatement(pages, groups);
+  const californiaChoice = interpretCaliforniaChoiceStatement(pages, groups, context);
   if (californiaChoice) return californiaChoice;
   const firstPass = candidateRowsFromPdfPages(pages, groups);
   const inferred = inferPdfStatementStructure(pages, groups);

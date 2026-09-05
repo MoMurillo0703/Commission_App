@@ -1,4 +1,5 @@
 import { resolveStatementCarrier } from "@/data/carriers";
+import { listCarrierGroupIdentities } from "@/data/carrierGroupIdentities";
 import { listGroups } from "@/data/groups";
 import { previewPdfStatement } from "@/data/pdfStatements";
 import { attachLayoutToStatement, findMatchingLayout } from "@/data/statementLayouts";
@@ -55,9 +56,13 @@ export function inspectUploadGuards(input: Pick<InspectStatementInput, "fileName
   return null;
 }
 
-async function inspectPdfPreview(buffer: ArrayBuffer | Uint8Array, groups: Awaited<ReturnType<typeof listGroups>>) {
+async function inspectPdfPreview(
+  buffer: ArrayBuffer | Uint8Array,
+  groups: Awaited<ReturnType<typeof listGroups>>,
+  context?: { carrierId?: number | null; identities?: Awaited<ReturnType<typeof listCarrierGroupIdentities>> },
+) {
   try {
-    return await previewPdfStatement(buffer, groups);
+    return await previewPdfStatement(buffer, groups, context);
   } catch (error) {
     statementInspectLog({
       outcome: "pdf_extraction_exception",
@@ -196,13 +201,17 @@ export async function inspectStatementUpload(
       carrierName: emptyToNull(String(input.carrierName ?? "")),
     });
     const groups = await listGroups(db);
+    const identities = await listCarrierGroupIdentities(db, resolved.carrier.id);
     let preview: StatementPreview;
     let sourceType: StatementFileKind;
     let status: string;
     let pdfExtraction: Awaited<ReturnType<typeof previewPdfStatement>>["extraction"] | null = null;
     let inferredPdfMapping = null as Awaited<ReturnType<typeof inspectPdfPreview>>["mapping"];
     if (isPdf) {
-      const extracted = await inspectPdfPreview(bytes, groups);
+      const extracted = await inspectPdfPreview(bytes, groups, {
+        carrierId: resolved.carrier.id,
+        identities,
+      });
       preview = extracted.preview;
       pdfExtraction = extracted.extraction;
       inferredPdfMapping = extracted.mapping;

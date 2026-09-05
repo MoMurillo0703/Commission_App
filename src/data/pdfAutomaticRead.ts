@@ -1,3 +1,4 @@
+import { listCarrierGroupIdentities } from "./carrierGroupIdentities";
 import { listGroups } from "./groups";
 import { loadStatementExtractionPages } from "./pdfLayoutConfirm";
 import { saveConfirmedPdfPreview, saveImportColumnMapping, type ImportStatementView } from "./statements";
@@ -16,7 +17,10 @@ export async function recoverAutomaticPdfRead(
   if (canReviewRows(statement.preview)) return statement;
   try {
     const pages = await loadStatementExtractionPages(db, statement);
-    const interpreted = interpretExtractedPdfPages(pages, await listGroups(db));
+    const interpreted = interpretExtractedPdfPages(pages, await listGroups(db), {
+      carrierId: statement.carrierId,
+      identities: await listCarrierGroupIdentities(db, statement.carrierId),
+    });
     if (!interpreted || interpreted.preview.rowCount === 0) return statement;
     await saveConfirmedPdfPreview(db, statement.id, interpreted.preview);
     return saveImportColumnMapping(db, statement.id, omitStatementCompensationMapping(interpreted.mapping));

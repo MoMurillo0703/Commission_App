@@ -9,7 +9,8 @@ import {
 } from "./allocations";
 import { mappingValue, type ColumnMapping } from "./columnMapping";
 import { calculateAgentCompensationCents } from "./compensation";
-import { applyGroupResolutions, matchCarrierGroupNumberFirst, matchImportedGroup, type GroupCandidate, type GroupImportResolution } from "./groupMatch";
+import { matchCarrierGroupIdentity, type CarrierGroupIdentity } from "./carrierGroupIdentity";
+import { applyGroupResolutions, matchImportedGroup, type GroupCandidate, type GroupImportResolution } from "./groupMatch";
 import { parseFlexibleMonth } from "./dates";
 import { parseDollarsToCents } from "./money";
 import { applyCarrierCoverageAlias, type CarrierCoverageAlias } from "./carrierCoverage";
@@ -63,7 +64,8 @@ export type ImportReferenceData = {
   lineResolutions?: NamedImportResolution[];
   agentResolutions?: NamedImportResolution[];
   carrierCoverageAliases?: CarrierCoverageAlias[];
-  preferCarrierGroupNumber?: boolean;
+  carrierGroupIdentities?: CarrierGroupIdentity[];
+  preferCarrierGroupIdentity?: boolean;
 };
 
 export function resolveImportedCarrier(
@@ -122,9 +124,11 @@ export function validateMappedRows(
       const groupSourceName = mappingValue(row.values, mapping.groupName);
       const groupSourceNumber = mappingValue(row.values, mapping.groupNumber);
       const group = applyGroupResolutions(
-        references.preferCarrierGroupNumber
-          ? matchCarrierGroupNumberFirst(references.groups, groupSourceName, groupSourceNumber)
-          : matchImportedGroup(references.groups, groupSourceName, groupSourceNumber),
+        matchCarrierGroupIdentity(references.groups, groupSourceName, groupSourceNumber, {
+          carrierId: references.statementCarrier?.id,
+          identities: references.carrierGroupIdentities,
+          requireNameConfirmation: references.preferCarrierGroupIdentity,
+        }),
         references.groupResolutions,
         references.groups,
       );

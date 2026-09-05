@@ -20,5 +20,6 @@ Record only intentional decisions and why. Do not restate the full rulebook.
 | 2026-09 | Stale DB client recycle (one attempt) | Serverless isolates can resume a dead pooler socket | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
 | 2026-09 | 45s client deadline; no automatic mutation retry | Bound hung fetches below Vercel 300s; never replay a write | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
 | 2026-09 | Carrier-scoped coverage aliases (`0006`) | Reuse a confirmed coverage label for that carrier only | [`DATA_MODEL.md`](DATA_MODEL.md) |
+| 2026-09 | Carrier-scoped Group identities (`0007`) | CaliforniaChoice Group Number belongs to the carrier, not `groups.group_number` | [`DATA_MODEL.md`](DATA_MODEL.md) |
 | 2026-09 | Docs live under `/docs` with one owner per topic | Audits found conflicting root files (`BUILD_STATUS`, `PROJECT`, work package 001) | [`AGENTS.md`](../AGENTS.md) |
 | 2026-09 | Recipient statement PDF from posted payouts; no generated-report ledger | Sprint 1 needs a downloadable payable statement without a second financial dataset | [`CURRENT_SPRINT.md`](CURRENT_SPRINT.md) |

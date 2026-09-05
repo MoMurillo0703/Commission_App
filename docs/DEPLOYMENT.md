@@ -34,7 +34,7 @@ npm run db:migrate
 
 `npm run db:setup` is the same script. It takes an advisory transaction lock, applies missing files from `migrations/`, then prints `connected:` and `carriers table reachable`.
 
-This documentation release adds **no** schema file. Production already has **0001–0006**. Do not run migrate for a docs-only commit.
+Production currently has **0001–0006**. `0007_carrier_group_identities.sql` exists in the repo and is **not** applied in production. Do not apply it until this correction is approved for deploy. Tests apply it only in PGlite.
 
 Historical SQLite files in `migrations/sqlite/` are not applied.
 
