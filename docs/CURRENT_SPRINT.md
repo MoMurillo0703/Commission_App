@@ -4,7 +4,7 @@ Authoritative owner: **Alex**.
 
 ## Phase
 
-Commission App 1.0 Sprint 1 — **IN PROGRESS**.
+Commission App 1.0 Sprint 1 — **DEPLOYED**. Product Acceptance is pending Mo smoke test. This is not Done.
 
 ## Authorized work
 
