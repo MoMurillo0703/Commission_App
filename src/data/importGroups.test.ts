@@ -341,4 +341,49 @@ describe("statement import group onboarding", () => {
     const anthemReview = await reviewImportGroups(db, anthemStatement.id, mapping);
     expect(anthemReview.rows[0]?.groupId).not.toBe(chimay.id);
   });
+
+  it("creates a CaliforniaChoice Group without copying the external number onto groups.group_number", async () => {
+    const { db } = await seed();
+    const california = await createCarrier(db, { name: "CaliforniaChoice" });
+    const firstBuffer = await workbook([
+      ["NEW COMPANY LLC", "83746", "CaliforniaChoice", "Medical", "Alex Morgan", "1000.00", "80.00", "", "2026-08"],
+    ]);
+    const first = await createImportStatement(db, {
+      originalFilename: "californiachoice-new.xlsx",
+      paidMonth: "2026-08",
+      carrierId: california.id,
+      sourceType: "excel",
+      status: "ready_to_map",
+      fingerprint: fingerprintBuffer(firstBuffer),
+      preview: await previewWorkbook(firstBuffer, await listGroups(db)),
+    });
+    const review = await reviewImportGroups(db, first.id, mapping);
+    expect(review.unmatchedGroups).toHaveLength(1);
+    const confirmed = await confirmImportGroups(db, first.id, mapping, [
+      { key: review.unmatchedGroups[0]!.key, action: "create" },
+    ]);
+    const created = (await listGroups(db)).find((group) => group.name === "NEW COMPANY LLC");
+    expect(confirmed.createdCount).toBe(1);
+    expect(created?.groupNumber).toBeNull();
+    expect(await listCarrierGroupIdentities(db, california.id)).toEqual([
+      { carrierId: california.id, externalGroupNumber: "83746", groupId: created?.id },
+    ]);
+
+    const laterBuffer = await workbook([
+      ["NEW COMPANY L.L.C.", "83746", "CaliforniaChoice", "Vision", "Alex Morgan", "50.00", "6.00", "", "2026-09"],
+    ]);
+    const later = await createImportStatement(db, {
+      originalFilename: "californiachoice-new-later.xlsx",
+      paidMonth: "2026-09",
+      carrierId: california.id,
+      sourceType: "excel",
+      status: "ready_to_map",
+      fingerprint: fingerprintBuffer(laterBuffer),
+      preview: await previewWorkbook(laterBuffer, await listGroups(db)),
+    });
+    const laterReview = await reviewImportGroups(db, later.id, mapping);
+    expect(laterReview.unmatchedGroups).toHaveLength(0);
+    expect(laterReview.rows[0]?.groupId).toBe(created?.id);
+    expect((await listGroups(db)).filter((group) => /new company/i.test(group.name))).toHaveLength(1);
+  });
 });

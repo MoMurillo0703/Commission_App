@@ -111,9 +111,11 @@ export async function confirmImportGroups(
         continue;
       }
 
+      const carrierScopedIdentity = /california\s*choice/i.test(review.statement.carrierName ?? "")
+        || review.statement.preview?.pdf?.groupMatchStrategy === "carrier_group_identity";
       const created = await createGroup(tx, {
         name,
-        groupNumber: proposed.sourceNumber,
+        groupNumber: carrierScopedIdentity ? null : proposed.sourceNumber,
       });
       await rememberCarrierGroupIdentity(tx, {
         carrierId: review.statement.carrierId,
