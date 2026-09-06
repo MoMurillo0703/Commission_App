@@ -3,11 +3,13 @@ import { settleAllocation } from "./allocations";
 import {
   correctionPreviewTotals,
   historicalAllocationForPaidMonth,
+  historicalAllocationIncludesRecipient,
   historicalAllocationState,
   missingAllocationBlockedMessage,
   newerAllocationBlockedMessage,
   proposedCorrectionSettlement,
 } from "./compensationCorrection";
+import { correctionPreviewToken, correctionRequestFingerprint } from "./compensationCorrectionAuth";
 
 const johnPerson = {
   id: 9,
@@ -76,5 +78,45 @@ describe("historical paid-month allocation for correction", () => {
       proposedRecipientPayableCents: 10000,
       resultingAgencyCents: 0,
     });
+    expect(historicalAllocationIncludesRecipient(johnPerson, [], "2026-09", { personKind: "agent", personId: 7 })).toBe(true);
+    expect(historicalAllocationIncludesRecipient(johnPerson, [], "2026-09", { personKind: "agent", personId: 8 })).toBe(false);
+    const token = correctionPreviewToken({
+      commissions: [{
+        commissionId: 1,
+        paidMonth: "2026-09",
+        allocation: {
+          id: 9,
+          groupId: 1,
+          lineOfBusinessId: 2,
+          effectiveStart: "2026-09",
+          effectiveEnd: null,
+          status: "active",
+          entries: [{ recipientType: "person", personKind: "agent", personId: 7, teamId: null, compensationBps: 10000 }],
+        },
+        teams: [],
+        proposedPayouts: [{
+          recipientType: "person",
+          personKind: "agent",
+          personId: 7,
+          teamId: null,
+          allocationBps: 10000,
+          teamInternalBps: null,
+          compensationCents: 10000,
+        }],
+        proposedAgentCompensationCents: 10000,
+        proposedAgencyNetCents: 0,
+      }],
+    });
+    expect(correctionRequestFingerprint({
+      commissionIds: [1],
+      previewToken: token,
+      reason: "Fix fallback",
+      termsHash: token,
+    })).not.toBe(correctionRequestFingerprint({
+      commissionIds: [1],
+      previewToken: token,
+      reason: "Different reason",
+      termsHash: token,
+    }));
   });
 });

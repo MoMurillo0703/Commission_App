@@ -14,24 +14,29 @@ import {
   newerAllocationBlockedMessage,
   proposedCorrectionSettlement,
   payoutAuditSnapshot,
+  stalePreviewMessage,
+  type CorrectionAuthorizedTerms,
   type CorrectionPreviewItem,
 } from "@/domain/compensationCorrection";
+import { correctionPreviewToken, correctionRequestFingerprint } from "@/domain/compensationCorrectionAuth";
 import { classifyAgencyFallback } from "@/domain/compensationFallback";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import {
   commissionRecords,
+  compensationAllocationEntries,
+  compensationAllocations,
   compensationCorrectionBatches,
   compensationCorrectionItems,
+  teamMemberships,
 } from "@/db/schema";
-import { ConflictError, ValidationError } from "@/lib/errors";
-import { isUniqueConstraintError } from "@/lib/errors";
-import { allocationCandidates, listAllocations } from "./allocations";
+import { ConflictError, ValidationError, isUniqueConstraintError } from "@/lib/errors";
+import { allocationCandidates, listAllocations, type AllocationView } from "./allocations";
 import { listAccountManagers } from "./accountManagers";
 import { listAgents } from "./agents";
-import { getCommission, listCommissions } from "./commissions";
+import { getCommission, listCommissions, type CommissionView } from "./commissions";
 import { listAllPayouts, listPayoutsForCommission, replaceCommissionPayouts, type PayoutView } from "./payouts";
-import { currentTeamMembers, listTeams } from "./teams";
+import { currentTeamMembers, listTeams, type TeamView } from "./teams";
 
 export type CorrectionInitiator = {
   id: string | null;
@@ -42,11 +47,20 @@ export type CorrectionInitiator = {
 export type CompensationCorrectionBatchResult = {
   batchId: number;
   confirmationKey: string;
+  previewToken: string;
+  requestFingerprint: string;
   reason: string;
   initiator: CorrectionInitiator;
   createdAt: string;
   commissionIds: number[];
   replayed: boolean;
+};
+
+export type CompensationCorrectionPreview = {
+  items: CorrectionPreviewItem[];
+  totals: ReturnType<typeof correctionPreviewTotals>;
+  correctableIds: number[];
+  previewToken: string | null;
 };
 
 async function personNameLookup(db: AppDatabase) {
@@ -70,6 +84,26 @@ async function teamShareMap(db: AppDatabase, paidMonth: string) {
       shareBps: member.shareBps,
     })),
   }]));
+}
+
+function teamAuthorization(teams: TeamView[], teamIds: number[], paidMonth: string) {
+  return teamIds.sort((left, right) => left - right).flatMap((teamId) => {
+    const team = teams.find((row) => row.id === teamId);
+    if (!team) return [];
+    return [{
+      teamId: team.id,
+      members: currentTeamMembers(team, paidMonth).map((member) => ({
+        personKind: member.personKind,
+        personId: member.personId,
+        shareBps: member.shareBps,
+        effectiveStart: member.effectiveStart,
+        effectiveEnd: member.effectiveEnd,
+        status: member.status,
+      })).sort((left, right) => (
+        left.personKind.localeCompare(right.personKind) || left.personId - right.personId
+      )),
+    }];
+  });
 }
 
 export async function listCorrectedCommissionIds(db?: AppDatabase) {
@@ -105,6 +139,8 @@ async function getBatchByConfirmationKey(db: AppDatabase, confirmationKey: strin
   return {
     batchId: batch.id,
     confirmationKey: batch.confirmationKey,
+    previewToken: batch.previewToken,
+    requestFingerprint: batch.requestFingerprint,
     reason: batch.reason,
     initiator: {
       id: batch.initiatorId,
@@ -117,18 +153,62 @@ async function getBatchByConfirmationKey(db: AppDatabase, confirmationKey: strin
   } satisfies CompensationCorrectionBatchResult;
 }
 
-export async function previewCompensationCorrection(
-  db: AppDatabase | undefined,
+function replayOrConflict(
+  existing: CompensationCorrectionBatchResult,
+  requestFingerprint: string,
+) {
+  if (existing.requestFingerprint !== requestFingerprint) {
+    throw new ConflictError("This confirmation key was already used for a different correction request.");
+  }
+  return existing;
+}
+
+async function lockCorrectionSources(
+  db: AppDatabase,
   commissionIds: number[],
-): Promise<{ items: CorrectionPreviewItem[]; totals: ReturnType<typeof correctionPreviewTotals>; correctableIds: number[] }> {
-  const database = await resolveDb(db);
+  allocationIds: number[],
+  teamIds: number[],
+) {
+  if (commissionIds.length > 0) {
+    await db.select({ id: commissionRecords.id })
+      .from(commissionRecords)
+      .where(inArray(commissionRecords.id, commissionIds))
+      .orderBy(commissionRecords.id)
+      .for("update");
+  }
+  if (allocationIds.length > 0) {
+    await db.select({ id: compensationAllocations.id })
+      .from(compensationAllocations)
+      .where(inArray(compensationAllocations.id, allocationIds))
+      .orderBy(compensationAllocations.id)
+      .for("update");
+    await db.select({ id: compensationAllocationEntries.id })
+      .from(compensationAllocationEntries)
+      .where(inArray(compensationAllocationEntries.allocationId, allocationIds))
+      .orderBy(compensationAllocationEntries.id)
+      .for("update");
+  }
+  if (teamIds.length > 0) {
+    await db.select({ id: teamMemberships.id })
+      .from(teamMemberships)
+      .where(inArray(teamMemberships.teamId, teamIds))
+      .orderBy(teamMemberships.id)
+      .for("update");
+  }
+}
+
+async function assembleCorrectionPlan(
+  db: AppDatabase,
+  commissionIds: number[],
+): Promise<CompensationCorrectionPreview & { terms: CorrectionAuthorizedTerms }> {
   const uniqueIds = [...new Set(commissionIds)].sort((left, right) => left - right);
   if (uniqueIds.length === 0) throw new ValidationError("Select at least one commission to preview.");
-  const [commissions, payouts, allocations, corrected] = await Promise.all([
-    listCommissions(database),
-    listAllPayouts(database),
-    listAllocations(database),
-    listCorrectedCommissionIds(database),
+  const [commissions, payouts, allocations, teams, corrected] = await Promise.all([
+    listCommissions(db),
+    listAllPayouts(db),
+    listAllocations(db),
+    listTeams(db),
+    listCorrectedCommissionIds(db),
   ]);
   const byId = new Map(commissions.map((row) => [row.id, row]));
   const payoutsByCommission = new Map<number, PayoutView[]>();
@@ -138,8 +218,9 @@ export async function previewCompensationCorrection(
     payoutsByCommission.set(payout.commissionId, current);
   }
   const candidates = allocationCandidates(allocations);
-  const names = await personNameLookup(database);
+  const names = await personNameLookup(db);
   const items: CorrectionPreviewItem[] = [];
+  const authorized: CorrectionAuthorizedTerms = { commissions: [] };
 
   for (const commissionId of uniqueIds) {
     const commission = byId.get(commissionId);
@@ -182,7 +263,10 @@ export async function previewCompensationCorrection(
     };
     const state = historicalAllocationState(candidates, query);
     const allocation = historicalAllocationForPaidMonth(candidates, query);
-    if (state === "newer_only" || !allocation) {
+    const fullAllocation = allocation
+      ? allocations.find((row) => row.id === allocation.id) ?? null
+      : null;
+    if (state === "newer_only" || !allocation || !fullAllocation) {
       items.push(correctionPreviewItem({
         commissionId: commission.id,
         paidMonth: commission.statementMonth,
@@ -200,7 +284,7 @@ export async function previewCompensationCorrection(
     const settled = settleAllocation(
       commission.grossCommissionCents,
       allocation.entries,
-      await teamShareMap(database, commission.statementMonth),
+      await teamShareMap(db, commission.statementMonth),
       { agencyName: "Murillo Insurance", personName: names },
     );
     items.push(correctionPreviewItem({
@@ -215,12 +299,76 @@ export async function previewCompensationCorrection(
       proposed: proposedCorrectionSettlement(settled, allocation),
       blockedReason: null,
     }));
+    const teamIds = [...new Set(allocation.entries.flatMap((entry) => entry.teamId == null ? [] : [entry.teamId]))];
+    authorized.commissions.push({
+      commissionId: commission.id,
+      paidMonth: commission.statementMonth,
+      allocation: {
+        id: fullAllocation.id,
+        groupId: fullAllocation.groupId,
+        lineOfBusinessId: fullAllocation.lineOfBusinessId,
+        effectiveStart: fullAllocation.effectiveStart,
+        effectiveEnd: fullAllocation.effectiveEnd,
+        status: fullAllocation.status,
+        entries: fullAllocation.entries.map((entry) => ({
+          recipientType: entry.recipientType,
+          personKind: entry.personKind,
+          personId: entry.personId,
+          teamId: entry.teamId,
+          compensationBps: entry.compensationBps,
+        })).sort((left, right) => (
+          left.recipientType.localeCompare(right.recipientType)
+          || (left.personId ?? 0) - (right.personId ?? 0)
+          || (left.teamId ?? 0) - (right.teamId ?? 0)
+        )),
+      },
+      teams: teamAuthorization(teams, teamIds, commission.statementMonth),
+      proposedPayouts: settled.payouts.map((payout) => ({
+        recipientType: payout.recipientType,
+        personKind: payout.personKind,
+        personId: payout.personId,
+        teamId: payout.teamId,
+        allocationBps: payout.allocationBps,
+        teamInternalBps: payout.teamInternalBps,
+        compensationCents: payout.compensationCents,
+      })),
+      proposedAgentCompensationCents: settled.compensationDistributedCents,
+      proposedAgencyNetCents: settled.agencyNetCents,
+    });
   }
 
+  const correctableIds = correctablePreviewIds(items);
   return {
     items,
     totals: correctionPreviewTotals(items),
-    correctableIds: correctablePreviewIds(items),
+    correctableIds,
+    previewToken: authorized.commissions.length === uniqueIds.length ? correctionPreviewToken(authorized) : null,
+    terms: authorized,
+  };
+}
+
+function sourceIdsForPlan(commissions: CommissionView[], allocations: AllocationView[]) {
+  const allocationIds = [...new Set(allocations.map((row) => row.id))];
+  const teamIds = [...new Set(allocations.flatMap((row) => (
+    row.entries.flatMap((entry) => entry.teamId == null ? [] : [entry.teamId])
+  )))];
+  return {
+    commissionIds: commissions.map((row) => row.id),
+    allocationIds,
+    teamIds,
+  };
+}
+
+export async function previewCompensationCorrection(
+  db: AppDatabase | undefined,
+  commissionIds: number[],
+): Promise<CompensationCorrectionPreview> {
+  const plan = await assembleCorrectionPlan(await resolveDb(db), commissionIds);
+  return {
+    items: plan.items,
+    totals: plan.totals,
+    correctableIds: plan.correctableIds,
+    previewToken: plan.previewToken,
   };
 }
 
@@ -230,45 +378,56 @@ export async function confirmCompensationCorrection(
     commissionIds: number[];
     reason: string;
     confirmationKey: string;
+    previewToken: string;
     initiator: CorrectionInitiator;
   },
 ): Promise<CompensationCorrectionBatchResult> {
   const database = await resolveDb(db);
   const reason = input.reason.trim();
   const confirmationKey = input.confirmationKey.trim();
+  const previewToken = input.previewToken.trim();
   if (!reason) throw new ValidationError("A correction reason is required.");
   if (!confirmationKey) throw new ValidationError("A confirmation key is required.");
+  if (!previewToken) throw new ValidationError("Confirm the exact preview. Preview again if it is missing.");
   const uniqueIds = [...new Set(input.commissionIds)].sort((left, right) => left - right);
   if (uniqueIds.length === 0) throw new ValidationError("Select at least one commission to correct.");
 
+  const incomingFingerprint = correctionRequestFingerprint({
+    commissionIds: uniqueIds,
+    previewToken,
+    reason,
+    termsHash: previewToken,
+  });
   const existing = await getBatchByConfirmationKey(database, confirmationKey);
-  if (existing) return existing;
+  if (existing) return replayOrConflict(existing, incomingFingerprint);
 
   try {
     return await database.transaction(async (tx) => {
       const transaction = tx as unknown as AppDatabase;
       const replay = await getBatchByConfirmationKey(transaction, confirmationKey);
-      if (replay) return replay;
+      if (replay) return replayOrConflict(replay, incomingFingerprint);
 
-      await transaction
-        .select({ id: commissionRecords.id })
-        .from(commissionRecords)
-        .where(inArray(commissionRecords.id, uniqueIds))
-        .orderBy(commissionRecords.id)
-        .for("update");
+      const commissions = (await listCommissions(transaction)).filter((row) => uniqueIds.includes(row.id));
+      const allocations = await listAllocations(transaction);
+      const pairKeys = new Set(commissions.map((row) => `${row.groupId}:${row.lineOfBusinessId}`));
+      const pairAllocations = allocations.filter((row) => pairKeys.has(`${row.groupId}:${row.lineOfBusinessId}`));
+      const sources = sourceIdsForPlan(commissions, pairAllocations);
+      await lockCorrectionSources(transaction, uniqueIds, sources.allocationIds, sources.teamIds);
 
-      const preview = await previewCompensationCorrection(transaction, uniqueIds);
-      const failed = preview.items.filter((item) => item.blockedReason || !item.proposed);
-      if (failed.length > 0) {
+      const plan = await assembleCorrectionPlan(transaction, uniqueIds);
+      const failed = plan.items.filter((item) => item.blockedReason || !item.proposed);
+      if (failed.length > 0 || plan.correctableIds.length !== uniqueIds.length || !plan.previewToken) {
         throw new ValidationError(failed[0]?.blockedReason ?? "One or more commissions cannot be corrected. The batch was not applied.");
       }
-      if (preview.correctableIds.length !== uniqueIds.length) {
-        throw new ValidationError("One or more commissions cannot be corrected. The batch was not applied.");
+      if (plan.previewToken !== previewToken) {
+        throw new ValidationError(stalePreviewMessage());
       }
 
       const now = new Date().toISOString();
       const [batch] = await transaction.insert(compensationCorrectionBatches).values({
         confirmationKey,
+        previewToken,
+        requestFingerprint: incomingFingerprint,
         reason,
         initiatorId: input.initiator.id,
         initiatorEmail: input.initiator.email,
@@ -277,9 +436,9 @@ export async function confirmCompensationCorrection(
       }).returning();
 
       const names = await personNameLookup(transaction);
-      const allocations = allocationCandidates(await listAllocations(transaction));
+      const lockedAllocations = allocationCandidates(await listAllocations(transaction));
 
-      for (const item of preview.items) {
+      for (const item of plan.items) {
         const commission = await getCommission(transaction, item.commissionId);
         if (!commission) throw new ValidationError("Commission not found.");
         const payouts = await listPayoutsForCommission(transaction, item.commissionId);
@@ -288,13 +447,14 @@ export async function confirmCompensationCorrection(
         if (!eligibility.eligible) {
           throw new ValidationError(eligibility.reason ?? "Commission is not an eligible Agency fallback.");
         }
-        const allocation = historicalAllocationForPaidMonth(allocations, {
+        const authorized = plan.terms.commissions.find((row) => row.commissionId === commission.id);
+        const allocation = historicalAllocationForPaidMonth(lockedAllocations, {
           groupId: commission.groupId,
           lineOfBusinessId: commission.lineOfBusinessId,
           paidMonth: commission.statementMonth,
         });
-        if (!allocation || allocation.id !== item.proposed?.allocationId) {
-          throw new ValidationError("The historical allocation changed before confirmation. The batch was not applied.");
+        if (!authorized || !allocation || allocation.id !== authorized.allocation.id || allocation.id !== item.proposed?.allocationId) {
+          throw new ValidationError(stalePreviewMessage());
         }
         const settled = settleAllocation(
           commission.grossCommissionCents,
@@ -302,8 +462,12 @@ export async function confirmCompensationCorrection(
           await teamShareMap(transaction, commission.statementMonth),
           { agencyName: "Murillo Insurance", personName: names },
         );
-        if (commission.grossCommissionCents !== item.grossCommissionCents) {
-          throw new ValidationError("Gross commission changed before confirmation. The batch was not applied.");
+        if (
+          commission.grossCommissionCents !== item.grossCommissionCents
+          || settled.compensationDistributedCents !== authorized.proposedAgentCompensationCents
+          || settled.agencyNetCents !== authorized.proposedAgencyNetCents
+        ) {
+          throw new ValidationError(stalePreviewMessage());
         }
 
         await transaction.insert(compensationCorrectionItems).values({
@@ -344,6 +508,8 @@ export async function confirmCompensationCorrection(
       return {
         batchId: batch.id,
         confirmationKey,
+        previewToken,
+        requestFingerprint: incomingFingerprint,
         reason,
         initiator: input.initiator,
         createdAt: now,
@@ -354,7 +520,7 @@ export async function confirmCompensationCorrection(
   } catch (error) {
     if (isUniqueConstraintError(error)) {
       const replay = await getBatchByConfirmationKey(database, confirmationKey);
-      if (replay) return replay;
+      if (replay) return replayOrConflict(replay, incomingFingerprint);
       throw new ConflictError("One or more commissions were already corrected. The batch was not applied.");
     }
     throw error;

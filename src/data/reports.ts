@@ -14,16 +14,19 @@ import {
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import { agents, carriers, commissionRecords, groups, linesOfBusiness } from "@/db/schema";
+import { historicalAllocationForPaidMonth, historicalAllocationIncludesRecipient } from "@/domain/compensationCorrection";
 import { compensationReviewHref } from "@/domain/compensationExceptions";
 import { isEligibleAgencyFallback } from "@/domain/compensationFallback";
 import { recipientPayableReadiness } from "@/domain/recipientStatement";
 import { individualRecipientTypeLabel } from "@/domain/reportWorkspace";
+import { allocationCandidates, listAllocations } from "./allocations";
 import { listCorrectedCommissionIds } from "./compensationCorrections";
 import { listAllPayouts } from "./payouts";
+import { listTeams } from "./teams";
 import { getAccountManager } from "./accountManagers";
 import { getAgent } from "./agents";
 import { getCarrier } from "./carriers";
-import { getGroup, listGroups } from "./groups";
+import { getGroup } from "./groups";
 import { getLineOfBusiness } from "./linesOfBusiness";
 import { getTeam } from "./teams";
 
@@ -168,38 +171,47 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
     current.push(payout);
     payoutsByCommission.set(payout.commissionId, current);
   }
-  const corrected = await listCorrectedCommissionIds(database);
-  const assignedGroupIds = filters.personId && filters.personKind
-    ? new Set(
-      (await listGroups(database)).flatMap((group) => {
-        const assigned = filters.personKind === "agent"
-          ? group.primaryAgentId === filters.personId
-          : group.accountManagerId === filters.personId;
-        return assigned ? [group.id] : [];
-      }),
-    )
-    : null;
-  const payableScope = assignedGroupIds
-    ? commissions.filter((commission) => assignedGroupIds.has(commission.groupId))
-    : commissions;
+  const [corrected, allocations, teams] = await Promise.all([
+    listCorrectedCommissionIds(database),
+    listAllocations(database),
+    listTeams(database),
+  ]);
+  const candidates = allocationCandidates(allocations);
   const payable = recipientPayableReadiness({
-    postedCommissions: payableScope.map((commission) => ({
-      id: commission.id,
-      groupId: commission.groupId,
-      groupName: commission.groupName,
-      lineOfBusinessId: commission.lineOfBusinessId,
-      lineOfBusinessName: commission.lineOfBusinessName,
-      paidMonth: commission.paidMonth,
-      grossCommissionCents: commission.grossCommissionCents,
-      isEligibleFallback: isEligibleAgencyFallback({
+    postedCommissions: commissions.map((commission) => {
+      const eligible = isEligibleAgencyFallback({
         commissionId: commission.id,
         grossCommissionCents: commission.grossCommissionCents,
         agentCompensationCents: commission.compensationDistributedCents,
         agencyNetCents: commission.agencyNetCents,
         payouts: payoutsByCommission.get(commission.id) ?? [],
         hasPriorCorrection: corrected.has(commission.id),
-      }),
-    })),
+      });
+      const historicallyRelevant = Boolean(
+        filters.personId
+        && (filters.personKind === "agent" || filters.personKind === "account_manager")
+        && historicalAllocationIncludesRecipient(
+          historicalAllocationForPaidMonth(candidates, {
+            groupId: commission.groupId,
+            lineOfBusinessId: commission.lineOfBusinessId,
+            paidMonth: commission.paidMonth,
+          }),
+          teams,
+          commission.paidMonth,
+          { personKind: filters.personKind, personId: filters.personId },
+        ),
+      );
+      return {
+        id: commission.id,
+        groupId: commission.groupId,
+        groupName: commission.groupName,
+        lineOfBusinessId: commission.lineOfBusinessId,
+        lineOfBusinessName: commission.lineOfBusinessName,
+        paidMonth: commission.paidMonth,
+        grossCommissionCents: commission.grossCommissionCents,
+        isEligibleFallback: eligible && historicallyRelevant,
+      };
+    }),
   });
   const paidMonth = filters.paidMonth ?? payable.unallocated[0]?.paidMonth ?? "";
   const names = await reportNameLookup(database, filters);

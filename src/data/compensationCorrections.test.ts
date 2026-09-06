@@ -63,18 +63,15 @@ describe("authorized historical compensation correction", () => {
     });
     expect((await listPayoutsForCommission(db, legitimate.id)).some((payout) => payout.allocationId == null && payout.recipientType === "person")).toBe(true);
 
-    const report = await buildIndividualReport(db, {
+    const assignedOnly = await buildIndividualReport(db, {
       kind: "recipient",
       paidMonth: "2026-09",
       personKind: "agent",
       personId: john.id,
     });
-    expect(report.payable?.unallocated).toHaveLength(6);
-    expect(report.payable?.message).toMatch(/6 commissions need compensation setup/);
-    expect(report.payable?.reviewHref).toContain("/compensation?review=1");
-    expect(report.payable?.unallocated.map((row) => row.commissionId)).not.toContain(legitimate.id);
-    const reviewIds = parseCommissionIds(new URL(report.payable!.reviewHref!, "https://app.local").searchParams.get("commissionIds"));
-    expect(reviewIds.sort((left, right) => left - right)).toEqual(posted.map((row) => row.id).sort((left, right) => left - right));
+    expect(assignedOnly.payable?.unallocated).toHaveLength(0);
+    expect(assignedOnly.payable?.reviewHref).toBeNull();
+    const reviewIds = posted.map((row) => row.id);
 
     const exceptions = await listPostedCompensationExceptions(db, { paidMonth: "2026-09", commissionIds: reviewIds });
     expect(exceptions).toHaveLength(6);
@@ -98,8 +95,9 @@ describe("authorized historical compensation correction", () => {
       commissionIds: [posted[0]!.id],
       reason: "Should not use newer allocation",
       confirmationKey: "blocked-newer-1",
+      previewToken: blockedNewer.previewToken ?? "missing-preview-token-value",
       initiator,
-    })).rejects.toThrow(/newer allocation|covers the original paid month|cannot be corrected/);
+    })).rejects.toThrow(/newer allocation|covers the original paid month|cannot be corrected|exact preview/);
     for (const allocation of newer.allocations) {
       await updateAllocation(db, allocation.id, { status: "inactive" });
     }
@@ -123,8 +121,18 @@ describe("authorized historical compensation correction", () => {
     const grouped = groupCompensationExceptions(exceptions, allocations);
     expect(exceptionWorkSummary(grouped).readyCommissionIds).toHaveLength(6);
     expect(grouped.every((group) => group.lines.every((line) => line.status === "ready_to_correct"))).toBe(true);
+    const johnReady = await buildIndividualReport(db, {
+      kind: "recipient",
+      paidMonth: "2026-09",
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(johnReady.payable?.unallocated).toHaveLength(6);
+    expect(johnReady.payable?.message).toMatch(/6 commissions need compensation setup/);
+    expect(parseCommissionIds(new URL(johnReady.payable!.reviewHref!, "https://app.local").searchParams.get("commissionIds")).sort((left, right) => left - right)).toEqual(reviewIds.sort((left, right) => left - right));
 
     const preview = await previewCompensationCorrection(db, reviewIds);
+    expect(preview.previewToken).toMatch(/^[a-f0-9]{64}$/);
     expect(preview.correctableIds.sort((left, right) => left - right)).toEqual(reviewIds.sort((left, right) => left - right));
     expect(preview.items[0]?.original.label).toBe("Agency 100%");
     expect(preview.totals.grossCents).toBe(10000 - 1500 + 4000 + 3000 + 1500 + 800);
@@ -138,8 +146,9 @@ describe("authorized historical compensation correction", () => {
       commissionIds: [...reviewIds, posted[0]!.id + 9999],
       reason: "Attempt mixed invalid batch",
       confirmationKey: "batch-fail-1",
+      previewToken: preview.previewToken ?? "missing-preview-token-value",
       initiator,
-    })).rejects.toThrow(/not found|cannot be corrected/);
+    })).rejects.toThrow(/not found|cannot be corrected|no longer matches/);
     expect((await listAllPayouts(db)).map((row) => ({ id: row.id, allocationId: row.allocationId, cents: row.compensationCents }))).toEqual(
       beforePayouts.map((row) => ({ id: row.id, allocationId: row.allocationId, cents: row.compensationCents })),
     );
@@ -148,6 +157,7 @@ describe("authorized historical compensation correction", () => {
       commissionIds: reviewIds,
       reason: "September 2026 missing allocation fallback for John Elizondo",
       confirmationKey: "correct-six-001",
+      previewToken: preview.previewToken!,
       initiator,
     });
     expect(confirmed.replayed).toBe(false);
@@ -158,6 +168,7 @@ describe("authorized historical compensation correction", () => {
       commissionIds: reviewIds,
       reason: "September 2026 missing allocation fallback for John Elizondo",
       confirmationKey: "correct-six-001",
+      previewToken: preview.previewToken!,
       initiator,
     });
     expect(replay.replayed).toBe(true);
@@ -165,8 +176,17 @@ describe("authorized historical compensation correction", () => {
 
     await expect(confirmCompensationCorrection(db, {
       commissionIds: reviewIds,
+      reason: "Different request against the same key",
+      confirmationKey: "correct-six-001",
+      previewToken: preview.previewToken!,
+      initiator,
+    })).rejects.toThrow(/different correction request/);
+
+    await expect(confirmCompensationCorrection(db, {
+      commissionIds: reviewIds,
       reason: "Second attempt",
       confirmationKey: "correct-six-002",
+      previewToken: preview.previewToken!,
       initiator,
     })).rejects.toThrow(/already exists for this commission|already corrected|not an eligible|cannot be corrected/);
 

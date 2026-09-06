@@ -65,7 +65,7 @@ export function StatementPosting({
   const [accountManagers, setAccountManagers] = useState<NamedOption[]>([]);
   const [lines, setLines] = useState<NamedOption[]>([]);
   const [agents, setAgents] = useState<NamedOption[]>([]);
-  const [groupDecisions, setGroupDecisions] = useState<Record<string, GroupImportDecision>>({});
+  const [userGroupDecisions, setUserGroupDecisions] = useState<Record<string, GroupImportDecision>>({});
   const [lineDecisions, setLineDecisions] = useState<Record<string, NamedImportDecision>>({});
   const [agentDecisions, setAgentDecisions] = useState<Record<string, NamedImportDecision>>({});
   const [error, setError] = useState("");
@@ -88,32 +88,22 @@ export function StatementPosting({
     ]);
   }, []);
 
-  useEffect(() => {
-    if (!review || groups.length === 0) return;
-    setGroupDecisions((current) => {
-      const next = { ...current };
-      for (const group of review.unmatchedGroups ?? []) {
-        const existing = next[group.key];
-        if (existing && existing.action !== "create") continue;
-        const suggested = defaultGroupImportAction(groups, group.sourceName, group.sourceNumber);
-        if (suggested.action === "match") {
-          next[group.key] = { key: group.key, action: "match", existingGroupId: suggested.existingGroupId };
-        }
-      }
-      return next;
-    });
-  }, [groups, review]);
+  const groupDecisions = useMemo(() => Object.fromEntries((review?.unmatchedGroups ?? []).map((group) => {
+    const user = userGroupDecisions[group.key];
+    if (user) return [group.key, user];
+    const suggested = groups.length > 0
+      ? defaultGroupImportAction(groups, group.sourceName, group.sourceNumber)
+      : { action: "create" as const, existingGroupId: undefined };
+    return [group.key, {
+      key: group.key,
+      action: suggested.action,
+      existingGroupId: suggested.existingGroupId,
+    }];
+  })), [review, groups, userGroupDecisions]);
 
-  function applyReview(body: PreviewResponse, groupOptions = groups) {
+  function applyReview(body: PreviewResponse) {
     setReview(body);
-    setGroupDecisions(Object.fromEntries((body.unmatchedGroups ?? []).map((group) => {
-      const suggested = defaultGroupImportAction(groupOptions, group.sourceName, group.sourceNumber);
-      return [group.key, {
-        key: group.key,
-        action: suggested.action,
-        existingGroupId: suggested.existingGroupId,
-      }];
-    })));
+    setUserGroupDecisions({});
     setLineDecisions(defaultNamedDecisions(body.unmatchedLines ?? []));
     setAgentDecisions(defaultNamedDecisions(body.unmatchedAgents ?? []));
     if (variant !== "extracted-confirm" && body.readiness?.blockers.some((blocker) => blocker.kind === "mapping")) {
@@ -175,8 +165,8 @@ export function StatementPosting({
   }
 
   function setGroupDecision(key: string, patch: Partial<GroupImportDecision>) {
-    setGroupDecisions((current) => {
-      const previous = current[key] ?? { key, action: "create" as const };
+    setUserGroupDecisions((current) => {
+      const previous = current[key] ?? groupDecisions[key] ?? { key, action: "create" as const };
       return { ...current, [key]: { ...previous, ...patch, key } };
     });
   }
@@ -580,20 +570,19 @@ function StatementGroupAssignment({
       .filter((group): group is NamedOption => Boolean(group));
   }, [groups, rows]);
   const { assigned: assignedGroups, needsAssignment } = partitionStatementGroupAssignments(statementGroups);
-  const [drafts, setDrafts] = useState<Record<number, { accountManagerId: string; primaryAgentId: string }>>({});
-  const [selected, setSelected] = useState<Record<number, boolean>>({});
+  const [draftOverrides, setDraftOverrides] = useState<Record<number, { accountManagerId: string; primaryAgentId: string }>>({});
+  const [selectedOverrides, setSelectedOverrides] = useState<Record<number, boolean>>({});
   const [saved, setSaved] = useState("");
   const [bulkManagerId, setBulkManagerId] = useState("");
   const [bulkAgentId, setBulkAgentId] = useState("");
-
-  useEffect(() => {
-    const missing = partitionStatementGroupAssignments(statementGroups).needsAssignment;
-    setDrafts(Object.fromEntries(missing.map((group) => [group.id, {
-      accountManagerId: group.accountManagerId ? String(group.accountManagerId) : "",
-      primaryAgentId: group.primaryAgentId ? String(group.primaryAgentId) : "",
-    }])));
-    setSelected((current) => Object.fromEntries(missing.map((group) => [group.id, current[group.id] ?? true])));
-  }, [statementGroups]);
+  const drafts = Object.fromEntries(needsAssignment.map((group) => [group.id, draftOverrides[group.id] ?? {
+    accountManagerId: group.accountManagerId ? String(group.accountManagerId) : "",
+    primaryAgentId: group.primaryAgentId ? String(group.primaryAgentId) : "",
+  }]));
+  const selected = Object.fromEntries(needsAssignment.map((group) => [
+    group.id,
+    selectedOverrides[group.id] ?? true,
+  ]));
 
   if (statementGroups.length === 0) return null;
 
@@ -635,12 +624,12 @@ function StatementGroupAssignment({
 
   function applyToSelected() {
     const ids = needsAssignment.filter((group) => selected[group.id]);
-    setDrafts((current) => {
+    setDraftOverrides((current) => {
       const next = { ...current };
       for (const group of ids) {
         next[group.id] = {
-          accountManagerId: bulkManagerId || current[group.id]?.accountManagerId || "",
-          primaryAgentId: bulkAgentId || current[group.id]?.primaryAgentId || "",
+          accountManagerId: bulkManagerId || drafts[group.id]?.accountManagerId || "",
+          primaryAgentId: bulkAgentId || drafts[group.id]?.primaryAgentId || "",
         };
       }
       return next;
@@ -691,7 +680,7 @@ function StatementGroupAssignment({
                     type="checkbox"
                     aria-label="Select all groups needing assignment"
                     checked={needsAssignment.length > 0 && needsAssignment.every((group) => selected[group.id])}
-                    onChange={(event) => setSelected(Object.fromEntries(needsAssignment.map((group) => [group.id, event.target.checked])))}
+                    onChange={(event) => setSelectedOverrides(Object.fromEntries(needsAssignment.map((group) => [group.id, event.target.checked])))}
                   />
                 </th>
                 <th>Group</th>
@@ -709,7 +698,7 @@ function StatementGroupAssignment({
                         type="checkbox"
                         aria-label={`Select ${group.name}`}
                         checked={Boolean(selected[group.id])}
-                        onChange={(event) => setSelected((current) => ({ ...current, [group.id]: event.target.checked }))}
+                        onChange={(event) => setSelectedOverrides((current) => ({ ...current, [group.id]: event.target.checked }))}
                       />
                     </td>
                     <td>
@@ -720,7 +709,7 @@ function StatementGroupAssignment({
                       <select
                         aria-label={`Account manager for ${group.name}`}
                         value={draft.accountManagerId}
-                        onChange={(event) => setDrafts((current) => ({
+                        onChange={(event) => setDraftOverrides((current) => ({
                           ...current,
                           [group.id]: { ...draft, accountManagerId: event.target.value },
                         }))}
@@ -735,7 +724,7 @@ function StatementGroupAssignment({
                       <select
                         aria-label={`Primary agent for ${group.name}`}
                         value={draft.primaryAgentId}
-                        onChange={(event) => setDrafts((current) => ({
+                        onChange={(event) => setDraftOverrides((current) => ({
                           ...current,
                           [group.id]: { ...draft, primaryAgentId: event.target.value },
                         }))}

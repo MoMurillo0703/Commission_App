@@ -210,6 +210,7 @@ export const compensationCorrectionConfirmSchema = z.object({
   commissionIds: z.array(z.coerce.number().int().positive()).min(1, "Select at least one commission."),
   reason: z.string().trim().min(3, "Enter a correction reason."),
   confirmationKey: z.string().trim().min(8, "Confirmation key is required."),
+  previewToken: z.string().trim().min(16, "Confirm the exact preview. Preview again if it expired."),
 });
 
 export function emptyToNull(value: string | null | undefined) {

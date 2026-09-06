@@ -80,10 +80,28 @@ export function CompensationWorkspace({
     commissions: PostedCompensationException[];
   } | null;
 }) {
+  const focusedAllocation = focusAllocationId
+    ? initialAllocations.find((allocation) => allocation.id === focusAllocationId) ?? null
+    : null;
   const [allocations, setAllocations] = useState(initialAllocations);
   const [teams, setTeams] = useState(initialTeams);
-  const [draft, setDraft] = useState(defaultAllocationDraft());
-  const [error, setError] = useState("");
+  const [draft, setDraft] = useState(() => {
+    if (!focusedAllocation) return defaultAllocationDraft();
+    return {
+      groupId: String(focusedAllocation.groupId),
+      lineOfBusinessId: String(focusedAllocation.lineOfBusinessId),
+      effectiveStart: "",
+      effectiveEnd: "",
+      entries: draftFromAllocationEntries(focusedAllocation.entries.map((entry) => ({
+        recipientType: entry.recipientType,
+        personKind: entry.personKind,
+        personId: entry.personId,
+        teamId: entry.teamId,
+        compensationPercent: bpsToPercentString(entry.compensationBps),
+      }))),
+    };
+  });
+  const [error, setError] = useState(focusedAllocation ? "Enter a new effective start month, then apply. Only this Line of Coverage is selected." : "");
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
@@ -96,19 +114,22 @@ export function CompensationWorkspace({
   const [queueNotice, setQueueNotice] = useState("");
   const [queueSessionTotal, setQueueSessionTotal] = useState(initialQueue.length);
   const [queueSessionPosition, setQueueSessionPosition] = useState(0);
-  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(focusedAllocation?.groupId ?? null);
+  const [workspaceOpen, setWorkspaceOpen] = useState(Boolean(focusedAllocation));
   const [reviewActive, setReviewActive] = useState(Boolean(reviewContext));
   const [reviewCommissions, setReviewCommissions] = useState(reviewContext?.commissions ?? []);
   const [correctionOpen, setCorrectionOpen] = useState(false);
   const [correctionIds, setCorrectionIds] = useState<number[]>([]);
   const [confirmationKey, setConfirmationKey] = useState("");
-  const [workspaceKeepLineIds, setWorkspaceKeepLineIds] = useState<number[]>([]);
+  const [workspaceKeepLineIds, setWorkspaceKeepLineIds] = useState<number[]>(focusedAllocation ? [focusedAllocation.lineOfBusinessId] : []);
   const [showHistory, setShowHistory] = useState(false);
   const [lineModes, setLineModes] = useState<Record<number, LineApplyMode>>({});
-  const allocationsRef = useRef(allocations);
-  const pendingOverrideLineId = useRef<number | null>(null);
-  allocationsRef.current = allocations;
+  const [overrideLineId, setOverrideLineId] = useState<number | null>(focusedAllocation?.lineOfBusinessId ?? null);
+  const allocationsRef = useRef(initialAllocations);
+
+  useEffect(() => {
+    allocationsRef.current = allocations;
+  }, [allocations]);
 
   const currentQueueItem = queue[queueIndex] ?? null;
   const draftGroupId = Number(draft.groupId) || null;
@@ -141,6 +162,8 @@ export function CompensationWorkspace({
 
   function resetDraft() {
     setDraft(cancelAllocationDraft());
+    setOverrideLineId(null);
+    setLineModes({});
     setError("");
   }
 
@@ -149,7 +172,7 @@ export function CompensationWorkspace({
     setSuccess("");
     const targets = plannedAllocationTargets({
       lineIds: applyLines.map((line) => line.lineOfBusinessId),
-      modes: lineModes,
+      modes: displayedLineModes,
       templateEntries: allocationEntryPayload(draft.entries).map((entry) => ({
         recipientType: entry.recipientType,
         personKind: entry.personKind,
@@ -197,6 +220,7 @@ export function CompensationWorkspace({
           return;
         }
         setSuccess(result.success ?? allocationSavedMessage());
+        setOverrideLineId(null);
         setLineModes({});
         if (queueOpen && currentQueueItem) {
           const next = afterGroupQueueRefresh(result.queue, currentQueueItem.groupId, queueIndex);
@@ -223,6 +247,7 @@ export function CompensationWorkspace({
     setWorkspaceKeepLineIds(keepLineIds);
     setShowHistory(false);
     setWorkspaceOpen(true);
+    setOverrideLineId(null);
     setLineModes(keepLineIds.length
       ? Object.fromEntries(keepLineIds.map((id) => [id, "template" as const]))
       : {});
@@ -239,21 +264,12 @@ export function CompensationWorkspace({
     setShowHistory(false);
   }
 
-  useEffect(() => {
-    if (!focusAllocationId) return;
-    const row = allocations.find((allocation) => allocation.id === focusAllocationId);
-    if (row) {
-      openGroupWorkspace(row.groupId, [row.lineOfBusinessId]);
-      changeAllocation(row);
-    }
-    // Load the complete allocation once when arriving from People.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusAllocationId]);
-
   function loadQueueGroup(item: GroupCompensationQueueItem | null) {
     if (!item) return;
     setSelectedGroupId(item.groupId);
     setWorkspaceKeepLineIds(item.lineOfBusinessIds);
+    setOverrideLineId(null);
+    setLineModes({});
     setDraft({
       groupId: String(item.groupId),
       lineOfBusinessId: "",
@@ -301,7 +317,7 @@ export function CompensationWorkspace({
   async function changeAllocation(row: { id: number }) {
     const allocation = allocationsRef.current.find((item) => item.id === row.id);
     if (!allocation) return;
-    pendingOverrideLineId.current = allocation.lineOfBusinessId;
+    setOverrideLineId(allocation.lineOfBusinessId);
     setSelectedGroupId(allocation.groupId);
     setDraft({
       groupId: String(allocation.groupId),
@@ -390,6 +406,12 @@ export function CompensationWorkspace({
     : [];
   const exceptionWork = exceptionWorkSummary(exceptionGroups);
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) ?? null;
+  const showGroupWorkspace = Boolean(
+    workspaceOpen
+    && selectedGroup
+    && !queueOpen
+    && (!reviewActive || exceptionWork.groups.some((group) => group.groupId === selectedGroupId)),
+  );
   const selectedHistory = selectedGroupId ? historicalAllocationsForGroup(allocations, selectedGroupId) : [];
   const coverageLines = groupCoverageLines({
     groupId: selectedGroupId ?? draftGroupId,
@@ -418,29 +440,12 @@ export function CompensationWorkspace({
     }
   });
 
-  useEffect(() => {
-    if (!reviewActive || !workspaceOpen || !selectedGroupId) return;
-    if (!exceptionWork.groups.some((group) => group.groupId === selectedGroupId)) {
-      closeGroupWorkspace();
-    }
-    // Close only after a refresh removes this Group from the remaining exception work list.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allocations, reviewActive, selectedGroupId, reviewCommissions]);
-
-  useEffect(() => {
-    if (pendingOverrideLineId.current != null) {
-      const lineId = pendingOverrideLineId.current;
-      pendingOverrideLineId.current = null;
-      setLineModes(Object.fromEntries(coverageLines.map((line) => [
+  const displayedLineModes = overrideLineId != null
+    ? Object.fromEntries(coverageLines.map((line) => [
         line.lineOfBusinessId,
-        line.lineOfBusinessId === lineId ? "template" : "skip",
-      ])));
-      return;
-    }
-    setLineModes({});
-    // Default selection is unconfigured LOBs via coverageMode fallback. Do not wipe checkbox/agency choices after refresh.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftGroupId, selectedGroupId]);
+        line.lineOfBusinessId === overrideLineId ? "template" as const : "skip" as const,
+      ]))
+    : lineModes;
 
   function beginLineOverride(line: (typeof coverageLines)[number]) {
     const allocation = allocations.find((row) => row.id === line.allocationId);
@@ -458,6 +463,7 @@ export function CompensationWorkspace({
         })))
         : current.entries,
     }));
+    setOverrideLineId(null);
     setLineModes(Object.fromEntries(coverageLines.map((item) => [
       item.lineOfBusinessId,
       item.lineOfBusinessId === line.lineOfBusinessId ? "template" : "skip",
@@ -479,18 +485,30 @@ export function CompensationWorkspace({
   const coverageTable = (
     <GroupCoverageTable
       lines={coverageLines}
-      modes={lineModes}
+      modes={displayedLineModes}
       templateEntries={templateEntries}
-      onToggle={(lineOfBusinessId, selected, currentMode) => setLineModes((current) => setCoverageMode(
-        current,
-        lineOfBusinessId,
-        selected ? (currentMode === "agency" ? "agency" : "template") : "skip",
-      ))}
-      onAgency={(lineOfBusinessId) => setLineModes((current) => setCoverageMode(current, lineOfBusinessId, "agency"))}
+      onToggle={(lineOfBusinessId, selected, currentMode) => {
+        setOverrideLineId(null);
+        setLineModes(setCoverageMode(
+          displayedLineModes,
+          lineOfBusinessId,
+          selected ? (currentMode === "agency" ? "agency" : "template") : "skip",
+        ));
+      }}
+      onAgency={(lineOfBusinessId) => {
+        setOverrideLineId(null);
+        setLineModes(setCoverageMode(displayedLineModes, lineOfBusinessId, "agency"));
+      }}
       onChange={(line) => beginLineOverride(line)}
       onDeactivate={(allocationId) => void deactivate(allocationId)}
-      onSelectNeedingSetup={() => setLineModes(selectNeedingSetupModes(coverageLines))}
-      onClearSelection={() => setLineModes(clearCoverageModes(coverageLines))}
+      onSelectNeedingSetup={() => {
+        setOverrideLineId(null);
+        setLineModes(selectNeedingSetupModes(coverageLines));
+      }}
+      onClearSelection={() => {
+        setOverrideLineId(null);
+        setLineModes(clearCoverageModes(coverageLines));
+      }}
     />
   );
 
@@ -620,7 +638,7 @@ export function CompensationWorkspace({
         )}
       </section>}
 
-      {workspaceOpen && selectedGroup && !queueOpen && (
+      {showGroupWorkspace && selectedGroup && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="group-workspace-title" onClick={() => { resetDraft(); closeGroupWorkspace(); }}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <p className="eyebrow">Group compensation</p>

@@ -110,7 +110,7 @@ Posted snapshot per recipient, including expanded team members. `commission_payo
 
 ### `compensation_correction_batches` / `compensation_correction_items`
 
-Audit-only history for an authorized fallback correction. One batch has a unique `confirmation_key`, reason, initiator, and timestamp. Each item stores one `commission_id` (unique — a commission can be corrected once), the original paid month, the allocation used, and JSON snapshots of original and corrected payouts plus header compensation / Agency Net. These rows are not payouts and must not be summed into reports. No production backfill.
+Audit-only history for an authorized fallback correction. One batch has a unique `confirmation_key`, the authorized `preview_token`, a `request_fingerprint` (commission IDs + preview token + reason + intended terms), reason, initiator, and timestamp. Each item stores one `commission_id` (unique — a commission can be corrected once), the original paid month, the allocation used, and JSON snapshots of original and corrected payouts plus header compensation / Agency Net. These rows are not payouts and must not be summed into reports. Database triggers reject UPDATE and DELETE; the audit is append-only. No production backfill.
 
 ### `import_statements`
 

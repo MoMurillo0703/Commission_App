@@ -38,8 +38,8 @@ describe("safe fallback exception listing", () => {
       personKind: "agent",
       personId: john.id,
     });
-    expect(report.payable?.unallocated.map((row) => row.commissionId)).toEqual([fallback.id]);
+    expect(report.payable?.unallocated).toHaveLength(0);
     expect(report.payable?.unallocated.map((row) => row.commissionId)).not.toContain(legitimate.id);
-    expect(report.payable?.reviewHref).toContain(`commissionIds=${fallback.id}`);
+    expect(report.payable?.reviewHref).toBeNull();
   });
 });

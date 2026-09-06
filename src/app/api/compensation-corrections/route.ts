@@ -14,6 +14,7 @@ export async function POST(request: Request) {
       commissionIds: body.commissionIds,
       reason: body.reason,
       confirmationKey: body.confirmationKey,
+      previewToken: body.previewToken,
       initiator: await currentCorrectionInitiator(),
     }), { status: 201 });
   } catch (error) {

@@ -232,7 +232,7 @@ describe("posted commission reports", () => {
     expect(text).toMatch(/John Elizando|TOTAL PAYABLE/i);
   });
 
-  it("does not call a recipient statement payable-ready when assigned-group commissions lack an allocation", async () => {
+  it("does not treat current Group assignment as a recipient compensation exception", async () => {
     const db = await createTestDb();
     const john = await createAgent(db, { name: "John Elizando" });
     const group = await createGroup(db, { name: "Need Plan", primaryAgentId: john.id });
@@ -251,27 +251,23 @@ describe("posted commission reports", () => {
       personKind: "agent",
       personId: john.id,
     });
-    expect(report.payable?.payableReady).toBe(false);
-    expect(report.payable?.message).toMatch(/need(?:s)? compensation setup/);
-    expect(report.payable?.reviewHref).toContain("/compensation?review=1");
-    expect(report.payable?.unallocated[0]).toMatchObject({
-      groupId: group.id,
-      lineOfBusinessId: dental.id,
-    });
+    expect(report.payable?.payableReady).toBe(true);
+    expect(report.payable?.unallocated).toHaveLength(0);
+    expect(report.payable?.reviewHref).toBeNull();
     expect(report.rows).toHaveLength(0);
     expect(report.matchingCommissionCount).toBe(1);
     expect(report.names.personName).toBe("John Elizando");
   });
 
-  it("does not treat another person's unallocated commissions as this recipient's compensation exceptions", async () => {
+  it("uses a historical paid-month allocation, not current assignment, for recipient exceptions", async () => {
     const db = await createTestDb();
     const john = await createAgent(db, { name: "John Elizondo" });
     const other = await createAgent(db, { name: "Other Agent" });
-    const johnGroup = await createGroup(db, { name: "John Group", primaryAgentId: john.id });
-    const otherGroup = await createGroup(db, { name: "Other Group", primaryAgentId: other.id });
+    const johnGroup = await createGroup(db, { name: "John Group", primaryAgentId: other.id });
+    const otherGroup = await createGroup(db, { name: "Other Group", primaryAgentId: john.id });
     const carrier = await createCarrier(db, { name: "Principal" });
     const medical = await createLineOfBusiness(db, { name: "Medical" });
-    await createCommission(db, {
+    const johnCommission = await createCommission(db, {
       statementMonth: "2026-09",
       groupId: johnGroup.id,
       carrierId: carrier.id,
@@ -285,15 +281,28 @@ describe("posted commission reports", () => {
       lineOfBusinessId: medical.id,
       grossCommissionCents: 9000,
     });
-    const report = await buildIndividualReport(db, {
+    const assignedOnly = await buildIndividualReport(db, {
       kind: "recipient",
       paidMonth: "2026-09",
       personKind: "agent",
       personId: john.id,
     });
-    expect(report.payable?.unallocated).toHaveLength(1);
-    expect(report.payable?.unallocated[0]?.groupId).toBe(johnGroup.id);
-    expect(report.payable?.reviewHref).toContain(`commissionIds=${report.payable?.unallocated[0]?.commissionId}`);
+    expect(assignedOnly.payable?.unallocated).toHaveLength(0);
+
+    await createAllocation(db, {
+      groupId: johnGroup.id,
+      lineOfBusinessId: medical.id,
+      effectiveStart: "2026-09",
+      entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }],
+    });
+    const historical = await buildIndividualReport(db, {
+      kind: "recipient",
+      paidMonth: "2026-09",
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(historical.payable?.unallocated.map((row) => row.commissionId)).toEqual([johnCommission.id]);
+    expect(historical.payable?.reviewHref).toContain(`commissionIds=${johnCommission.id}`);
   });
 
   it("uses stored Agent and Account Manager payout identities and names", async () => {

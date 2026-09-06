@@ -33,6 +33,7 @@ type PreviewResponse = {
     resultingAgencyCents: number;
   };
   correctableIds: number[];
+  previewToken: string | null;
 };
 
 export function CompensationCorrectionDialog({
@@ -84,6 +85,7 @@ export function CompensationCorrectionDialog({
           commissionIds,
           reason,
           confirmationKey,
+          previewToken: preview?.previewToken,
         }),
       });
       const body = await readApiJson<{ commissionIds?: number[]; message?: string }>(response);
@@ -157,7 +159,7 @@ export function CompensationCorrectionDialog({
             I reviewed the original and proposed settlements and authorize this correction.
           </label>
           <div className="form-actions full">
-            <button type="submit" disabled={busy || !confirmed || correctable.length === 0 || blocked.length > 0 || correctable.length !== commissionIds.length}>
+            <button type="submit" disabled={busy || !confirmed || !preview?.previewToken || correctable.length === 0 || blocked.length > 0 || correctable.length !== commissionIds.length}>
               {busy ? "Correcting…" : `Confirm correction of ${correctable.length} commission${correctable.length === 1 ? "" : "s"}`}
             </button>
             <button type="button" className="secondary" onClick={onClose}>Cancel</button>

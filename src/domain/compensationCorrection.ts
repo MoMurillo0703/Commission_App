@@ -4,9 +4,11 @@ import {
 import {
   resolveCompensationAllocation,
   type AllocationCandidate,
+  type PersonKind,
   type SettledAllocation,
   type SettledPayout,
 } from "./allocations";
+import { paidMonthInRange } from "./dates";
 import { formatAllocationPercent } from "./recipientStatement";
 
 export type HistoricalAllocationState = "covers" | "newer_only" | "missing";
@@ -139,6 +141,99 @@ export function newerAllocationBlockedMessage() {
 
 export function missingAllocationBlockedMessage() {
   return "Correction is blocked until a complete allocation covers the original paid month.";
+}
+
+export type CorrectionAuthorizedCommission = {
+  commissionId: number;
+  paidMonth: string;
+  allocation: {
+    id: number;
+    groupId: number;
+    lineOfBusinessId: number;
+    effectiveStart: string;
+    effectiveEnd: string | null;
+    status: string;
+    entries: Array<{
+      recipientType: string;
+      personKind: string | null;
+      personId: number | null;
+      teamId: number | null;
+      compensationBps: number;
+    }>;
+  };
+  teams: Array<{
+    teamId: number;
+    members: Array<{
+      personKind: string;
+      personId: number;
+      shareBps: number;
+      effectiveStart: string;
+      effectiveEnd: string | null;
+      status: string;
+    }>;
+  }>;
+  proposedPayouts: Array<{
+    recipientType: string;
+    personKind: string | null;
+    personId: number | null;
+    teamId: number | null;
+    allocationBps: number;
+    teamInternalBps: number | null;
+    compensationCents: number;
+  }>;
+  proposedAgentCompensationCents: number;
+  proposedAgencyNetCents: number;
+};
+
+export type CorrectionAuthorizedTerms = {
+  commissions: CorrectionAuthorizedCommission[];
+};
+
+export function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+}
+
+export function stalePreviewMessage() {
+  return "The authorized preview no longer matches current allocation or team terms. Preview again.";
+}
+
+export function historicalAllocationIncludesRecipient(
+  allocation: AllocationCandidate | null,
+  teams: Array<{
+    id: number;
+    members: Array<{
+      personKind: PersonKind;
+      personId: number;
+      shareBps: number;
+      effectiveStart?: string;
+      effectiveEnd?: string | null;
+      status?: string;
+    }>;
+  }>,
+  paidMonth: string,
+  person: { personKind: PersonKind; personId: number },
+) {
+  if (!allocation) return false;
+  if (allocation.entries.some((entry) => (
+    entry.recipientType === "person"
+    && entry.personKind === person.personKind
+    && entry.personId === person.personId
+  ))) {
+    return true;
+  }
+  return allocation.entries.some((entry) => {
+    if (entry.recipientType !== "team" || entry.teamId == null) return false;
+    const team = teams.find((item) => item.id === entry.teamId);
+    return Boolean(team?.members.some((member) => (
+      member.personKind === person.personKind
+      && member.personId === person.personId
+      && (member.status ?? "active") === "active"
+      && (member.effectiveStart == null || paidMonthInRange(paidMonth, member.effectiveStart, member.effectiveEnd ?? null))
+    )));
+  });
 }
 
 export function payoutAuditSnapshot(payouts: Array<{

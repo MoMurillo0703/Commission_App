@@ -203,6 +203,8 @@ export const commissionPayouts = pgTable("commission_payouts", {
 export const compensationCorrectionBatches = pgTable("compensation_correction_batches", {
   id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
   confirmationKey: text("confirmation_key").notNull(),
+  previewToken: text("preview_token").notNull(),
+  requestFingerprint: text("request_fingerprint").notNull(),
   reason: text("reason").notNull(),
   initiatorId: text("initiator_id"),
   initiatorEmail: text("initiator_email"),
