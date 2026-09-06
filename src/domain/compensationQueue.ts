@@ -122,6 +122,72 @@ export function identifyCompensationQueue(input: {
   ));
 }
 
+export type GroupCompensationQueueItem = {
+  key: string;
+  groupId: number;
+  groupName: string;
+  needingLineCount: number;
+  lineOfBusinessIds: number[];
+  lineOfBusinessNames: string[];
+  reason: CompensationQueueReason;
+  reasonLabel: string;
+  suggestedEffectiveStart: string;
+  lines: CompensationQueueItem[];
+};
+
+export function groupQueueKey(groupId: number) {
+  return `group:${groupId}`;
+}
+
+export function groupQueueNeedsLabel(count: number) {
+  if (count === 1) return "1 Line of Coverage needs compensation";
+  return `${count} Lines of Coverage need compensation`;
+}
+
+export function groupCompensationQueue(items: CompensationQueueItem[]): GroupCompensationQueueItem[] {
+  const byGroup = new Map<number, CompensationQueueItem[]>();
+  for (const item of items) {
+    const current = byGroup.get(item.groupId) ?? [];
+    current.push(item);
+    byGroup.set(item.groupId, current);
+  }
+  return [...byGroup.values()].map((lines) => {
+    const first = lines[0]!;
+    let reason = first.reason;
+    for (const line of lines) reason = preferReason(reason, line.reason);
+    return {
+      key: groupQueueKey(first.groupId),
+      groupId: first.groupId,
+      groupName: first.groupName,
+      needingLineCount: lines.length,
+      lineOfBusinessIds: lines.map((line) => line.lineOfBusinessId),
+      lineOfBusinessNames: lines.map((line) => line.lineOfBusinessName),
+      reason,
+      reasonLabel: queueReasonLabel(reason),
+      suggestedEffectiveStart: lines.map((line) => line.suggestedEffectiveStart).sort()[0] ?? first.suggestedEffectiveStart,
+      lines,
+    };
+  }).sort((left, right) => left.groupName.localeCompare(right.groupName));
+}
+
+export function afterGroupQueueRefresh<T extends { groupId: number }>(
+  remaining: T[],
+  currentGroupId: number,
+  index: number,
+) {
+  if (remaining.some((item) => item.groupId === currentGroupId)) {
+    const nextIndex = remaining.findIndex((item) => item.groupId === currentGroupId);
+    return {
+      items: remaining,
+      index: nextIndex >= 0 ? nextIndex : index,
+      done: false,
+      advance: false,
+    };
+  }
+  if (remaining.length === 0) return { items: remaining, index: 0, done: true, advance: true };
+  return { items: remaining, index: Math.min(index, remaining.length - 1), done: false, advance: true };
+}
+
 export function queueGroupCount(items: Array<{ groupId: number }>) {
   return new Set(items.map((item) => item.groupId)).size;
 }

@@ -2,8 +2,17 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { AllocationRecipientEditor } from "@/components/AllocationRecipientEditor";
+import { GroupCoverageTable } from "@/components/GroupCoverageTable";
 import type { AllocationView } from "@/data/allocations";
-import type { CompensationQueueItem } from "@/domain/compensationQueue";
+import {
+  afterGroupQueueRefresh,
+  closeQueue,
+  groupQueueNeedsLabel,
+  queueBannerLabel,
+  queueSessionProgressLabel,
+  skipQueueIndex,
+  type GroupCompensationQueueItem,
+} from "@/domain/compensationQueue";
 import type { TeamView } from "@/data/teams";
 import type { AccountManager, Agent, Group, LineOfBusiness } from "@/db/schema";
 import {
@@ -14,25 +23,25 @@ import {
   personRoleLabel,
 } from "@/domain/allocationEditor";
 import { allocationProgressLabel, allocationTotals } from "@/domain/allocations";
-import { closeQueue, queueBannerLabel, queueSessionProgressLabel, skipQueueIndex } from "@/domain/compensationQueue";
-import { defaultLineApplyMode, plannedAllocationTargets, type LineApplyMode } from "@/domain/allocationBulkApply";
+import { plannedAllocationTargets, type LineApplyMode } from "@/domain/allocationBulkApply";
 import {
-  allocationSavedMessage,
-  runAllocationSaveFlow,
-  runBulkAllocationSaveFlow,
-} from "@/domain/allocationSaveFlow";
+  clearCoverageModes,
+  groupCoverageLines,
+  selectNeedingSetupModes,
+  setCoverageMode,
+} from "@/domain/groupCoverage";
+import { bulkAllocationRequestBody } from "@/domain/groupCompensationWorkspace";
+import { allocationSavedMessage, runBulkAllocationSaveFlow } from "@/domain/allocationSaveFlow";
 import type { AllocationTerms } from "@/domain/allocationTerms";
 import {
   compensationGroupSummaries,
-  currentAllocationsForGroup,
   filterCompensationGroups,
   groupActiveCountLabel,
   historicalAllocationsForGroup,
-  missingLinesForGroup,
   allocationRecipientSummary,
 } from "@/domain/compensationHome";
 import { runTeamSaveFlow, teamSavedMessage } from "@/domain/teamSaveFlow";
-import { linesForGroupSelection, type GroupLineEvidence } from "@/domain/activeGroupLines";
+import type { GroupLineEvidence } from "@/domain/activeGroupLines";
 import { formatStatementMonth } from "@/domain/dates";
 import { bpsToPercentString, parsePercentToBps } from "@/domain/money";
 import { fetchWithDeadline, httpFailureMessage, readApiJson, requestFailureMessage, runBusyAction } from "@/lib/apiClient";
@@ -54,7 +63,7 @@ export function CompensationWorkspace({
   linesOfBusiness: LineOfBusiness[];
   initialAllocations: AllocationView[];
   initialTeams: TeamView[];
-  initialQueue?: CompensationQueueItem[];
+  initialQueue?: GroupCompensationQueueItem[];
   groupLineEvidence?: GroupLineEvidence[];
   focusAllocationId?: number | null;
 }) {
@@ -78,17 +87,11 @@ export function CompensationWorkspace({
   const [showHistory, setShowHistory] = useState(false);
   const [lineModes, setLineModes] = useState<Record<number, LineApplyMode>>({});
   const allocationsRef = useRef(allocations);
+  const pendingOverrideLineId = useRef<number | null>(null);
   allocationsRef.current = allocations;
 
   const currentQueueItem = queue[queueIndex] ?? null;
   const draftGroupId = Number(draft.groupId) || null;
-  const visibleLines = linesForGroupSelection(
-    draftGroupId,
-    linesOfBusiness,
-    groupLineEvidence,
-    currentQueueItem && currentQueueItem.groupId === draftGroupId ? [currentQueueItem.lineOfBusinessId] : [],
-  );
-
   const totals = allocationTotals(draft.entries.flatMap((entry) => {
     try {
       return [{ compensationBps: parsePercentToBps(entry.percent || "0") }];
@@ -105,7 +108,7 @@ export function CompensationWorkspace({
     ]);
     const nextAllocations = await readApiJson<AllocationView[]>(allocationsResponse);
     const nextTeams = await readApiJson<TeamView[]>(teamsResponse);
-    const nextQueue = await readApiJson<CompensationQueueItem[]>(queueResponse);
+    const nextQueue = await readApiJson<GroupCompensationQueueItem[]>(queueResponse);
     if (!allocationsResponse.ok || !teamsResponse.ok || !queueResponse.ok) {
       throw new Error(failureMessage);
     }
@@ -121,82 +124,11 @@ export function CompensationWorkspace({
     setError("");
   }
 
-  async function saveAllocation(event?: FormEvent, advanceQueue = false) {
-    event?.preventDefault();
-    setError("");
-    setSuccess("");
-    try {
-      await runBusyAction(setBusy, async () => {
-        const submitted: AllocationTerms = {
-          groupId: Number(draft.groupId),
-          lineOfBusinessId: Number(draft.lineOfBusinessId),
-          effectiveStart: draft.effectiveStart,
-          effectiveEnd: draft.effectiveEnd || null,
-          status: "active",
-          entries: allocationEntryPayload(draft.entries).map((entry) => ({
-            recipientType: entry.recipientType,
-            personKind: entry.personKind,
-            personId: entry.personId,
-            teamId: entry.teamId,
-            compensationBps: parsePercentToBps(entry.compensationPercent || "0"),
-          })),
-        };
-        const result = await runAllocationSaveFlow({
-          request: async () => {
-            const response = await fetchWithDeadline("/api/allocations", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                groupId: submitted.groupId,
-                lineOfBusinessId: submitted.lineOfBusinessId,
-                effectiveStart: submitted.effectiveStart,
-                effectiveEnd: draft.effectiveEnd,
-                status: "active",
-                entries: allocationEntryPayload(draft.entries),
-              }),
-            });
-            const body = await readApiJson<{ message?: string }>(response);
-            return { ok: response.ok, message: httpFailureMessage(response.status, body.message) };
-          },
-          refresh,
-          submitted,
-          savedKey: advanceQueue && currentQueueItem ? currentQueueItem.key : null,
-          queueIndex,
-        });
-        if (result.error) {
-          setError(result.error);
-          setQueueNotice("");
-          return;
-        }
-        setQueue(result.queue);
-        setQueueIndex(result.queueIndex);
-        setQueueDone(result.queueDone);
-        setQueueOpen(result.queueOpen);
-        setQueueNotice(result.notice ?? "");
-        if (result.loadNext) {
-          setSuccess("");
-          setQueueSessionPosition((position) => position + 1);
-          loadQueueItem(result.queue[result.queueIndex] ?? null, allocationsRef.current);
-        } else if (result.recovered) {
-          setSuccess(result.success ?? allocationSavedMessage());
-          if (!result.queueOpen) resetDraft();
-        } else if (result.stillQueued) {
-          setSuccess(result.success ?? allocationSavedMessage());
-        } else {
-          setSuccess(result.success ?? allocationSavedMessage());
-          if (!result.queueOpen) resetDraft();
-        }
-      });
-    } catch (error) {
-      setError(requestFailureMessage(error, "Unable to save allocation."));
-    }
-  }
-
   async function saveSelectedLines() {
     setError("");
     setSuccess("");
     const targets = plannedAllocationTargets({
-      lineIds: applyLines.map((line) => line.id),
+      lineIds: applyLines.map((line) => line.lineOfBusinessId),
       modes: lineModes,
       templateEntries: allocationEntryPayload(draft.entries).map((entry) => ({
         recipientType: entry.recipientType,
@@ -225,20 +157,13 @@ export function CompensationWorkspace({
             const response = await fetchWithDeadline("/api/allocations/bulk", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
+              body: JSON.stringify(bulkAllocationRequestBody({
                 groupId: Number(draft.groupId),
                 effectiveStart: draft.effectiveStart,
                 effectiveEnd: draft.effectiveEnd,
-                status: "active",
-                targets: targets.map((target) => ({
-                  lineOfBusinessId: target.lineOfBusinessId,
-                  entries: allocationEntryPayload(
-                    target.mode === "agency"
-                      ? [{ recipientType: "agency", personKind: "", personId: "", teamId: "", percent: "100" }]
-                      : draft.entries,
-                  ),
-                })),
-              }),
+                targets,
+                draftEntries: draft.entries,
+              })),
             });
             const body = await readApiJson<{ message?: string }>(response);
             return { ok: response.ok, message: httpFailureMessage(response.status, body.message) };
@@ -252,6 +177,20 @@ export function CompensationWorkspace({
           return;
         }
         setSuccess(result.success ?? allocationSavedMessage());
+        setLineModes({});
+        if (queueOpen && currentQueueItem) {
+          const next = afterGroupQueueRefresh(result.queue, currentQueueItem.groupId, queueIndex);
+          setQueueIndex(next.index);
+          setQueueDone(next.done);
+          setQueueOpen(!next.done);
+          if (next.advance && !next.done) {
+            setQueueSessionPosition((position) => position + 1);
+            loadQueueGroup(result.queue[next.index] ?? null);
+          } else if (next.done) {
+            resetDraft();
+          }
+          return;
+        }
         if (!queueOpen) resetDraft();
       });
     } catch (error) {
@@ -270,30 +209,20 @@ export function CompensationWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusAllocationId]);
 
-  function loadQueueItem(item: typeof currentQueueItem, sourceAllocations = allocationsRef.current) {
+  function loadQueueGroup(item: GroupCompensationQueueItem | null) {
     if (!item) return;
-    const existing = sourceAllocations.find((row) => (
-      row.groupId === item.groupId && row.lineOfBusinessId === item.lineOfBusinessId && row.status === "active"
-    ));
+    setSelectedGroupId(item.groupId);
     setDraft({
       groupId: String(item.groupId),
-      lineOfBusinessId: String(item.lineOfBusinessId),
+      lineOfBusinessId: "",
       effectiveStart: item.suggestedEffectiveStart,
       effectiveEnd: "",
-      entries: existing && !allocationTotals(existing.entries).complete
-        ? draftFromAllocationEntries(existing.entries.map((entry) => ({
-          recipientType: entry.recipientType,
-          personKind: entry.personKind,
-          personId: entry.personId,
-          teamId: entry.teamId,
-          compensationPercent: bpsToPercentString(entry.compensationBps),
-        })))
-        : draftFromAllocationEntries([{
-          recipientType: "person",
-          personKind: "agent",
-          personId: null,
-          compensationPercent: "",
-        }]),
+      entries: draftFromAllocationEntries([{
+        recipientType: "person",
+        personKind: "agent",
+        personId: null,
+        compensationPercent: "",
+      }]),
     });
     setError("");
     setSuccess("");
@@ -307,7 +236,7 @@ export function CompensationWorkspace({
     setSuccess("");
     setQueueSessionTotal(queue.length);
     setQueueSessionPosition(0);
-    loadQueueItem(queue[0] ?? null);
+    loadQueueGroup(queue[0] ?? null);
   }
 
   function skipCurrent() {
@@ -323,12 +252,13 @@ export function CompensationWorkspace({
       resetDraft();
       return;
     }
-    loadQueueItem(queue[next.index] ?? null);
+    loadQueueGroup(queue[next.index] ?? null);
   }
 
   async function changeAllocation(row: { id: number }) {
     const allocation = allocationsRef.current.find((item) => item.id === row.id);
     if (!allocation) return;
+    pendingOverrideLineId.current = allocation.lineOfBusinessId;
     setSelectedGroupId(allocation.groupId);
     setDraft({
       groupId: String(allocation.groupId),
@@ -343,7 +273,7 @@ export function CompensationWorkspace({
         compensationPercent: bpsToPercentString(entry.compensationBps),
       }))),
     });
-    setError("Enter a new effective start month, then save. The prior allocation will close the month before.");
+    setError("Enter a new effective start month, then apply. Only this Line of Coverage is selected.");
   }
 
   async function deactivate(id: number) {
@@ -413,32 +343,69 @@ export function CompensationWorkspace({
 
   const groupSummaries = filterCompensationGroups(compensationGroupSummaries(allocations, groups), query);
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) ?? null;
-  const selectedCurrent = selectedGroupId ? currentAllocationsForGroup(allocations, selectedGroupId) : [];
   const selectedHistory = selectedGroupId ? historicalAllocationsForGroup(allocations, selectedGroupId) : [];
-  const selectedMissing = selectedGroupId
-    ? missingLinesForGroup(selectedGroupId, groupLineEvidence, linesOfBusiness, allocations)
-    : [];
-  const coveredLineIds = selectedCurrent.map((row) => row.lineOfBusinessId);
-  const applyLines = draftGroupId ? visibleLines : [];
+  const coverageLines = groupCoverageLines({
+    groupId: selectedGroupId ?? draftGroupId,
+    lines: linesOfBusiness,
+    evidence: groupLineEvidence,
+    allocations,
+    keepLineIds: currentQueueItem && (currentQueueItem.groupId === selectedGroupId || currentQueueItem.groupId === draftGroupId)
+      ? currentQueueItem.lineOfBusinessIds
+      : [],
+  });
+  const applyLines = coverageLines;
+  const templateEntries = draft.entries.flatMap((entry) => {
+    try {
+      return [{
+        recipientType: entry.recipientType,
+        personKind: entry.personKind || null,
+        personId: entry.personId ? Number(entry.personId) : null,
+        teamId: entry.teamId ? Number(entry.teamId) : null,
+        compensationBps: parsePercentToBps(entry.percent || "0"),
+      }];
+    } catch {
+      return [];
+    }
+  });
 
   useEffect(() => {
+    if (pendingOverrideLineId.current != null) {
+      const lineId = pendingOverrideLineId.current;
+      pendingOverrideLineId.current = null;
+      setLineModes(Object.fromEntries(coverageLines.map((line) => [
+        line.lineOfBusinessId,
+        line.lineOfBusinessId === lineId ? "template" : "skip",
+      ])));
+      return;
+    }
     setLineModes({});
-  }, [draftGroupId]);
-
-  useEffect(() => {
-    if (!draftGroupId) return;
-    const missingIds = selectedMissing.map((item) => item.id);
-    const selectedLineId = Number(draft.lineOfBusinessId) || null;
-    setLineModes((current) => {
-      const next: Record<number, LineApplyMode> = {};
-      for (const line of applyLines) {
-        next[line.id] = current[line.id] ?? defaultLineApplyMode(line.id, selectedLineId, missingIds, coveredLineIds);
-      }
-      return next;
-    });
-    // Recalculate defaults for newly visible lines, not on every keystroke.
+    // Default selection is unconfigured LOBs via coverageMode fallback. Do not wipe checkbox/agency choices after refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftGroupId, draft.lineOfBusinessId, applyLines.map((line) => line.id).join(","), selectedMissing.map((line) => line.id).join(","), coveredLineIds.join(",")]);
+  }, [draftGroupId, selectedGroupId]);
+
+  function beginLineOverride(line: (typeof coverageLines)[number]) {
+    const allocation = allocations.find((row) => row.id === line.allocationId);
+    setDraft((current) => ({
+      ...current,
+      groupId: String(selectedGroupId ?? draftGroupId ?? ""),
+      lineOfBusinessId: String(line.lineOfBusinessId),
+      entries: allocation
+        ? draftFromAllocationEntries(allocation.entries.map((entry) => ({
+          recipientType: entry.recipientType,
+          personKind: entry.personKind,
+          personId: entry.personId,
+          teamId: entry.teamId,
+          compensationPercent: bpsToPercentString(entry.compensationBps),
+        })))
+        : current.entries,
+    }));
+    setLineModes(Object.fromEntries(coverageLines.map((item) => [
+      item.lineOfBusinessId,
+      item.lineOfBusinessId === line.lineOfBusinessId ? "template" : "skip",
+    ])));
+    setError("Enter a new effective start month, then apply. Only this Line of Coverage is selected.");
+    setSuccess("");
+  }
 
   const editor = (
     <AllocationRecipientEditor
@@ -450,6 +417,24 @@ export function CompensationWorkspace({
     />
   );
 
+  const coverageTable = (
+    <GroupCoverageTable
+      lines={coverageLines}
+      modes={lineModes}
+      templateEntries={templateEntries}
+      onToggle={(lineOfBusinessId, selected, currentMode) => setLineModes((current) => setCoverageMode(
+        current,
+        lineOfBusinessId,
+        selected ? (currentMode === "agency" ? "agency" : "template") : "skip",
+      ))}
+      onAgency={(lineOfBusinessId) => setLineModes((current) => setCoverageMode(current, lineOfBusinessId, "agency"))}
+      onChange={(line) => beginLineOverride(line)}
+      onDeactivate={(allocationId) => void deactivate(allocationId)}
+      onSelectNeedingSetup={() => setLineModes(selectNeedingSetupModes(coverageLines))}
+      onClearSelection={() => setLineModes(clearCoverageModes(coverageLines))}
+    />
+  );
+
   return (
     <>
       {queue.length > 0 && (
@@ -457,7 +442,7 @@ export function CompensationWorkspace({
           <div>
             <p className="eyebrow">Needs attention</p>
             <h2>{queueBannerLabel(queue)}</h2>
-            <p>{queue.length} group + line combination{queue.length === 1 ? "" : "s"} {queue.length === 1 ? "is" : "are"} missing a valid active 100% allocation.</p>
+            <p>{queue.length} group{queue.length === 1 ? "" : "s"} {queue.length === 1 ? "has" : "have"} Lines of Coverage that still need compensation.</p>
           </div>
           <button type="button" onClick={openQueue}>Review groups needing allocation</button>
         </section>
@@ -468,7 +453,7 @@ export function CompensationWorkspace({
           <div>
             <p className="eyebrow">Browse by group</p>
             <h2>Compensation</h2>
-            <p>Search a group to see its current allocations. The work queue is for missing Group + LOB setup. Posted commissions keep their original payout snapshots.</p>
+            <p>Search a group to see every Line of Coverage together. Enter recipients once and apply them to the selected lines. Posted commissions keep their original payout snapshots.</p>
           </div>
         </div>
         <label className="directory-controls">
@@ -488,7 +473,11 @@ export function CompensationWorkspace({
               {groupSummaries.map((group) => (
                 <tr key={group.groupId} className={group.groupId === selectedGroupId ? "selected-row" : undefined}>
                   <td>
-                    <button type="button" className="linkish" onClick={() => { setSelectedGroupId(group.groupId); setShowHistory(false); }}>
+                    <button type="button" className="linkish" onClick={() => {
+                      setSelectedGroupId(group.groupId);
+                      setShowHistory(false);
+                      setDraft((current) => ({ ...current, groupId: String(group.groupId), lineOfBusinessId: "" }));
+                    }}>
                       <strong>{group.groupName}</strong>
                     </button>
                   </td>
@@ -506,69 +495,11 @@ export function CompensationWorkspace({
           <div>
             <p className="eyebrow">Group compensation</p>
             <h2>{selectedGroup.name}</h2>
-            <p>Current allocations for this group. Change Allocation opens the complete Group + LOB plan. History stays available and is not rewritten.</p>
+            <p>Enter recipients once, select the Lines of Coverage that should use this setup, then apply. Already-configured lines stay unchanged unless you intentionally select them. Posted payout snapshots are not rewritten.</p>
           </div>
         </div>
-        <h3>Current compensation</h3>
-        {selectedCurrent.length === 0 ? (
-          <p className="empty">This group has no active allocation.</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>LOB</th>
-                <th>Recipients</th>
-                <th>Effective</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {selectedCurrent.map((row) => (
-                <tr key={row.id}>
-                  <td>{row.lineOfBusinessName}</td>
-                  <td>{allocationRecipientSummary(row)}</td>
-                  <td>{formatStatementMonth(row.effectiveStart)} – {row.effectiveEnd ? formatStatementMonth(row.effectiveEnd) : "Present"}</td>
-                  <td>{row.status}</td>
-                  <td>
-                    <div className="form-actions">
-                      <button type="button" className="secondary" onClick={() => void changeAllocation(row)}>Change Allocation</button>
-                      <button type="button" className="secondary" onClick={() => void deactivate(row.id)}>Deactivate</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {selectedMissing.length > 0 && (
-          <div className="related-block">
-            <strong>Set up missing LOB allocation</strong>
-            <div className="form-actions" style={{ marginTop: 10 }}>
-              {selectedMissing.map((line) => (
-                <button
-                  key={line.id}
-                  type="button"
-                  className="secondary"
-                  onClick={() => setDraft({
-                    groupId: String(selectedGroup.id),
-                    lineOfBusinessId: String(line.id),
-                    effectiveStart: "",
-                    effectiveEnd: "",
-                    entries: draftFromAllocationEntries([{
-                      recipientType: "person",
-                      personKind: "agent",
-                      personId: null,
-                      compensationPercent: "",
-                    }]),
-                  })}
-                >
-                  Set up {line.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+        <h3>Lines of Coverage</h3>
+        {coverageTable}
         <div className="related-block">
           <button type="button" className="secondary" onClick={() => setShowHistory((current) => !current)}>
             {showHistory ? "Hide history" : "Show historical allocations"}
@@ -598,40 +529,7 @@ export function CompensationWorkspace({
             </table>
           ))}
         </div>
-        <form className="form-grid form-grid-wide" onSubmit={(event) => void saveAllocation(event)}>
-          <label>
-            Group
-            <select
-              value={draft.groupId}
-              onChange={(event) => {
-                const groupId = event.target.value;
-                const nextLines = linesForGroupSelection(
-                  Number(groupId) || null,
-                  linesOfBusiness,
-                  groupLineEvidence,
-                  currentQueueItem && currentQueueItem.groupId === Number(groupId) ? [currentQueueItem.lineOfBusinessId] : [],
-                );
-                setDraft((current) => ({
-                  ...current,
-                  groupId,
-                  lineOfBusinessId: nextLines.some((line) => String(line.id) === current.lineOfBusinessId)
-                    ? current.lineOfBusinessId
-                    : "",
-                }));
-              }}
-              required
-            >
-              <option value="">Select group</option>
-              {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-            </select>
-          </label>
-          <label>
-            Line of business
-            <select value={draft.lineOfBusinessId} onChange={(event) => setDraft((current) => ({ ...current, lineOfBusinessId: event.target.value }))} required disabled={!draft.groupId}>
-              <option value="">{draft.groupId ? "Select line" : "Select a group first"}</option>
-              {visibleLines.map((line) => <option key={line.id} value={line.id}>{line.name}</option>)}
-            </select>
-          </label>
+        <form className="form-grid form-grid-wide" onSubmit={(event) => { event.preventDefault(); void saveSelectedLines(); }}>
           <label>
             Effective start
             <input type="month" value={draft.effectiveStart} onChange={(event) => setDraft((current) => ({ ...current, effectiveStart: event.target.value }))} required />
@@ -640,42 +538,15 @@ export function CompensationWorkspace({
             Effective end
             <input type="month" value={draft.effectiveEnd} onChange={(event) => setDraft((current) => ({ ...current, effectiveEnd: event.target.value }))} />
           </label>
-          {draft.groupId && visibleLines.length === 0 && (
-            <p className="muted-note full">This group does not yet have an active line of coverage on file from commissions, allocations, or agreements. Historical inactive lines stay in history and are not listed here.</p>
-          )}
-          {draft.groupId && visibleLines.length > 0 && (
-            <p className="muted-note full">Only lines of business evidenced for this group are listed. Historical inactive lines remain preserved in history.</p>
-          )}
           {editor}
-          {applyLines.length > 0 && (
-            <div className="related-block full">
-              <strong>Apply this setup to lines of business</strong>
-              <p>Enter recipients once. Apply the same split to selected lines, set a line to Agency 100% when it has no recipient compensation, or skip a line. This creates separate Group + LOB allocations and does not rewrite posted payouts.</p>
-              {applyLines.map((line) => (
-                <label key={line.id} style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
-                  <span style={{ minWidth: 140 }}>{line.name}</span>
-                  <select
-                    aria-label={`Apply mode for ${line.name}`}
-                    value={lineModes[line.id] ?? "skip"}
-                    onChange={(event) => setLineModes((current) => ({ ...current, [line.id]: event.target.value as LineApplyMode }))}
-                  >
-                    <option value="template">Use this setup</option>
-                    <option value="agency">Agency 100% / no recipient compensation</option>
-                    <option value="skip">Skip</option>
-                  </select>
-                </label>
-              ))}
-            </div>
-          )}
           <p className={totals.complete ? "form-success full" : "allocation-progress full"}>{allocationProgressLabel(draft.entries.flatMap((entry) => {
             try { return [{ compensationBps: parsePercentToBps(entry.percent || "0") }]; } catch { return []; }
           }))}</p>
           {error && !queueOpen && <p className="form-error">{error}</p>}
           {success && !queueOpen && <p className="form-success">{success}</p>}
           <div className="form-actions full">
-            <button disabled={busy || !totals.complete}>{busy ? "Saving…" : "Save allocation"}</button>
-            <button type="button" disabled={busy || !totals.complete || applyLines.length === 0} onClick={() => void saveSelectedLines()}>
-              Save for selected lines
+            <button type="submit" disabled={busy || !totals.complete || coverageLines.length === 0}>
+              {busy ? "Saving…" : "Apply to Selected Lines"}
             </button>
             <button type="button" className="secondary" onClick={resetDraft}>Cancel</button>
           </div>
@@ -755,16 +626,9 @@ export function CompensationWorkspace({
           <div className="modal">
             <p className="eyebrow">Compensation work queue</p>
             <h2 id="queue-title">{currentQueueItem.groupName}</h2>
-            <p>{currentQueueItem.lineOfBusinessName} · {currentQueueItem.reasonLabel} · {queueSessionProgressLabel(queueSessionPosition, queueSessionTotal || queue.length)}</p>
-            <form className="form-grid form-grid-wide" onSubmit={(event) => void saveAllocation(event, true)}>
-              <label>
-                Group
-                <input value={currentQueueItem.groupName} readOnly />
-              </label>
-              <label>
-                Line of business
-                <input value={currentQueueItem.lineOfBusinessName} readOnly />
-              </label>
+            <p>{groupQueueNeedsLabel(currentQueueItem.needingLineCount)} · {queueSessionProgressLabel(queueSessionPosition, queueSessionTotal || queue.length)}</p>
+            {coverageTable}
+            <form className="form-grid form-grid-wide" onSubmit={(event) => { event.preventDefault(); void saveSelectedLines(); }}>
               <label>
                 Effective start
                 <input type="month" value={draft.effectiveStart} onChange={(event) => setDraft((current) => ({ ...current, effectiveStart: event.target.value }))} required />
@@ -781,7 +645,7 @@ export function CompensationWorkspace({
               {queueNotice && <p className="muted-note">{queueNotice}</p>}
               {success && <p className="form-success">{success}</p>}
               <div className="form-actions full">
-                <button disabled={busy || !totals.complete}>{busy ? "Saving…" : "Save & Next"}</button>
+                <button type="submit" disabled={busy || !totals.complete}>{busy ? "Saving…" : "Apply to Selected Lines"}</button>
                 <button type="button" className="secondary" onClick={skipCurrent}>Skip for now</button>
                 <button type="button" className="secondary" onClick={() => { setQueueOpen(closeQueue().open); setQueueNotice(""); setSuccess(""); resetDraft(); }}>Close</button>
               </div>

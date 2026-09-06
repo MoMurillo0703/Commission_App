@@ -4,7 +4,7 @@ import { listAccountManagers } from "@/data/accountManagers";
 import { listAgents } from "@/data/agents";
 import { listAllocations } from "@/data/allocations";
 import { countUnassignedCommissions } from "@/data/commissions";
-import { listCompensationQueue } from "@/data/compensationQueue";
+import { listGroupCompensationQueue } from "@/data/compensationQueue";
 import { listGroups } from "@/data/groups";
 import { listLinesOfBusiness } from "@/data/linesOfBusiness";
 import { listGroupLineEvidence } from "@/data/groupLineEvidence";
@@ -25,7 +25,7 @@ export default async function CompensationPage({
         <div>
           <p className="eyebrow">Compensation allocations</p>
           <h1>Compensation</h1>
-          <p>Browse compensation by Group. Use the work queue for missing Group + LOB setup. Posted payout snapshots stay unchanged.</p>
+          <p>Browse compensation by Group. Open a Group to see every Line of Coverage together. Posted payout snapshots stay unchanged.</p>
         </div>
       </header>
       <CompensationWorkspace
@@ -35,7 +35,7 @@ export default async function CompensationPage({
         linesOfBusiness={await listLinesOfBusiness()}
         initialAllocations={await listAllocations()}
         initialTeams={await listTeams()}
-        initialQueue={await listCompensationQueue()}
+        initialQueue={await listGroupCompensationQueue()}
         groupLineEvidence={await listGroupLineEvidence()}
         focusAllocationId={Number.isInteger(focusAllocationId) && focusAllocationId > 0 ? focusAllocationId : null}
       />

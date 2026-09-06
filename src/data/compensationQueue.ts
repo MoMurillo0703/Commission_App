@@ -1,7 +1,7 @@
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import { currentPaidMonth } from "@/domain/dates";
-import { identifyCompensationQueue, queueAllocationCandidates } from "@/domain/compensationQueue";
+import { groupCompensationQueue, identifyCompensationQueue, queueAllocationCandidates } from "@/domain/compensationQueue";
 import { listAllocations } from "./allocations";
 import { listPostedGroupLobMonths } from "./commissions";
 import { listGroups } from "./groups";
@@ -22,4 +22,8 @@ export async function listCompensationQueue(db?: AppDatabase) {
     posted,
     asOfMonth: currentPaidMonth(),
   });
+}
+
+export async function listGroupCompensationQueue(db?: AppDatabase) {
+  return groupCompensationQueue(await listCompensationQueue(db));
 }

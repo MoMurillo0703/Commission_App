@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createAccountManager } from "./accountManagers";
 import { createAgent } from "./agents";
 import { createAllocation, createAllocationsForLines, listAllocations } from "./allocations";
-import { listCompensationQueue } from "./compensationQueue";
+import { listCompensationQueue, listGroupCompensationQueue } from "./compensationQueue";
 import { createCarrier } from "./carriers";
 import { createCommission, getCommission } from "./commissions";
 import { createGroup } from "./groups";
@@ -359,5 +359,95 @@ describe("compensation allocations", () => {
     })).rejects.toThrow(/already exists for this group, line, and period/);
     expect((await listAllocations(db)).filter((row) => row.lineOfBusinessId === medical.id && row.status === "active")).toHaveLength(1);
     expect((await listCompensationQueue(db)).some((item) => item.lineOfBusinessId === dental.id)).toBe(true);
+  });
+
+  it("applies one Group split to Medical, Dental, and Vision without overwriting Life Agency 100%", async () => {
+    const db = await createTestDb();
+    const john = await createAgent(db, { name: "John Elizondo" });
+    const maurilio = await createAgent(db, { name: "Maurilio Murillo" });
+    const laura = await createAccountManager(db, { name: "Laura Montoya" });
+    const group = await createGroup(db, { name: "ABC COMPANY", primaryAgentId: john.id, accountManagerId: laura.id });
+    const nextGroup = await createGroup(db, { name: "NEXT GROUP" });
+    const carrier = await createCarrier(db, { name: "Choice Builder" });
+    const medical = await createLineOfBusiness(db, { name: "Medical" });
+    const dental = await createLineOfBusiness(db, { name: "Dental" });
+    const vision = await createLineOfBusiness(db, { name: "Vision" });
+    const life = await createLineOfBusiness(db, { name: "Life" });
+
+    await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: life.id,
+      effectiveStart: "2026-01",
+      entries: [{ recipientType: "agency", compensationBps: 10000 }],
+    });
+    const lifePosted = await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: life.id,
+      grossCommissionCents: 5000,
+    });
+    const lifePayouts = await listPayoutsForCommission(db, lifePosted.id);
+    expect(lifePayouts).toEqual([expect.objectContaining({ recipientType: "agency", compensationCents: 5000 })]);
+
+    for (const line of [medical, dental, vision]) {
+      await createCommission(db, {
+        statementMonth: "2026-08",
+        groupId: group.id,
+        carrierId: carrier.id,
+        lineOfBusinessId: line.id,
+        grossCommissionCents: 10000,
+      });
+    }
+    await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: nextGroup.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: medical.id,
+      grossCommissionCents: 1000,
+    });
+
+    const pairQueue = await listCompensationQueue(db);
+    expect(pairQueue.filter((item) => item.groupId === group.id)).toHaveLength(3);
+    const groupQueue = await listGroupCompensationQueue(db);
+    expect(groupQueue.filter((item) => item.groupId === group.id)).toHaveLength(1);
+    expect(groupQueue.find((item) => item.groupId === group.id)?.needingLineCount).toBe(3);
+
+    const split = [
+      { recipientType: "person" as const, personKind: "agent" as const, personId: john.id, compensationBps: 7000 },
+      { recipientType: "person" as const, personKind: "agent" as const, personId: maurilio.id, compensationBps: 2000 },
+      { recipientType: "person" as const, personKind: "account_manager" as const, personId: laura.id, compensationBps: 1000 },
+    ];
+    const applied = await createAllocationsForLines(db, {
+      groupId: group.id,
+      effectiveStart: "2026-08",
+      targets: [
+        { lineOfBusinessId: medical.id, entries: split },
+        { lineOfBusinessId: dental.id, entries: split },
+        { lineOfBusinessId: vision.id, entries: split },
+      ],
+    });
+    expect(applied.createdCount).toBe(3);
+
+    const listed = await listAllocations(db);
+    expect(listed.find((row) => row.lineOfBusinessId === life.id && row.status === "active")?.entries).toEqual([
+      expect.objectContaining({ recipientType: "agency", compensationBps: 10000 }),
+    ]);
+    expect(await listPayoutsForCommission(db, lifePosted.id)).toEqual(lifePayouts);
+
+    await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: life.id,
+      effectiveStart: "2026-10",
+      entries: [
+        { recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 5000 },
+        { recipientType: "agency", compensationBps: 5000 },
+      ],
+    });
+    expect(await listPayoutsForCommission(db, lifePosted.id)).toEqual(lifePayouts);
+    expect((await listAllocations(db)).find((row) => row.lineOfBusinessId === life.id && row.effectiveStart === "2026-01")?.effectiveEnd).toBe("2026-09");
+
+    expect((await listGroupCompensationQueue(db)).some((item) => item.groupId === group.id)).toBe(false);
+    expect((await listGroupCompensationQueue(db)).some((item) => item.groupId === nextGroup.id)).toBe(true);
   });
 });
