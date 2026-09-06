@@ -7,10 +7,10 @@ Authoritative owner: **Alex**. Update this file when a release is deployed or ac
 | Field | Value |
 | --- | --- |
 | URL | https://commissionapp-iota.vercel.app |
-| SHA | `7e72de369858f9f48083764ec4e66eeb43e34a97` |
+| SHA | `28ca513578b37f154c8ec57c9569a2e1e29a7103` |
 | Migrations | **0001–0007** applied (none required for this release) |
 | Release state | **DEPLOYED — PRODUCT ACCEPTANCE PENDING** |
-| Product acceptance | Pending Mo live retest of the CaliforniaChoice import |
+| Product acceptance | Pending Mo live retest of the statement workflow correction batch |
 
 This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 
@@ -18,11 +18,13 @@ This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 
 - CSV and XLSX statement intake
 - Readable text-PDF intake, including Choice Builder inference and CaliforniaChoice Product/LOB interpretation (`Cal Choice` filename, no `$` / Paid Month LOB review, session Ignore for unknown Products)
-- Unmatched group review; create or match; fingerprint and source-row duplicate protection
+- Unmatched group review with searchable / suggested matching; create, match, or ignore; confirmed carrier Group identity learning; fingerprint and source-row duplicate protection
 - Private original-file storage
 - Groups, Carriers, LOBs, Agents, Account Managers
-- In-workflow Group Account Manager / Primary Agent assignment (assignment ≠ compensation)
+- Exception-oriented Group Account Manager / Primary Agent assignment with Save All (assignment ≠ compensation; missing assignment does not block posting)
 - Compensation allocations (Agency / Person / Team), effective dating, payout snapshots, setup queue
+- Group-level compensation apply across selected LOBs through one atomic server transaction; LOB overrides remain Group + LOB allocations
+- Exact-term timeout/overlap recovery; no automatic mutation retry; queue advances only after a confirmed matching save
 - Person-first Compensation / Splits view from People, editing the complete Group + LOB allocation
 - Recipient commission statement + binary PDF from posted `commission_payouts`
 - Agency / Individual / Team reporting foundation with CSV, XLSX, printable HTML, and PDF export

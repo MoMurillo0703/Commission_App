@@ -4,7 +4,7 @@ Authoritative owner: **Alex**.
 
 ## Phase
 
-Commission App 1.0 Sprint 1 — **DEPLOYED — PRODUCT ACCEPTANCE PENDING**. Product Acceptance is pending Mo live retest of the CaliforniaChoice import-blocker fix. This is not Done. Do not mark Product Accepted or Done until Mo completes that workflow.
+Commission App 1.0 Sprint 1 — **DEPLOYED — PRODUCT ACCEPTANCE PENDING**. Product Acceptance is pending Mo live retest of the statement workflow correction batch (searchable Group matching, exception assignments, atomic Group-level compensation, exact-term queue recovery), including the earlier CaliforniaChoice import-blocker fix. This is not Done. Do not mark Product Accepted or Done until Mo completes that workflow.
 
 ## Authorized work
 
@@ -25,6 +25,7 @@ End-to-end payable commission workflow:
 13. Compensation home is Group-first; work queue remains a separate operational tool (UX-003).
 14. Correct CaliforniaChoice carrier Group identity, row Paid Month semantics, and ADJ CD retention (Ben review blockers).
 15. CaliforniaChoice Product must be the LOB candidate; `$` and carrier Paid Month tokens must not block import (QA-005).
+16. Searchable / suggested Group matching with teach-once carrier identity; exception assignment Save All; atomic multi-LOB compensation; exact-term timeout recovery.
 
 ## Not authorized
 
