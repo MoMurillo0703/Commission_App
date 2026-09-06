@@ -216,8 +216,8 @@ describe("posted commission reports", () => {
       statement.names,
       "John Elizando",
     );
-    expect(document.title).toBe("Commission Statement");
-    expect(document.totals[1]?.label).toBe("TOTAL PAYABLE TO RECIPIENT");
+    expect(document.title).toBe("Individual Commission Report");
+    expect(document.totals[1]?.label).toBe("TOTAL PAYABLE");
     expect(document.totals[1]?.value).toBe("$115.00");
     expect(document.notes?.join(" ")).toMatch(/does not mean the recipient has been paid/);
     expect(document.sourceCommissionIds).toEqual(statement.rows.map((row) => row.commissionId).sort((left, right) => (left ?? 0) - (right ?? 0)));
@@ -228,7 +228,7 @@ describe("posted commission reports", () => {
     const parsed = await getDocumentProxy(new Uint8Array(pdf.body as Uint8Array));
     const extracted = await extractText(parsed, { mergePages: true });
     const text = Array.isArray(extracted.text) ? extracted.text.join(" ") : extracted.text;
-    expect(text).toMatch(/Commission Statement/);
+    expect(text).toMatch(/Individual Commission Report/);
     expect(text).toMatch(/John Elizando|TOTAL PAYABLE/i);
   });
 
@@ -361,5 +361,132 @@ describe("posted commission reports", () => {
     expect(report.rows).toHaveLength(2);
     expect(report.totals.compensationCents).toBe(0);
     expect(report.rows.some((row) => row.compensationCents < 0)).toBe(true);
+  });
+
+  it("builds one Individual Commission Report from three statements without rewriting later allocations", async () => {
+    const db = await createTestDb();
+    const john = await createAgent(db, { name: "John Elizondo" });
+    const nobody = await createAgent(db, { name: "No Activity" });
+    const laura = await createAccountManager(db, { name: "Laura Montoya" });
+    const groupA = await createGroup(db, { name: "Alpha Benefits", primaryAgentId: john.id });
+    const groupB = await createGroup(db, { name: "Beta Health", primaryAgentId: john.id });
+    const carrierA = await createCarrier(db, { name: "Statement A Carrier" });
+    const carrierB = await createCarrier(db, { name: "Statement B Carrier" });
+    const carrierC = await createCarrier(db, { name: "Statement C Carrier" });
+    const medical = await createLineOfBusiness(db, { name: "Medical" });
+    const dental = await createLineOfBusiness(db, { name: "Dental" });
+    const team = await createTeam(db, {
+      name: "Valley",
+      members: [
+        { personKind: "agent", personId: john.id, shareBps: 5000, effectiveStart: "2026-01" },
+        { personKind: "account_manager", personId: laura.id, shareBps: 5000, effectiveStart: "2026-01" },
+      ],
+    });
+    await createAllocation(db, {
+      groupId: groupA.id,
+      lineOfBusinessId: medical.id,
+      effectiveStart: "2026-08",
+      entries: [
+        { recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 7000 },
+        { recipientType: "agency", compensationBps: 3000 },
+      ],
+    });
+    await createAllocation(db, {
+      groupId: groupA.id,
+      lineOfBusinessId: dental.id,
+      effectiveStart: "2026-08",
+      entries: [
+        { recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 5000 },
+        { recipientType: "team", teamId: team.id, compensationBps: 2000 },
+        { recipientType: "agency", compensationBps: 3000 },
+      ],
+    });
+    await createAllocation(db, {
+      groupId: groupB.id,
+      lineOfBusinessId: medical.id,
+      effectiveStart: "2026-08",
+      entries: [
+        { recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 },
+      ],
+    });
+
+    const statementA = await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: groupA.id,
+      carrierId: carrierA.id,
+      lineOfBusinessId: medical.id,
+      grossCommissionCents: 10000,
+      importStatementId: null,
+    });
+    const statementB = await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: groupA.id,
+      carrierId: carrierB.id,
+      lineOfBusinessId: dental.id,
+      grossCommissionCents: 8000,
+    });
+    const statementC = await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: groupB.id,
+      carrierId: carrierC.id,
+      lineOfBusinessId: medical.id,
+      grossCommissionCents: -2000,
+    });
+
+    const report = await buildIndividualReport(db, {
+      kind: "individual",
+      paidMonth: "2026-08",
+      personKind: "agent",
+      personId: john.id,
+    });
+    const payable = report.rows.reduce((sum, row) => sum + row.compensationCents, 0);
+    expect(report.rows.length).toBeGreaterThanOrEqual(4);
+    expect([...new Set(report.rows.map((row) => row.commissionId))].sort()).toEqual(
+      [statementA.id, statementB.id, statementC.id].sort(),
+    );
+    expect(report.totals.compensationCents).toBe(payable);
+    expect(payable).toBe(7000 + 4000 + 800 - 2000);
+    expect(report.rows.some((row) => row.compensationCents < 0)).toBe(true);
+    expect(report.rows.some((row) => row.recipientType === "Agent")).toBe(true);
+    expect(report.rows.some((row) => row.recipientType?.startsWith("Team member"))).toBe(true);
+    expect(report.totals.grossCommissionCents).toBe(16000);
+
+    await createAllocation(db, {
+      groupId: groupA.id,
+      lineOfBusinessId: medical.id,
+      effectiveStart: "2026-09",
+      entries: [
+        { recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 1000 },
+        { recipientType: "agency", compensationBps: 9000 },
+      ],
+    });
+    const afterChange = await buildIndividualReport(db, {
+      kind: "individual",
+      paidMonth: "2026-08",
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(afterChange.totals.compensationCents).toBe(payable);
+
+    const empty = await buildIndividualReport(db, {
+      kind: "individual",
+      paidMonth: "2026-08",
+      personKind: "agent",
+      personId: nobody.id,
+    });
+    expect(empty.rows).toHaveLength(0);
+    expect(empty.totals.compensationCents).toBe(0);
+
+    const document = individualReportDocument(report.rows, report.totals, report.filters, report.names, "John Elizondo");
+    expect(document.title).toBe("Individual Commission Report");
+    expect(document.totals[1]).toEqual({ label: "TOTAL PAYABLE", value: "$98.00" });
+    const pdf = await exportReportDocument(document, "pdf");
+    const { extractText, getDocumentProxy } = await import("unpdf");
+    const parsed = await getDocumentProxy(new Uint8Array(pdf.body as Uint8Array));
+    const extracted = await extractText(parsed, { mergePages: true });
+    const text = Array.isArray(extracted.text) ? extracted.text.join(" ") : extracted.text;
+    expect(text).toMatch(/Individual Commission Report/);
+    expect(text).toMatch(/TOTAL PAYABLE/);
+    expect(text).toMatch(/\$98\.00/);
   });
 });

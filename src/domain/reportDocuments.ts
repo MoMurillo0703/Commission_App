@@ -17,6 +17,7 @@ import {
   type TeamReportRow,
   toCsv,
 } from "./reports";
+import { individualRecipientTypeLabel } from "./reportWorkspace";
 
 export const AGENCY_NAME = "Murillo Insurance";
 
@@ -59,8 +60,10 @@ function isRecipientStatement(filters: ReportFilters) {
 
 function reportTitle(kind: ReportKind, filters?: ReportFilters) {
   if (kind === "agency") return "Agency Commission Report";
-  if (kind === "recipient" || (kind === "individual" && filters && isRecipientStatement(filters))) return "Commission Statement";
-  if (kind === "individual") return "Individual Compensation Report";
+  if (kind === "recipient" || (kind === "individual" && filters && isRecipientStatement(filters))) {
+    return "Individual Commission Report";
+  }
+  if (kind === "individual") return "Individual Commission Report";
   return "Team Compensation Report";
 }
 
@@ -119,17 +122,17 @@ export function individualReportDocument(
       commissionIds.length ? `Source commission IDs: ${commissionIds.join(", ")}` : "No posted payout rows matched this recipient and period.",
     ] : undefined,
     sourceCommissionIds: commissionIds,
-    totals: recipient ? [
+    totals: [
       { label: "Total agency commission represented", value: formatCents(agencyGross) },
-      { label: "TOTAL PAYABLE TO RECIPIENT", value: formatCents(totals.compensationCents) },
-    ] : [
-      { label: `Total ${recipientName} Compensation`, value: formatCents(totals.compensationCents) },
+      { label: "TOTAL PAYABLE", value: formatCents(totals.compensationCents) },
     ],
     headers: recipient
-      ? ["Paid Month", "Group", "Carrier", "LOB", "Premium", "Agency Gross", "Applicable %", "Recipient Amount", "Commission ID"]
-      : ["Paid Month", "Group", "Carrier", "LOB", "Gross Commission", "Applicable %", "Compensation Earned"],
+      ? ["Paid Month", "Recipient", "Recipient Type", "Group", "Carrier", "Line of Coverage", "Premium", "Agency Gross", "Recipient split %", "Recipient commission", "Commission ID"]
+      : ["Paid Month", "Recipient", "Recipient Type", "Group", "Carrier", "Line of Coverage", "Agency Gross", "Recipient split %", "Recipient commission"],
     rows: rows.map((row) => recipient ? [
       formatStatementMonth(row.paidMonth),
+      row.recipientName,
+      row.recipientType || individualRecipientTypeLabel(row),
       row.groupName,
       row.carrierName,
       row.lineOfBusinessName,
@@ -140,6 +143,8 @@ export function individualReportDocument(
       row.commissionId == null ? "—" : String(row.commissionId),
     ] : [
       formatStatementMonth(row.paidMonth),
+      row.recipientName,
+      row.recipientType || individualRecipientTypeLabel(row),
       row.groupName,
       row.carrierName,
       row.lineOfBusinessName,

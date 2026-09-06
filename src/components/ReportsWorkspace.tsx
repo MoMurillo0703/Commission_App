@@ -6,6 +6,11 @@ import type { AccountManager, Agent, Carrier, Group, LineOfBusiness } from "@/db
 import { formatCents } from "@/domain/money";
 import { formatStatementMonth } from "@/domain/dates";
 import type { AgencyReportRow, IndividualReportRow, ReportKind, TeamReportRow } from "@/domain/reports";
+import {
+  individualReportNeedsRecipientAndMonth,
+  individualReportPrompt,
+  renderedReportKind,
+} from "@/domain/reportWorkspace";
 
 type ReportResponse = {
   filters: { kind: ReportKind };
@@ -35,7 +40,7 @@ export function ReportsWorkspace({
   teams: TeamView[];
   initialReport?: ReportResponse | null;
 }) {
-  const [kind, setKind] = useState<ReportKind>("recipient");
+  const [kind, setKind] = useState<ReportKind>("individual");
   const [paidMonth, setPaidMonth] = useState("");
   const [startMonth, setStartMonth] = useState("");
   const [endMonth, setEndMonth] = useState("");
@@ -79,21 +84,28 @@ export function ReportsWorkspace({
 
   async function run(event?: FormEvent) {
     event?.preventDefault();
-    if (kind === "recipient" && (!personKey || !paidMonth)) {
-      setError("Choose a recipient and a paid month to generate a commission statement.");
+    if (individualReportNeedsRecipientAndMonth(kind) && (!personKey || !paidMonth)) {
+      setError("Choose a recipient and a paid month to generate an Individual Commission Report.");
       return;
     }
     setBusy(true);
     setError("");
-    const response = await fetch(`/api/reports?${queryString()}`);
-    const body = await response.json();
-    setBusy(false);
-    if (!response.ok) {
-      setError(body.message ?? "Unable to build report.");
-      return;
+    try {
+      const response = await fetch(`/api/reports?${queryString()}`);
+      const body = await response.json();
+      if (!response.ok) {
+        setError(body.message ?? "Unable to build report.");
+        return;
+      }
+      setReport(body);
+    } catch {
+      setError("Unable to build report.");
+    } finally {
+      setBusy(false);
     }
-    setReport(body);
   }
+
+  const displayedKind = renderedReportKind(report);
 
   return (
     <>
@@ -102,9 +114,9 @@ export function ReportsWorkspace({
           <label>
             Report
             <select value={kind} onChange={(event) => setKind(event.target.value as ReportKind)}>
+              <option value="individual">Individual Commission Report</option>
               <option value="recipient">Recipient commission statement</option>
               <option value="agency">Agency commission</option>
-              <option value="individual">Individual compensation</option>
               <option value="team">Team compensation</option>
             </select>
           </label>
@@ -174,6 +186,9 @@ export function ReportsWorkspace({
             </select>
           </label>
           {error && <p className="form-error">{error}</p>}
+          {!report && !error && individualReportNeedsRecipientAndMonth(kind) && (
+            <p className="muted-note full">{individualReportPrompt()}</p>
+          )}
           <div className="form-actions full">
             <button disabled={busy}>{busy ? "Building…" : "Run report"}</button>
             {report && (
@@ -206,7 +221,7 @@ export function ReportsWorkspace({
             {report.payable?.message && (
               <p className="form-error">{report.payable.message}</p>
             )}
-            {kind === "recipient" && report.payable?.payableReady && !report.emptyMessage && (
+            {(displayedKind === "recipient" || displayedKind === "individual") && report.payable?.payableReady && !report.emptyMessage && (
               <p className="form-success">Payable from posted commissions. This is not a payment record.</p>
             )}
           </div>
@@ -219,9 +234,11 @@ export function ReportsWorkspace({
             ))}
           </div>
           {report.emptyMessage && <p className="empty">{report.emptyMessage}</p>}
-          {!report.emptyMessage && kind === "agency" && <AgencyTable rows={report.rows as AgencyReportRow[]} />}
-          {!report.emptyMessage && (kind === "individual" || kind === "recipient") && <IndividualTable rows={report.rows as IndividualReportRow[]} recipient={kind === "recipient"} />}
-          {!report.emptyMessage && kind === "team" && <TeamTable rows={report.rows as TeamReportRow[]} />}
+          {!report.emptyMessage && displayedKind === "agency" && <AgencyTable rows={report.rows as AgencyReportRow[]} />}
+          {!report.emptyMessage && (displayedKind === "individual" || displayedKind === "recipient") && (
+            <IndividualTable rows={report.rows as IndividualReportRow[]} />
+          )}
+          {!report.emptyMessage && displayedKind === "team" && <TeamTable rows={report.rows as TeamReportRow[]} />}
         </section>
       )}
     </>
@@ -267,22 +284,22 @@ function AgencyTable({ rows }: { rows: AgencyReportRow[] }) {
   );
 }
 
-function IndividualTable({ rows, recipient = false }: { rows: IndividualReportRow[]; recipient?: boolean }) {
-  if (rows.length === 0) return <p className="empty">No posted commissions match the current filters.</p>;
+function IndividualTable({ rows }: { rows: IndividualReportRow[] }) {
+  if (rows.length === 0) return <p className="empty">No posted payout records match this recipient and paid month.</p>;
   return (
     <table className="report-table">
       <thead>
         <tr>
           <th>Paid Month</th>
           <th>Recipient</th>
+          <th>Recipient Type</th>
           <th>Group</th>
           <th>Carrier</th>
-          <th>LOB</th>
-          {recipient ? <th className="num">Premium</th> : null}
+          <th>Line of Coverage</th>
+          <th className="num">Premium</th>
           <th className="num">Agency Gross</th>
-          <th className="num">Applicable %</th>
-          <th className="num">{recipient ? "Recipient Amount" : "Compensation Earned"}</th>
-          {recipient ? <th>Commission ID</th> : null}
+          <th className="num">Recipient split %</th>
+          <th className="num">Recipient commission</th>
         </tr>
       </thead>
       <tbody>
@@ -290,14 +307,14 @@ function IndividualTable({ rows, recipient = false }: { rows: IndividualReportRo
           <tr key={`${row.personKind}-${row.personId}-${row.groupId}-${row.commissionId ?? index}`}>
             <td>{formatStatementMonth(row.paidMonth)}</td>
             <td>{row.recipientName}{row.teamName ? ` · ${row.teamName}` : ""}</td>
+            <td>{row.recipientType || (row.teamName ? "Team member" : row.personKind === "account_manager" ? "Account manager" : "Agent")}</td>
             <td>{row.groupName}</td>
             <td>{row.carrierName}</td>
             <td>{row.lineOfBusinessName}</td>
-            {recipient ? moneyCell(row.premiumCents ?? null) : null}
+            {moneyCell(row.premiumCents ?? null)}
             {moneyCell(row.grossCommissionCents)}
             <td className="num">{`${(row.allocationBps / 100).toFixed(row.allocationBps % 100 === 0 ? 0 : 2)}%`}</td>
             {moneyCell(row.compensationCents)}
-            {recipient ? <td>{row.commissionId ?? "—"}</td> : null}
           </tr>
         ))}
       </tbody>

@@ -41,6 +41,7 @@ export type IndividualReportRow = {
   lineOfBusinessId: number;
   lineOfBusinessName: string;
   recipientName: string;
+  recipientType?: string;
   personKind: "agent" | "account_manager" | null;
   personId: number | null;
   teamName: string | null;

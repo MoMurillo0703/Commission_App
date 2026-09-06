@@ -15,6 +15,7 @@ import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import { agents, carriers, commissionRecords, groups, linesOfBusiness } from "@/db/schema";
 import { recipientPayableReadiness } from "@/domain/recipientStatement";
+import { individualRecipientTypeLabel } from "@/domain/reportWorkspace";
 import { listAllPayouts } from "./payouts";
 import { getAccountManager } from "./accountManagers";
 import { getAgent } from "./agents";
@@ -145,6 +146,7 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
       lineOfBusinessId: commission.lineOfBusinessId,
       lineOfBusinessName: commission.lineOfBusinessName,
       recipientName: payout.personName ?? "Person",
+      recipientType: individualRecipientTypeLabel({ personKind: payout.personKind, teamName: payout.teamName }),
       personKind: payout.personKind,
       personId: payout.personId,
       teamName: payout.teamName,
