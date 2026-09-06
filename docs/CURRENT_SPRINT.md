@@ -4,7 +4,7 @@ Authoritative owner: **Alex**.
 
 ## Phase
 
-Commission App 1.0 Sprint 1 — **DEPLOYED — PRODUCT ACCEPTANCE PENDING**. Product Acceptance is pending Mo live retest of the Group-first compensation workflow (one Missing Compensation item per Group, all coverage lines together, one split applied through the existing atomic bulk write), including the earlier statement workflow correction batch. This is not Done. Do not mark Product Accepted or Done until Mo completes that workflow.
+Commission App 1.0 Sprint 1 — **DEPLOYED — PRODUCT ACCEPTANCE PENDING**. Product Acceptance is pending Mo live retest of Individual Commission Reports (recipient + paid month from posted payout snapshots and matching PDF), including the Group-first compensation workflow. This is not Done. Do not mark Product Accepted or Done until Mo completes that workflow.
 
 ## Authorized work
 

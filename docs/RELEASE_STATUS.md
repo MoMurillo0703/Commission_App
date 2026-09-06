@@ -7,10 +7,10 @@ Authoritative owner: **Alex**. Update this file when a release is deployed or ac
 | Field | Value |
 | --- | --- |
 | URL | https://commissionapp-iota.vercel.app |
-| SHA | `ba14ce5835546fb84b029b142cfc5ad4ca0b700b` |
+| SHA | `0f6d844f2a1875aadd7595aa8d1e41baa36ce6cd` |
 | Migrations | **0001–0007** applied (none required for this release) |
 | Release state | **DEPLOYED — PRODUCT ACCEPTANCE PENDING** |
-| Product acceptance | Pending Mo live retest of the Group-first compensation workflow |
+| Product acceptance | Pending Mo live retest of Individual Commission Reports |
 
 This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 
@@ -28,6 +28,7 @@ This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 - Group-level compensation apply across selected LOBs through one atomic server transaction; LOB overrides remain Group + LOB allocations
 - Exact-term timeout/overlap recovery; no automatic mutation retry; queue advances only after a confirmed matching save
 - Person-first Compensation / Splits view from People, editing the complete Group + LOB allocation
+- Individual Commission Report: choose a recipient and paid month; rows and TOTAL PAYABLE come from posted `commission_payouts`; PDF uses the same document totals
 - Recipient commission statement + binary PDF from posted `commission_payouts`
 - Agency / Individual / Team reporting foundation with CSV, XLSX, printable HTML, and PDF export
 - Auth allow-list
