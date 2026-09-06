@@ -20,7 +20,12 @@ type ReportResponse = {
   document?: { title: string; period: string; totals: Array<{ label: string; value: string }>; filtersUsed?: string[]; generatedAt?: string; notes?: string[] };
   emptyMessage?: string | null;
   availability?: { postedCommissionCount: number; availablePaidMonths: string[] };
-  payable?: { payableReady: boolean; message: string | null };
+  payable?: {
+    payableReady: boolean;
+    message: string | null;
+    reviewHref?: string | null;
+    unallocated?: Array<{ commissionId: number; groupName: string; lineOfBusinessName: string }>;
+  };
 };
 
 export function ReportsWorkspace({
@@ -219,7 +224,14 @@ export function ReportsWorkspace({
               <p key={note} className="report-filters">{note}</p>
             ))}
             {report.payable?.message && (
-              <p className="form-error">{report.payable.message}</p>
+              <div className="form-error">
+                <p>{report.payable.message}</p>
+                {report.payable.reviewHref && (
+                  <p className="form-actions" style={{ marginTop: 10 }}>
+                    <a className="secondary" href={report.payable.reviewHref}>Review Compensation</a>
+                  </p>
+                )}
+              </div>
             )}
             {(displayedKind === "recipient" || displayedKind === "individual") && report.payable?.payableReady && !report.emptyMessage && (
               <p className="form-success">Payable from posted commissions. This is not a payment record.</p>

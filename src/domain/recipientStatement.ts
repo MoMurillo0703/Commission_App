@@ -1,8 +1,11 @@
+import { compensationExceptionWarning } from "./compensationExceptions";
 import type { IndividualReportRow } from "./reports";
 
 export type UnallocatedPostedCommission = {
   commissionId: number;
+  groupId: number;
   groupName: string;
+  lineOfBusinessId: number;
   lineOfBusinessName: string;
   paidMonth: string;
   grossCommissionCents: number;
@@ -19,11 +22,12 @@ export function formatAllocationPercent(bps: number) {
 }
 
 export function recipientPayableReadiness(input: {
-  assignedGroupIds: number[];
+  assignedGroupIds?: number[];
   postedCommissions: Array<{
     id: number;
     groupId: number;
     groupName: string;
+    lineOfBusinessId: number;
     lineOfBusinessName: string;
     paidMonth: string;
     grossCommissionCents: number;
@@ -31,10 +35,12 @@ export function recipientPayableReadiness(input: {
   }>;
 }): RecipientPayableReadiness {
   const unallocated = input.postedCommissions
-    .filter((row) => input.assignedGroupIds.includes(row.groupId) && !row.hasAllocation)
+    .filter((row) => !row.hasAllocation)
     .map((row) => ({
       commissionId: row.id,
+      groupId: row.groupId,
       groupName: row.groupName,
+      lineOfBusinessId: row.lineOfBusinessId,
       lineOfBusinessName: row.lineOfBusinessName,
       paidMonth: row.paidMonth,
       grossCommissionCents: row.grossCommissionCents,
@@ -42,9 +48,7 @@ export function recipientPayableReadiness(input: {
   return {
     payableReady: unallocated.length === 0,
     unallocated,
-    message: unallocated.length === 0
-      ? null
-      : `${unallocated.length} posted commission${unallocated.length === 1 ? "" : "s"} on this person's assigned groups ${unallocated.length === 1 ? "has" : "have"} no complete allocation. ${unallocated.length === 1 ? "It settled" : "They settled"} as 100% Agency and ${unallocated.length === 1 ? "is" : "are"} not included as producer pay. Confirm compensation before treating this statement as payable-ready.`,
+    message: compensationExceptionWarning(unallocated.length),
   };
 }
 

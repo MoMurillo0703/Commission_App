@@ -4,21 +4,38 @@ import { listAccountManagers } from "@/data/accountManagers";
 import { listAgents } from "@/data/agents";
 import { listAllocations } from "@/data/allocations";
 import { countUnassignedCommissions } from "@/data/commissions";
+import { listPostedCompensationExceptions } from "@/data/compensationExceptions";
 import { listGroupCompensationQueue } from "@/data/compensationQueue";
 import { listGroups } from "@/data/groups";
 import { listLinesOfBusiness } from "@/data/linesOfBusiness";
 import { listGroupLineEvidence } from "@/data/groupLineEvidence";
 import { listTeams } from "@/data/teams";
+import { parseCommissionIds } from "@/domain/compensationExceptions";
 
 export const dynamic = "force-dynamic";
 
 export default async function CompensationPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ allocationId?: string }>;
+  searchParams?: Promise<{
+    allocationId?: string;
+    review?: string;
+    paidMonth?: string;
+    commissionIds?: string;
+    personKind?: string;
+    personId?: string;
+    personName?: string;
+  }>;
 }) {
   const params = searchParams ? await searchParams : {};
   const focusAllocationId = Number(params.allocationId);
+  const paidMonth = params.paidMonth ?? "";
+  const reviewCommissions = params.review === "1" && paidMonth
+    ? await listPostedCompensationExceptions(undefined, {
+      paidMonth,
+      commissionIds: parseCommissionIds(params.commissionIds),
+    })
+    : [];
   return (
     <AppShell active="compensation" reviewCount={await countUnassignedCommissions()}>
       <header>
@@ -38,6 +55,11 @@ export default async function CompensationPage({
         initialQueue={await listGroupCompensationQueue()}
         groupLineEvidence={await listGroupLineEvidence()}
         focusAllocationId={Number.isInteger(focusAllocationId) && focusAllocationId > 0 ? focusAllocationId : null}
+        reviewContext={reviewCommissions.length > 0 ? {
+          paidMonth,
+          personName: params.personName ?? null,
+          commissions: reviewCommissions,
+        } : null}
       />
     </AppShell>
   );

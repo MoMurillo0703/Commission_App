@@ -13,6 +13,12 @@ import {
   skipQueueIndex,
   type GroupCompensationQueueItem,
 } from "@/domain/compensationQueue";
+import {
+  exceptionWorkSummary,
+  groupCompensationExceptions,
+  remainingSettlementMessage,
+  type PostedCompensationException,
+} from "@/domain/compensationExceptions";
 import type { TeamView } from "@/data/teams";
 import type { AccountManager, Agent, Group, LineOfBusiness } from "@/db/schema";
 import {
@@ -56,6 +62,7 @@ export function CompensationWorkspace({
   initialQueue = [],
   groupLineEvidence = [],
   focusAllocationId = null,
+  reviewContext = null,
 }: {
   groups: Group[];
   agents: Agent[];
@@ -66,6 +73,11 @@ export function CompensationWorkspace({
   initialQueue?: GroupCompensationQueueItem[];
   groupLineEvidence?: GroupLineEvidence[];
   focusAllocationId?: number | null;
+  reviewContext?: {
+    paidMonth: string;
+    personName: string | null;
+    commissions: PostedCompensationException[];
+  } | null;
 }) {
   const [allocations, setAllocations] = useState(initialAllocations);
   const [teams, setTeams] = useState(initialTeams);
@@ -84,6 +96,9 @@ export function CompensationWorkspace({
   const [queueSessionTotal, setQueueSessionTotal] = useState(initialQueue.length);
   const [queueSessionPosition, setQueueSessionPosition] = useState(0);
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [reviewActive, setReviewActive] = useState(Boolean(reviewContext));
+  const [workspaceKeepLineIds, setWorkspaceKeepLineIds] = useState<number[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [lineModes, setLineModes] = useState<Record<number, LineApplyMode>>({});
   const allocationsRef = useRef(allocations);
@@ -198,11 +213,32 @@ export function CompensationWorkspace({
     }
   }
 
+  function openGroupWorkspace(groupId: number, keepLineIds: number[] = []) {
+    setSelectedGroupId(groupId);
+    setWorkspaceKeepLineIds(keepLineIds);
+    setShowHistory(false);
+    setWorkspaceOpen(true);
+    setLineModes(keepLineIds.length
+      ? Object.fromEntries(keepLineIds.map((id) => [id, "template" as const]))
+      : {});
+    setDraft((current) => ({
+      ...current,
+      groupId: String(groupId),
+      lineOfBusinessId: "",
+      effectiveStart: current.effectiveStart || reviewContext?.paidMonth || "",
+    }));
+  }
+
+  function closeGroupWorkspace() {
+    setWorkspaceOpen(false);
+    setShowHistory(false);
+  }
+
   useEffect(() => {
     if (!focusAllocationId) return;
     const row = allocations.find((allocation) => allocation.id === focusAllocationId);
     if (row) {
-      setSelectedGroupId(row.groupId);
+      openGroupWorkspace(row.groupId, [row.lineOfBusinessId]);
       changeAllocation(row);
     }
     // Load the complete allocation once when arriving from People.
@@ -212,6 +248,7 @@ export function CompensationWorkspace({
   function loadQueueGroup(item: GroupCompensationQueueItem | null) {
     if (!item) return;
     setSelectedGroupId(item.groupId);
+    setWorkspaceKeepLineIds(item.lineOfBusinessIds);
     setDraft({
       groupId: String(item.groupId),
       lineOfBusinessId: "",
@@ -229,6 +266,7 @@ export function CompensationWorkspace({
   }
 
   function openQueue() {
+    setWorkspaceOpen(false);
     setQueueOpen(true);
     setQueueDone(false);
     setQueueIndex(0);
@@ -342,6 +380,10 @@ export function CompensationWorkspace({
   }
 
   const groupSummaries = filterCompensationGroups(compensationGroupSummaries(allocations, groups), query);
+  const exceptionGroups = reviewActive && reviewContext
+    ? groupCompensationExceptions(reviewContext.commissions, allocations)
+    : [];
+  const exceptionWork = exceptionWorkSummary(exceptionGroups);
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) ?? null;
   const selectedHistory = selectedGroupId ? historicalAllocationsForGroup(allocations, selectedGroupId) : [];
   const coverageLines = groupCoverageLines({
@@ -349,9 +391,12 @@ export function CompensationWorkspace({
     lines: linesOfBusiness,
     evidence: groupLineEvidence,
     allocations,
-    keepLineIds: currentQueueItem && (currentQueueItem.groupId === selectedGroupId || currentQueueItem.groupId === draftGroupId)
-      ? currentQueueItem.lineOfBusinessIds
-      : [],
+    keepLineIds: [
+      ...workspaceKeepLineIds,
+      ...(currentQueueItem && (currentQueueItem.groupId === selectedGroupId || currentQueueItem.groupId === draftGroupId)
+        ? currentQueueItem.lineOfBusinessIds
+        : []),
+    ],
   });
   const applyLines = coverageLines;
   const templateEntries = draft.entries.flatMap((entry) => {
@@ -367,6 +412,15 @@ export function CompensationWorkspace({
       return [];
     }
   });
+
+  useEffect(() => {
+    if (!reviewActive || !workspaceOpen || !selectedGroupId) return;
+    if (!exceptionWork.groups.some((group) => group.groupId === selectedGroupId)) {
+      closeGroupWorkspace();
+    }
+    // Close only after a refresh removes this Group from the remaining exception work list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allocations, reviewActive, selectedGroupId]);
 
   useEffect(() => {
     if (pendingOverrideLineId.current != null) {
@@ -437,7 +491,61 @@ export function CompensationWorkspace({
 
   return (
     <>
-      {queue.length > 0 && (
+      {reviewActive && reviewContext && (
+        <section className="panel queue-banner">
+          <div>
+            <p className="eyebrow">Compensation requires review</p>
+            <h2>{reviewContext.personName ? `${reviewContext.personName} · ${formatStatementMonth(reviewContext.paidMonth)}` : formatStatementMonth(reviewContext.paidMonth)}</h2>
+            {exceptionWork.groupCount > 0 && (
+              <p>{exceptionWork.groupCount} Group{exceptionWork.groupCount === 1 ? "" : "s"} / {exceptionWork.commissionCount} commission record{exceptionWork.commissionCount === 1 ? "" : "s"} require review</p>
+            )}
+            <p>{remainingSettlementMessage(reviewContext.commissions.filter((row) => !row.hasAllocationSnapshot).length)}</p>
+          </div>
+          <button type="button" className="secondary" onClick={() => setReviewActive(false)}>Exit filtered review</button>
+        </section>
+      )}
+
+      {reviewActive && reviewContext && exceptionWork.groupCount > 0 && (
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Affected Groups</p>
+              <h2>Posted commissions without an allocation snapshot</h2>
+              <p>Open a Group to set the current Group + LOB allocation. Posted payout snapshots are not rewritten.</p>
+            </div>
+          </div>
+          {exceptionWork.groups.map((group) => (
+            <article key={group.groupId} className="allocation-card">
+              <button type="button" className="linkish" onClick={() => openGroupWorkspace(
+                group.groupId,
+                group.lines.filter((line) => line.status === "needs_allocation").map((line) => line.lineOfBusinessId),
+              )}>
+                <strong>{group.groupName}</strong>
+              </button>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Coverage</th>
+                    <th>Status</th>
+                    <th>Commission IDs</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.lines.map((line) => (
+                    <tr key={line.lineOfBusinessId}>
+                      <td>{line.lineOfBusinessName}</td>
+                      <td>{line.statusLabel}</td>
+                      <td>{line.commissionIds.join(", ")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </article>
+          ))}
+        </section>
+      )}
+
+      {queue.length > 0 && !reviewActive && (
         <section className="panel queue-banner">
           <div>
             <p className="eyebrow">Needs attention</p>
@@ -448,7 +556,7 @@ export function CompensationWorkspace({
         </section>
       )}
 
-      <section className="panel">
+      {!reviewActive && <section className="panel">
         <div className="panel-head">
           <div>
             <p className="eyebrow">Browse by group</p>
@@ -473,11 +581,7 @@ export function CompensationWorkspace({
               {groupSummaries.map((group) => (
                 <tr key={group.groupId} className={group.groupId === selectedGroupId ? "selected-row" : undefined}>
                   <td>
-                    <button type="button" className="linkish" onClick={() => {
-                      setSelectedGroupId(group.groupId);
-                      setShowHistory(false);
-                      setDraft((current) => ({ ...current, groupId: String(group.groupId), lineOfBusinessId: "" }));
-                    }}>
+                    <button type="button" className="linkish" onClick={() => openGroupWorkspace(group.groupId)}>
                       <strong>{group.groupName}</strong>
                     </button>
                   </td>
@@ -487,74 +591,72 @@ export function CompensationWorkspace({
             </tbody>
           </table>
         )}
-      </section>
+      </section>}
 
-      {selectedGroup && (
-      <section className="panel">
-        <div className="panel-head">
-          <div>
+      {workspaceOpen && selectedGroup && !queueOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="group-workspace-title" onClick={() => { resetDraft(); closeGroupWorkspace(); }}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
             <p className="eyebrow">Group compensation</p>
-            <h2>{selectedGroup.name}</h2>
+            <h2 id="group-workspace-title">{selectedGroup.name}</h2>
             <p>Enter recipients once, select the Lines of Coverage that should use this setup, then apply. Already-configured lines stay unchanged unless you intentionally select them. Posted payout snapshots are not rewritten.</p>
+            <h3>Lines of Coverage</h3>
+            {coverageTable}
+            <div className="related-block">
+              <button type="button" className="secondary" onClick={() => setShowHistory((current) => !current)}>
+                {showHistory ? "Hide history" : "Show historical allocations"}
+              </button>
+              {showHistory && (selectedHistory.length === 0 ? (
+                <p className="empty">No historical allocations for this group.</p>
+              ) : (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>LOB</th>
+                      <th>Recipients</th>
+                      <th>Effective</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedHistory.map((row) => (
+                      <tr key={row.id} className="history-row">
+                        <td>{row.lineOfBusinessName}</td>
+                        <td>{allocationRecipientSummary(row)}</td>
+                        <td>{formatStatementMonth(row.effectiveStart)} – {row.effectiveEnd ? formatStatementMonth(row.effectiveEnd) : "Present"}</td>
+                        <td>{row.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ))}
+            </div>
+            <form className="form-grid form-grid-wide" onSubmit={(event) => { event.preventDefault(); void saveSelectedLines(); }}>
+              <label>
+                Effective start
+                <input type="month" value={draft.effectiveStart} onChange={(event) => setDraft((current) => ({ ...current, effectiveStart: event.target.value }))} required />
+              </label>
+              <label>
+                Effective end
+                <input type="month" value={draft.effectiveEnd} onChange={(event) => setDraft((current) => ({ ...current, effectiveEnd: event.target.value }))} />
+              </label>
+              {editor}
+              <p className={totals.complete ? "form-success full" : "allocation-progress full"}>{allocationProgressLabel(draft.entries.flatMap((entry) => {
+                try { return [{ compensationBps: parsePercentToBps(entry.percent || "0") }]; } catch { return []; }
+              }))}</p>
+              {error && <p className="form-error">{error}</p>}
+              {success && <p className="form-success">{success}</p>}
+              <div className="form-actions full">
+                <button type="submit" disabled={busy || !totals.complete || coverageLines.length === 0}>
+                  {busy ? "Saving…" : "Apply to Selected Lines"}
+                </button>
+                <button type="button" className="secondary" onClick={() => { resetDraft(); closeGroupWorkspace(); }}>Close</button>
+              </div>
+            </form>
           </div>
         </div>
-        <h3>Lines of Coverage</h3>
-        {coverageTable}
-        <div className="related-block">
-          <button type="button" className="secondary" onClick={() => setShowHistory((current) => !current)}>
-            {showHistory ? "Hide history" : "Show historical allocations"}
-          </button>
-          {showHistory && (selectedHistory.length === 0 ? (
-            <p className="empty">No historical allocations for this group.</p>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>LOB</th>
-                  <th>Recipients</th>
-                  <th>Effective</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selectedHistory.map((row) => (
-                  <tr key={row.id} className="history-row">
-                    <td>{row.lineOfBusinessName}</td>
-                    <td>{allocationRecipientSummary(row)}</td>
-                    <td>{formatStatementMonth(row.effectiveStart)} – {row.effectiveEnd ? formatStatementMonth(row.effectiveEnd) : "Present"}</td>
-                    <td>{row.status}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ))}
-        </div>
-        <form className="form-grid form-grid-wide" onSubmit={(event) => { event.preventDefault(); void saveSelectedLines(); }}>
-          <label>
-            Effective start
-            <input type="month" value={draft.effectiveStart} onChange={(event) => setDraft((current) => ({ ...current, effectiveStart: event.target.value }))} required />
-          </label>
-          <label>
-            Effective end
-            <input type="month" value={draft.effectiveEnd} onChange={(event) => setDraft((current) => ({ ...current, effectiveEnd: event.target.value }))} />
-          </label>
-          {editor}
-          <p className={totals.complete ? "form-success full" : "allocation-progress full"}>{allocationProgressLabel(draft.entries.flatMap((entry) => {
-            try { return [{ compensationBps: parsePercentToBps(entry.percent || "0") }]; } catch { return []; }
-          }))}</p>
-          {error && !queueOpen && <p className="form-error">{error}</p>}
-          {success && !queueOpen && <p className="form-success">{success}</p>}
-          <div className="form-actions full">
-            <button type="submit" disabled={busy || !totals.complete || coverageLines.length === 0}>
-              {busy ? "Saving…" : "Apply to Selected Lines"}
-            </button>
-            <button type="button" className="secondary" onClick={resetDraft}>Cancel</button>
-          </div>
-        </form>
-      </section>
       )}
 
-      <section className="panel recent">
+      {!reviewActive && <section className="panel recent">
         <div className="panel-head">
           <div>
             <p className="eyebrow">Reusable teams</p>
@@ -619,7 +721,7 @@ export function CompensationWorkspace({
             </table>
           </article>
         ))}
-      </section>
+      </section>}
 
       {queueOpen && currentQueueItem && !queueDone && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="queue-title">

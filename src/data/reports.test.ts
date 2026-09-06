@@ -252,10 +252,48 @@ describe("posted commission reports", () => {
       personId: john.id,
     });
     expect(report.payable?.payableReady).toBe(false);
-    expect(report.payable?.message).toMatch(/no complete allocation/);
+    expect(report.payable?.message).toMatch(/need(?:s)? compensation setup/);
+    expect(report.payable?.reviewHref).toContain("/compensation?review=1");
+    expect(report.payable?.unallocated[0]).toMatchObject({
+      groupId: group.id,
+      lineOfBusinessId: dental.id,
+    });
     expect(report.rows).toHaveLength(0);
     expect(report.matchingCommissionCount).toBe(1);
     expect(report.names.personName).toBe("John Elizando");
+  });
+
+  it("does not treat another person's unallocated commissions as this recipient's compensation exceptions", async () => {
+    const db = await createTestDb();
+    const john = await createAgent(db, { name: "John Elizondo" });
+    const other = await createAgent(db, { name: "Other Agent" });
+    const johnGroup = await createGroup(db, { name: "John Group", primaryAgentId: john.id });
+    const otherGroup = await createGroup(db, { name: "Other Group", primaryAgentId: other.id });
+    const carrier = await createCarrier(db, { name: "Principal" });
+    const medical = await createLineOfBusiness(db, { name: "Medical" });
+    await createCommission(db, {
+      statementMonth: "2026-09",
+      groupId: johnGroup.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: medical.id,
+      grossCommissionCents: 5000,
+    });
+    await createCommission(db, {
+      statementMonth: "2026-09",
+      groupId: otherGroup.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: medical.id,
+      grossCommissionCents: 9000,
+    });
+    const report = await buildIndividualReport(db, {
+      kind: "recipient",
+      paidMonth: "2026-09",
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(report.payable?.unallocated).toHaveLength(1);
+    expect(report.payable?.unallocated[0]?.groupId).toBe(johnGroup.id);
+    expect(report.payable?.reviewHref).toContain(`commissionIds=${report.payable?.unallocated[0]?.commissionId}`);
   });
 
   it("uses stored Agent and Account Manager payout identities and names", async () => {

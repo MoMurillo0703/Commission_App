@@ -15,6 +15,7 @@ describe("recipient payable readiness", () => {
         id: 10,
         groupId: 1,
         groupName: "Acme",
+        lineOfBusinessId: 4,
         lineOfBusinessName: "Dental",
         paidMonth: "2026-08",
         grossCommissionCents: 5000,
@@ -25,7 +26,7 @@ describe("recipient payable readiness", () => {
     expect(readiness.message).toBeNull();
   });
 
-  it("surfaces missing allocations on assigned groups before calling the report payable-ready", () => {
+  it("surfaces posted commissions that settled without an allocation snapshot, not Group assignment", () => {
     const readiness = recipientPayableReadiness({
       assignedGroupIds: [1, 2],
       postedCommissions: [
@@ -33,6 +34,7 @@ describe("recipient payable readiness", () => {
           id: 11,
           groupId: 1,
           groupName: "Acme",
+          lineOfBusinessId: 4,
           lineOfBusinessName: "Dental",
           paidMonth: "2026-08",
           grossCommissionCents: 5000,
@@ -42,17 +44,27 @@ describe("recipient payable readiness", () => {
           id: 12,
           groupId: 3,
           groupName: "Other",
+          lineOfBusinessId: 5,
           lineOfBusinessName: "Vision",
           paidMonth: "2026-08",
           grossCommissionCents: 2000,
           hasAllocation: false,
         },
+        {
+          id: 13,
+          groupId: 1,
+          groupName: "Acme",
+          lineOfBusinessId: 6,
+          lineOfBusinessName: "Medical",
+          paidMonth: "2026-08",
+          grossCommissionCents: 1000,
+          hasAllocation: true,
+        },
       ],
     });
     expect(readiness.payableReady).toBe(false);
-    expect(readiness.unallocated).toHaveLength(1);
-    expect(readiness.unallocated[0]?.commissionId).toBe(11);
-    expect(readiness.message).toMatch(/no complete allocation/);
+    expect(readiness.unallocated.map((row) => row.commissionId)).toEqual([11, 12]);
+    expect(readiness.message).toMatch(/2 commissions need compensation setup/);
     expect(readiness.message).toMatch(/not included as producer pay/);
   });
 

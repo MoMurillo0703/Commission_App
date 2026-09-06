@@ -14,6 +14,7 @@ import {
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import { agents, carriers, commissionRecords, groups, linesOfBusiness } from "@/db/schema";
+import { compensationReviewHref } from "@/domain/compensationExceptions";
 import { recipientPayableReadiness } from "@/domain/recipientStatement";
 import { individualRecipientTypeLabel } from "@/domain/reportWorkspace";
 import { listAllPayouts } from "./payouts";
@@ -159,35 +160,54 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
       importStatementId: commission.importStatementId,
     });
   }
-  const groups = await listGroups(database);
-  const assignedGroupIds = groups
-    .filter((group) => (
-      (filters.personKind === "agent" && group.primaryAgentId === filters.personId)
-      || (filters.personKind === "account_manager" && group.accountManagerId === filters.personId)
-    ))
-    .map((group) => group.id);
   const commissionsWithAllocation = new Set(
     payouts.filter((payout) => payout.allocationId != null).map((payout) => payout.commissionId),
   );
+  const assignedGroupIds = filters.personId && filters.personKind
+    ? new Set(
+      (await listGroups(database)).flatMap((group) => {
+        const assigned = filters.personKind === "agent"
+          ? group.primaryAgentId === filters.personId
+          : group.accountManagerId === filters.personId;
+        return assigned ? [group.id] : [];
+      }),
+    )
+    : null;
+  const payableScope = assignedGroupIds
+    ? commissions.filter((commission) => assignedGroupIds.has(commission.groupId))
+    : commissions;
   const payable = recipientPayableReadiness({
-    assignedGroupIds,
-    postedCommissions: commissions.map((commission) => ({
+    postedCommissions: payableScope.map((commission) => ({
       id: commission.id,
       groupId: commission.groupId,
       groupName: commission.groupName,
+      lineOfBusinessId: commission.lineOfBusinessId,
       lineOfBusinessName: commission.lineOfBusinessName,
       paidMonth: commission.paidMonth,
       grossCommissionCents: commission.grossCommissionCents,
       hasAllocation: commissionsWithAllocation.has(commission.id),
     })),
   });
+  const paidMonth = filters.paidMonth ?? payable.unallocated[0]?.paidMonth ?? "";
+  const names = await reportNameLookup(database, filters);
   return {
     filters,
-    names: await reportNameLookup(database, filters),
+    names,
     rows,
     totals: sumIndividualReport(rows),
     availability: await reportAvailability(database, rows.length),
-    payable,
+    payable: {
+      ...payable,
+      reviewHref: payable.unallocated.length && paidMonth
+        ? compensationReviewHref({
+          paidMonth,
+          commissionIds: payable.unallocated.map((row) => row.commissionId),
+          personKind: filters.personKind,
+          personId: filters.personId,
+          personName: names.personName,
+        })
+        : null,
+    },
     matchingCommissionCount: commissions.length,
   };
 }
