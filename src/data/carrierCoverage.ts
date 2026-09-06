@@ -3,6 +3,7 @@ import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import { carrierCoverageAliases } from "@/db/schema";
 import { normalizeCoverageValue, type CarrierCoverageAlias } from "@/domain/carrierCoverage";
+import { isImpossibleLobCandidate } from "@/domain/lobCandidates";
 
 export async function listCarrierCoverageAliases(db?: AppDatabase, carrierId?: number | null): Promise<CarrierCoverageAlias[]> {
   const database = await resolveDb(db);
@@ -21,7 +22,7 @@ export async function rememberCarrierCoverageAlias(
   input: { carrierId: number | null | undefined; sourceValue: string | null | undefined; lineOfBusinessId: number },
 ) {
   const sourceValue = normalizeCoverageValue(input.sourceValue);
-  if (!input.carrierId || !sourceValue) return null;
+  if (!input.carrierId || !sourceValue || isImpossibleLobCandidate(input.sourceValue)) return null;
   const database = await resolveDb(db);
   const now = new Date().toISOString();
   const [existing] = await database

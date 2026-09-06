@@ -59,7 +59,7 @@ export function inspectUploadGuards(input: Pick<InspectStatementInput, "fileName
 async function inspectPdfPreview(
   buffer: ArrayBuffer | Uint8Array,
   groups: Awaited<ReturnType<typeof listGroups>>,
-  context?: { carrierId?: number | null; identities?: Awaited<ReturnType<typeof listCarrierGroupIdentities>> },
+  context?: { carrierId?: number | null; identities?: Awaited<ReturnType<typeof listCarrierGroupIdentities>>; sourceHint?: string | null },
 ) {
   try {
     return await previewPdfStatement(buffer, groups, context);
@@ -211,6 +211,7 @@ export async function inspectStatementUpload(
       const extracted = await inspectPdfPreview(bytes, groups, {
         carrierId: resolved.carrier.id,
         identities,
+        sourceHint: `${input.fileName}\n${resolved.carrier.name}`,
       });
       preview = extracted.preview;
       pdfExtraction = extracted.extraction;
@@ -255,7 +256,9 @@ export async function inspectStatementUpload(
         preview.sheets.flatMap((sheet) => sheet.headers),
         pdfExtraction?.pages[0]?.text ?? "",
       );
-      const layout = await findMatchingLayout(db, resolved.carrier.id, signature);
+      const layout = preview.pdf?.groupMatchStrategy === "carrier_group_identity"
+        ? null
+        : await findMatchingLayout(db, resolved.carrier.id, signature);
       if (layout) {
         statement = await timedStage("import-persist", "save_layout_mapping", { statementId: statement.id }, () => saveImportColumnMapping(db, statement.id, layout.mapping));
         await attachLayoutToStatement(db, statement.id, layout);

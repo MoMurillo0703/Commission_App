@@ -179,6 +179,28 @@ describe("statement compensation from agreements", () => {
     expect(resolved[0]?.importedAgentName).toBe("Pat Lee");
   });
 
+  it("does not send impossible LOB values to review and treats ignore as skipped rows", () => {
+    const garbageSheets = compensationSheets.map((sheet) => ({
+      ...sheet,
+      rows: sheet.rows.map((row) => ({ ...row, values: { ...row.values, LOB: "$" } })),
+    }));
+    const garbage = validateMappedRows(garbageSheets, compensationMapping, "2026-08", compensationRefs);
+    expect(garbage[0]?.status).toBe("blocked");
+    expect(garbage[0]?.exceptions.join(" ")).toMatch(/could not be read/);
+    expect(garbage[0]?.exceptions.join(" ")).not.toMatch(/Unmatched line of business/);
+    const ignoreSheets = compensationSheets.map((sheet) => ({
+      ...sheet,
+      rows: sheet.rows.map((row) => ({ ...row, values: { ...row.values, LOB: "PPO Dental" } })),
+    }));
+    const ignored = validateMappedRows(ignoreSheets, compensationMapping, "2026-08", {
+      ...compensationRefs,
+      lineResolutions: [{ key: "name:ppo dental", entityId: null, sourceName: "PPO Dental", action: "ignore" }],
+    });
+    expect(ignored[0]?.status).toBe("ignored");
+    expect(ignored[0]?.lineOfBusinessId).toBeNull();
+    expect(ignored[0]?.exceptions.join(" ")).toMatch(/ignored/i);
+  });
+
   it("uses the Group + Agent + LOB agreement selected by paid month, not premium month", () => {
     const agreements = [
       { id: 1, groupId: 1, agentId: 5, lineOfBusinessId: 3, compensationBps: 4000, effectiveStart: "2026-01", effectiveEnd: "2026-06", status: "active" as const },

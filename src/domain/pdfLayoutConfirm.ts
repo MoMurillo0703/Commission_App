@@ -1,3 +1,4 @@
+import { interpretCaliforniaChoiceStatement } from "./californiaChoice";
 import { detectGroupHeaders, matchImportedGroup, type GroupCandidate } from "./groupMatch";
 import { isIgnoredPdfLine, lineCells, type ExtractedPdfPage } from "./pdfExtraction";
 import { previewFromSheets, type PreviewRow, type PreviewSheet, type StatementPreview } from "./workbook";
@@ -76,6 +77,16 @@ export function previewFromConfirmedPdfLayout(
       preview: emptyConfirmedPreview(pages),
       headerCells: [],
       selectedLineCount: 0,
+      ignoredLineCount: 0,
+    };
+  }
+
+  const californiaChoice = interpretCaliforniaChoiceStatement(pages, groups);
+  if (californiaChoice) {
+    return {
+      preview: californiaChoice.preview,
+      headerCells: californiaChoice.preview.sheets[0]?.headers ?? [],
+      selectedLineCount: californiaChoice.preview.rowCount,
       ignoredLineCount: 0,
     };
   }

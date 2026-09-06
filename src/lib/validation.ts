@@ -165,7 +165,7 @@ export const importGroupConfirmSchema = z.object({
 
 export const importNamedDecisionSchema = z.object({
   key: z.string().min(1),
-  action: z.enum(["create", "match"]),
+  action: z.enum(["create", "match", "ignore"]),
   existingId: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
 });
 

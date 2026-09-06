@@ -14,11 +14,12 @@ import { applyGroupResolutions, matchImportedGroup, type GroupCandidate, type Gr
 import { parseFlexibleMonth } from "./dates";
 import { parseDollarsToCents } from "./money";
 import { applyCarrierCoverageAlias, type CarrierCoverageAlias } from "./carrierCoverage";
+import { isImpossibleLobCandidate } from "./lobCandidates";
 import { resolveNamedImport, type NamedImportResolution } from "./namedImport";
 import { matchNamedRecord, type NamedRecord } from "./nameMatch";
 import type { PreviewSheet } from "./workbook";
 
-export type ImportRowStatus = "ready" | "blocked" | "posted";
+export type ImportRowStatus = "ready" | "blocked" | "posted" | "ignored";
 export type CarrierSourceKind = "statement" | "column";
 
 export type ValidatedImportRow = {
@@ -136,13 +137,16 @@ export function validateMappedRows(
       const carrier = resolveImportedCarrier(mapping, row.values, references.carriers, references.statementCarrier);
       const importedLineName = mappingValue(row.values, mapping.lineOfBusiness);
       const importedAgentName = mappingValue(row.values, mapping.agent);
-      const line = applyCarrierCoverageAlias(
-        resolveNamedImport(references.linesOfBusiness, importedLineName, references.lineResolutions),
-        references.carrierCoverageAliases,
-        carrier.id,
-        importedLineName,
-        references.linesOfBusiness,
-      );
+      const invalidLob = isImpossibleLobCandidate(importedLineName);
+      const line = invalidLob
+        ? { status: "missing" as const, id: null, name: null, source: importedLineName }
+        : applyCarrierCoverageAlias(
+          resolveNamedImport(references.linesOfBusiness, importedLineName, references.lineResolutions),
+          references.carrierCoverageAliases,
+          carrier.id,
+          importedLineName,
+          references.linesOfBusiness,
+        );
       const matchedGroup = references.groups.find((candidate) => candidate.id === group.groupId);
       const agent = resolveNamedImport(references.agents, importedAgentName, references.agentResolutions);
       const grossText = mappingValue(row.values, mapping.grossCommission);
@@ -167,9 +171,11 @@ export function validateMappedRows(
       if (carrier.status === "missing") exceptions.push("Carrier is missing.");
       if (carrier.status === "unmatched") exceptions.push(`Unmatched carrier: ${carrier.source}.`);
       if (carrier.status === "ambiguous") exceptions.push(`Carrier name matches more than one record: ${carrier.source}.`);
-      if (line.status === "missing") exceptions.push("Line of business is missing.");
-      if (line.status === "unmatched") exceptions.push(`Unmatched line of business: ${line.source}.`);
-      if (line.status === "ambiguous") exceptions.push(`Line of business matches more than one record: ${line.source}.`);
+      if (line.status === "ignored") exceptions.push("Line of business ignored. It will not be posted.");
+      else if (invalidLob) exceptions.push("Product / line of business could not be read.");
+      else if (line.status === "missing") exceptions.push("Line of business is missing.");
+      else if (line.status === "unmatched") exceptions.push(`Unmatched line of business: ${line.source}.`);
+      else if (line.status === "ambiguous") exceptions.push(`Line of business matches more than one record: ${line.source}.`);
       if (agent.status === "unmatched") exceptions.push(`Unmatched agent: ${agent.source}.`);
       if (agent.status === "ambiguous") exceptions.push(`Agent name matches more than one record: ${agent.source}.`);
 
@@ -243,7 +249,11 @@ export function validateMappedRows(
       }
 
       const ready = exceptions.length === 0 && group.groupId != null && carrier.id != null && line.id != null && grossCommissionCents != null;
-      const status: ImportRowStatus = postedKeys.has(key) ? "posted" : ready ? "ready" : "blocked";
+      const status: ImportRowStatus = postedKeys.has(key)
+        ? "posted"
+        : line.status === "ignored"
+          ? "ignored"
+          : ready ? "ready" : "blocked";
 
       return {
         sourceRowKey: key,

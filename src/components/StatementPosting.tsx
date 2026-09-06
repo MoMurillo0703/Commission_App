@@ -415,7 +415,7 @@ export function StatementPosting({
         <ResolveTable
           id="resolve-lines"
           title={`${unmatchedLines.length} Line${unmatchedLines.length === 1 ? "" : "s"} of Business need review`}
-          help="Carrier product labels that do not match a line of business stay unmatched until you confirm. Confirming a coverage value for this carrier is reused on later statements from the same carrier only. Changing it later does not rewrite posted commissions. Creating a line of business does not create a compensation agreement."
+          help="Carrier product labels that do not match a line of business stay unmatched until you confirm. Match or create a line of business, or ignore. Ignore skips posting those rows and does not create a line of business or compensation. Confirming a coverage value for this carrier is reused on later statements from the same carrier only. Changing it later does not rewrite posted commissions."
           rows={unmatchedLines.map((line) => ({
             key: line.key,
             label: line.sourceName,
@@ -426,10 +426,10 @@ export function StatementPosting({
           options={lines.map((option) => ({ id: option.id, label: option.name }))}
           createLabel="Create new line of business"
           matchLabel="Match existing line of business"
+          ignoreLabel="Ignore"
           confirmLabel="Confirm line of business decisions"
           busy={busy}
           onDecision={(key, action, existingId) => {
-            if (action === "ignore") return;
             setNamedDecision(setLineDecisions, key, { action, existingId: existingId ?? null });
           }}
           onConfirm={() => confirm("lines", Object.values(lineDecisions))}
@@ -494,7 +494,7 @@ export function StatementPosting({
               </thead>
               <tbody>
                 {review.rows.map((row) => {
-                  const statusLabel = row.status === "ready" ? "READY" : row.status === "posted" ? "POSTED" : row.exceptions.some((item) => /Unmatched|Ambiguous/.test(item)) ? "NEEDS REVIEW" : "BLOCKED";
+                  const statusLabel = row.status === "ready" ? "READY" : row.status === "posted" ? "POSTED" : row.status === "ignored" ? "IGNORED" : row.exceptions.some((item) => /Unmatched|Ambiguous/.test(item)) ? "NEEDS REVIEW" : "BLOCKED";
                   return (
                     <tr key={row.sourceRowKey}>
                       <td>{row.groupLabel || row.importedGroupName || "—"}</td>
@@ -510,7 +510,7 @@ export function StatementPosting({
                       <td>{row.grossCommissionCents == null ? "—" : formatCents(row.grossCommissionCents)}</td>
                       <td>{row.premiumMonth || "—"}</td>
                       <td>
-                        <span className={`pill ${row.status === "ready" ? "ready_to_map" : row.status === "posted" ? "posted" : "review"}`}>
+                        <span className={`pill ${row.status === "ready" ? "ready_to_map" : row.status === "posted" ? "posted" : row.status === "ignored" ? "review" : "review"}`}>
                           {statusLabel}
                         </span>
                         {row.exceptions.length > 0 && <small> {row.exceptions.join(" ")}</small>}

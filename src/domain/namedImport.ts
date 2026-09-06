@@ -1,6 +1,7 @@
+import { isImpossibleLobCandidate } from "./lobCandidates";
 import { matchNamedRecord, type NamedRecord, type NameMatch } from "./nameMatch";
 
-export type NamedImportAction = "create" | "match";
+export type NamedImportAction = "create" | "match" | "ignore";
 
 export type UnmatchedNamedImport = {
   key: string;
@@ -16,7 +17,7 @@ export type NamedImportDecision = {
 
 export type NamedImportResolution = {
   key: string;
-  entityId: number;
+  entityId: number | null;
   sourceName: string;
   action?: NamedImportAction;
 };
@@ -44,6 +45,9 @@ export function applyNamedResolutions(
   const key = unmatchedNamedIdentity(match.source);
   const resolution = resolutions?.find((item) => item.key === key);
   if (!resolution) return match;
+  if (resolution.action === "ignore") {
+    return { status: "ignored", id: null, name: null, source: match.source };
+  }
   const record = records.find((item) => item.id === resolution.entityId);
   if (!record) return match;
   return {
@@ -86,7 +90,10 @@ export const unmatchedLinePrefixes = ["Unmatched line of business:", "Line of bu
 export const unmatchedAgentPrefixes = ["Unmatched agent:", "Agent name matches more than one"];
 
 export function collectUnmatchedImportLines(rows: Array<{ exceptions: string[]; importedName: string | null | undefined }>) {
-  return collectUnmatchedNamedImports(rows, unmatchedLinePrefixes);
+  return collectUnmatchedNamedImports(
+    rows.filter((row) => !isImpossibleLobCandidate(row.importedName)),
+    unmatchedLinePrefixes,
+  );
 }
 
 export function collectUnmatchedImportAgents(rows: Array<{ exceptions: string[]; importedName: string | null | undefined }>) {

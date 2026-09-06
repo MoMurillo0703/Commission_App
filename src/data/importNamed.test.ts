@@ -193,4 +193,42 @@ describe("statement named-entity review", () => {
     expect(afterOverride[0]?.id).toBe(postedCommission?.id);
     expect(afterOverride[0]?.lineOfBusinessId).toBe(vision.id);
   });
+
+  it("ignores a legitimate unknown Product without creating a LOB or posting those rows", async () => {
+    const db = await createTestDb();
+    await createGroup(db, { name: "Acme Benefits", groupNumber: "A1" });
+    const carrier = await createCarrier(db, { name: "Principal" });
+    await createLineOfBusiness(db, { name: "Medical" });
+    await createAgent(db, { name: "Alex Morgan" });
+    const buffer = await workbook([
+      ["Acme Benefits", "A1", "Principal", "Acupuncture", "Alex Morgan", "30.00", "1.50", "2026-07"],
+      ["Acme Benefits", "A1", "Principal", "Medical", "Alex Morgan", "100.00", "5.00", "2026-07"],
+    ]);
+    const statement = await createImportStatement(db, {
+      originalFilename: "ignore-lob.xlsx",
+      paidMonth: "2026-09",
+      carrierId: carrier.id,
+      sourceType: "excel",
+      status: "ready_to_map",
+      fingerprint: fingerprintBuffer(buffer),
+      preview: await previewWorkbook(buffer, await listGroups(db)),
+    });
+    const review = await previewImportPosting(db, statement.id, mapping);
+    const acupuncture = review.unmatchedLines.find((item) => item.sourceName === "Acupuncture");
+    expect(acupuncture).toBeTruthy();
+    expect(review.unmatchedLines.some((item) => item.sourceName === "Medical")).toBe(false);
+    const confirmed = await confirmImportLines(db, statement.id, mapping, [
+      { key: acupuncture!.key, action: "ignore" },
+    ]);
+    expect(confirmed.unmatchedLines).toHaveLength(0);
+    expect((await listLinesOfBusiness(db)).map((item) => item.name)).toEqual(["Medical"]);
+    expect((await listCarrierCoverageAliases(db, carrier.id))).toHaveLength(0);
+    expect(confirmed.rows.find((row) => row.importedLineName === "Acupuncture")?.status).toBe("ignored");
+    expect(confirmed.rows.find((row) => row.importedLineName === "Medical")?.status).toBe("ready");
+    expect(confirmed.readiness.canContinue).toBe(true);
+    const posted = await postImportStatement(db, statement.id, mapping);
+    expect(posted.postedCount).toBe(1);
+    expect((await listCommissions(db))).toHaveLength(1);
+    expect((await listCommissions(db))[0]?.lineOfBusinessId).not.toBeNull();
+  });
 });

@@ -1,20 +1,16 @@
 import { matchCarrierGroupIdentity, type CarrierGroupIdentity } from "./carrierGroupIdentity";
 import type { ColumnMapping } from "./columnMapping";
 import { isCoverageLabel } from "./coverageLabels";
-import { parseFlexibleMonth } from "./dates";
+import { parseCaliforniaChoiceMonth } from "./dates";
 import type { GroupCandidate } from "./groupMatch";
+import { isCurrencySymbol } from "./lobCandidates";
 import { moneyToken, type ExtractedPdfPage } from "./pdfExtraction";
 import { previewFromSheets, type PreviewRow, type StatementPreview } from "./workbook";
 
-export function parseCaliforniaChoiceMonth(value: string | null | undefined) {
-  const fromFlexible = parseFlexibleMonth(value);
-  if (fromFlexible) return fromFlexible;
-  const trimmed = value?.trim() ?? "";
-  const mmYy = trimmed.match(/^(0?[1-9]|1[0-2])[/-](\d{2}|\d{4})$/);
-  if (!mmYy) return null;
-  const month = mmYy[1]!.padStart(2, "0");
-  const year = mmYy[2]!.length === 2 ? `20${mmYy[2]}` : mmYy[2]!;
-  return `${year}-${month}`;
+export { parseCaliforniaChoiceMonth };
+
+export function isCaliforniaChoiceSource(value: string | null | undefined) {
+  return /cal(?:ifornia)?\s*choice/i.test(value ?? "");
 }
 
 export const CALIFORNIA_CHOICE_HEADERS = {
@@ -29,12 +25,13 @@ export const CALIFORNIA_CHOICE_HEADERS = {
   sourceContext: "Source context",
 } as const;
 
-const ignoredLine = /^(page\s+\d+|subtotal|total|grand total|commission statement|california\s*choice|adjustment|adj(\.|ustment)?\s*code)/i;
+const ignoredLine = /^(page\s+\d+|subtotal|total|grand total|commission statement|california\s*choice|cal\s*choice|adjustment|adj(\.|ustment)?\s*code)/i;
 const rateToken = /^\d{1,2}(?:\.\d{1,2})%?$/;
 
-export function looksLikeCaliforniaChoice(pages: ExtractedPdfPage[]) {
-  const text = pages.map((page) => [page.text, ...(page.lines ?? [])].join("\n")).join("\n");
-  if (/california\s*choice/i.test(text)) return true;
+export function looksLikeCaliforniaChoice(pages: ExtractedPdfPage[], hint?: string | null) {
+  const text = [hint ?? "", ...pages.map((page) => [page.text, ...(page.lines ?? [])].join("\n"))].join("\n");
+  if (/choice\s*builder/i.test(text) && !isCaliforniaChoiceSource(text)) return false;
+  if (isCaliforniaChoiceSource(text)) return true;
   const lines = pages.flatMap((page) => (page.lines.length > 0 ? page.lines : page.text.split(/\r?\n/))).map((line) => line.trim()).filter(Boolean);
   let standaloneNumbers = 0;
   let monthProductRows = 0;
@@ -44,7 +41,7 @@ export function looksLikeCaliforniaChoice(pages: ExtractedPdfPage[]) {
       monthProductRows += 1;
     }
   }
-  return standaloneNumbers >= 2 && monthProductRows >= 2 && !/choice\s*builder/i.test(text);
+  return standaloneNumbers >= 2 && monthProductRows >= 2;
 }
 
 function isMoney(value: string) {
@@ -57,7 +54,7 @@ function isGroupNumber(value: string) {
 
 function isCompanyName(value: string) {
   const text = value.trim();
-  if (!text || isMoney(text) || isGroupNumber(text) || parseCaliforniaChoiceMonth(text) != null || isCoverageLabel(text) || rateToken.test(text)) {
+  if (!text || isMoney(text) || isCurrencySymbol(text) || isGroupNumber(text) || parseCaliforniaChoiceMonth(text) != null || isCoverageLabel(text) || rateToken.test(text)) {
     return false;
   }
   if (ignoredLine.test(text)) return false;
@@ -69,11 +66,11 @@ function tokensFromLine(line: string) {
   const wide = line.split(/\s{2,}|\s\|\s/).map((cell) => cell.trim()).filter(Boolean);
   if (wide.length >= 2) return wide;
   const trimmed = line.trim();
-  if (parseCaliforniaChoiceMonth(trimmed) || isGroupNumber(trimmed) || isCoverageLabel(trimmed) || isMoney(trimmed)) {
+  if (parseCaliforniaChoiceMonth(trimmed) || isGroupNumber(trimmed) || isCoverageLabel(trimmed) || isMoney(trimmed) || isCurrencySymbol(trimmed)) {
     return [trimmed];
   }
   const parts = trimmed.split(/\s+/).filter(Boolean);
-  if (parts.some((part) => isMoney(part) || parseCaliforniaChoiceMonth(part) || isCoverageLabel(part) || isGroupNumber(part))) {
+  if (parts.some((part) => isMoney(part) || isCurrencySymbol(part) || parseCaliforniaChoiceMonth(part) || isCoverageLabel(part) || isGroupNumber(part))) {
     return parts;
   }
   return [trimmed];
@@ -93,12 +90,13 @@ export type CaliforniaChoiceRecord = {
 export type CaliforniaChoiceMatchContext = {
   carrierId?: number | null;
   identities?: CarrierGroupIdentity[];
+  sourceHint?: string | null;
 };
 
 function isAdjustmentCode(value: string) {
   const text = value.trim();
   if (!text) return false;
-  if (isMoney(text) || isGroupNumber(text) || parseCaliforniaChoiceMonth(text) != null || isCoverageLabel(text) || rateToken.test(text)) {
+  if (isMoney(text) || isCurrencySymbol(text) || isGroupNumber(text) || parseCaliforniaChoiceMonth(text) != null || isCoverageLabel(text) || rateToken.test(text)) {
     return false;
   }
   if (ignoredLine.test(text)) return false;
@@ -141,6 +139,22 @@ export function parseCaliforniaChoiceLines(lines: string[]): CaliforniaChoiceRec
       continue;
     }
 
+    const monthIndex = isGroupNumber(tokens[0] ?? "")
+      ? tokens.findIndex((token, tokenIndex) => tokenIndex >= 1 && parseCaliforniaChoiceMonth(token) != null)
+      : -1;
+    if (tokens.length >= 3 && isGroupNumber(tokens[0]!) && monthIndex > 1) {
+      const name = tokens.slice(1, monthIndex).join(" ").trim();
+      if (name && !isCoverageLabel(name)) {
+        groupNumber = tokens[0]!;
+        groupName = name;
+      }
+      const parsed = parseCommissionTokens(tokens.slice(monthIndex));
+      if (parsed && groupNumber && groupName && !isCoverageLabel(groupName)) {
+        records.push({ groupNumber, groupName, ...parsed });
+      }
+      continue;
+    }
+
     if (tokens.length >= 3 && isGroupNumber(tokens[0]!) && isCompanyName(tokens[1]!)) {
       groupNumber = tokens[0]!;
       groupName = tokens[1]!;
@@ -155,14 +169,17 @@ export function parseCaliforniaChoiceLines(lines: string[]): CaliforniaChoiceRec
     if (tokens.length === 1 && parseCaliforniaChoiceMonth(tokens[0]!) != null) {
       const month = tokens[0]!;
       const collected: string[] = [month];
-      while (index < usable.length && collected.length < 5) {
+      while (index < usable.length) {
         const next = peek();
         if (!next) break;
         const nextTokens = tokensFromLine(next);
         if (nextTokens.length !== 1) break;
         const value = nextTokens[0]!;
-        if (isGroupNumber(value) || (isCompanyName(value) && !isCoverageLabel(value))) break;
+        if (isGroupNumber(value)) break;
+        if (isCompanyName(value) && !isCoverageLabel(value) && !isCurrencySymbol(value)) break;
+        if (parseCaliforniaChoiceMonth(value) != null && collected.some((token) => isProductCandidate(token))) break;
         collected.push(take()!);
+        if (parseCommissionTokens(collected) && !shouldKeepCollectingCommission(peek())) break;
       }
       const parsed = parseCommissionTokens(collected);
       if (parsed && !parsed.adjustmentCode) {
@@ -187,20 +204,45 @@ export function parseCaliforniaChoiceLines(lines: string[]): CaliforniaChoiceRec
   return records;
 }
 
+function isProductCandidate(value: string) {
+  const text = value.trim();
+  if (!text || isCurrencySymbol(text) || isMoney(text) || isGroupNumber(text)) return false;
+  if (parseCaliforniaChoiceMonth(text) != null) return false;
+  if (rateToken.test(text) && !isCoverageLabel(text)) return false;
+  if (isImpossibleLobName(text) && !isCoverageLabel(text)) return false;
+  return /[A-Za-z]/.test(text);
+}
+
+function isImpossibleLobName(value: string) {
+  return /^(page(\s+\d+.*)?|subtotal|sub-total|total|grand total|california\s*choice|cal(\s*ifornia)?\s*choice)$/i.test(value.trim());
+}
+
+function shouldKeepCollectingCommission(nextLine: string | undefined) {
+  if (!nextLine) return false;
+  const nextTokens = tokensFromLine(nextLine);
+  if (nextTokens.length !== 1) return false;
+  const value = nextTokens[0]!;
+  return isCurrencySymbol(value) || isMoney(value) || rateToken.test(value) || isAdjustmentCode(value);
+}
+
 function parseCommissionTokens(tokens: string[]) {
-  const month = tokens.find((token) => parseCaliforniaChoiceMonth(token) != null);
-  const product = tokens.find((token) => isCoverageLabel(token));
-  const money = tokens.filter((token) => isMoney(token));
-  const rate = tokens.find((token) => rateToken.test(token) && !isMoney(token));
+  const usable = tokens.filter((token) => !isCurrencySymbol(token));
+  const monthIndex = usable.findIndex((token) => parseCaliforniaChoiceMonth(token) != null);
+  const month = monthIndex >= 0 ? usable[monthIndex] : undefined;
+  const afterMonth = monthIndex >= 0 ? usable.slice(monthIndex + 1) : usable;
+  const product = afterMonth.find((token) => isProductCandidate(token))
+    ?? afterMonth.find((token) => isCoverageLabel(token));
+  const money = afterMonth.filter((token) => isMoney(token));
+  const rate = afterMonth.find((token) => rateToken.test(token) && !isMoney(token) && token !== product);
   const commission = money[money.length - 1];
   const premium = money.length > 1 ? money[0]! : null;
-  if (!month || !product || !commission) return null;
-  if (isCoverageLabel(month) || isGroupNumber(product)) return null;
+  if (!month || !commission) return null;
+  if (product && (isCoverageLabel(month) || isGroupNumber(product))) return null;
   const consumed = new Set([month, product, rate, ...money].filter(Boolean));
-  const adjustmentCode = tokens.find((token) => !consumed.has(token) && isAdjustmentCode(token)) ?? null;
+  const adjustmentCode = usable.find((token) => !consumed.has(token) && isAdjustmentCode(token)) ?? null;
   return {
     paidMonthSource: month,
-    product,
+    product: product ?? "",
     premium,
     rate: rate ?? null,
     commission,
@@ -213,7 +255,7 @@ export function interpretCaliforniaChoiceStatement(
   groups: GroupCandidate[] = [],
   context: CaliforniaChoiceMatchContext = {},
 ): { preview: StatementPreview; mapping: ColumnMapping; inferred: true } | null {
-  if (!looksLikeCaliforniaChoice(pages)) return null;
+  if (!looksLikeCaliforniaChoice(pages, context.sourceHint)) return null;
   const records: Array<CaliforniaChoiceRecord & { pageNumber: number; lineNumber: number }> = [];
   let carriedNumber = "";
   let carriedName = "";

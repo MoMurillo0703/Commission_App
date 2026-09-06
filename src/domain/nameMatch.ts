@@ -1,4 +1,4 @@
-export type NameMatchStatus = "matched" | "unmatched" | "missing" | "ambiguous";
+export type NameMatchStatus = "matched" | "unmatched" | "missing" | "ambiguous" | "ignored";
 
 export type NamedRecord = {
   id: number;

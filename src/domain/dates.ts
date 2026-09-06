@@ -33,6 +33,17 @@ const namedMonthIndex: Record<string, string> = {
   dec: "12",
 };
 
+export function parseCaliforniaChoiceMonth(value: string | null | undefined) {
+  const fromFlexible = parseFlexibleMonth(value);
+  if (fromFlexible) return fromFlexible;
+  const trimmed = value?.trim() ?? "";
+  const mmYy = trimmed.match(/^(0?[1-9]|1[0-2])[/-](\d{2}|\d{4})$/);
+  if (!mmYy) return null;
+  const month = mmYy[1]!.padStart(2, "0");
+  const year = mmYy[2]!.length === 2 ? `20${mmYy[2]}` : mmYy[2]!;
+  return `${year}-${month}`;
+}
+
 /** Accepts YYYY-MM, M/D/YYYY, or "Aug 2026" / "August 2026". Does not invent a month. */
 export function parseFlexibleMonth(value: string | null | undefined) {
   const trimmed = value?.trim();

@@ -1,8 +1,11 @@
+import { listCarrierGroupIdentities } from "@/data/carrierGroupIdentities";
 import { listGroups } from "@/data/groups";
 import { extractPdfPages } from "@/data/pdfStatements";
-import { getImportStatement, saveConfirmedPdfPreview, type ImportStatementView } from "@/data/statements";
+import { getImportStatement, saveConfirmedPdfPreview, saveImportColumnMapping, type ImportStatementView } from "@/data/statements";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
+import { interpretCaliforniaChoiceStatement } from "@/domain/californiaChoice";
+import { omitStatementCompensationMapping } from "@/domain/columnMapping";
 import {
   flattenExtractedPdfLines,
   previewFromConfirmedPdfLayout,
@@ -146,6 +149,33 @@ export async function confirmPdfStatementLayout(
   if (problem) throw new ValidationError(problem);
 
   const groups = await listGroups(database);
+  const californiaChoice = interpretCaliforniaChoiceStatement(pages, groups, {
+    carrierId: statement.carrierId,
+    identities: await listCarrierGroupIdentities(database, statement.carrierId),
+    sourceHint: [statement.originalFilename, statement.carrierName].filter(Boolean).join("\n"),
+  });
+  if (californiaChoice) {
+    const preview = {
+      ...californiaChoice.preview,
+      groupResolutions: statement.preview?.groupResolutions,
+      lineResolutions: statement.preview?.lineResolutions,
+      agentResolutions: statement.preview?.agentResolutions,
+      pdf: {
+        classification: "readable" as const,
+        pageCount: californiaChoice.preview.pdf?.pageCount ?? pages.length,
+        ...californiaChoice.preview.pdf,
+        extractionPath: statement.extractionPath ?? statement.preview?.pdf?.extractionPath ?? null,
+        layoutId: statement.preview?.pdf?.layoutId ?? statement.layoutId ?? null,
+        layoutVersion: statement.preview?.pdf?.layoutVersion ?? statement.layoutVersion ?? null,
+        layoutName: statement.preview?.pdf?.layoutName ?? null,
+        layoutConfirmed: true,
+        confirmedLayout: selection,
+      },
+    };
+    await saveConfirmedPdfPreview(database, id, preview);
+    return saveImportColumnMapping(database, id, omitStatementCompensationMapping(californiaChoice.mapping));
+  }
+
   const generated = previewFromConfirmedPdfLayout(pages, selection, groups);
   if (generated.preview.rowCount === 0) {
     throw new ValidationError("No commission rows were found in the selected area. Adjust the header or where the data begins and ends.");

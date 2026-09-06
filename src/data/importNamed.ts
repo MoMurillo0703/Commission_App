@@ -78,12 +78,16 @@ async function confirmNamedImports(
 
   for (const proposed of unmatched) {
     const decision = decisionsByKey.get(proposed.key) ?? { key: proposed.key, action: "create" as const };
+    if (decision.action === "ignore") {
+      if (kind === "agent") throw new ValidationError("Agents cannot be ignored.");
+      continue;
+    }
     if (decision.action === "match" && !decision.existingId) {
-      throw new ValidationError(`Select an existing ${kind === "line" ? "line of business" : "agent"} for ${proposed.sourceName}.`);
-    }
-    if (decision.action === "create" && !proposed.sourceName) {
-      throw new ValidationError(`A new ${kind === "line" ? "line of business" : "agent"} needs a name.`);
-    }
+        throw new ValidationError(`Select an existing ${kind === "line" ? "line of business" : "agent"} for ${proposed.sourceName}.`);
+      }
+      if (decision.action === "create" && !proposed.sourceName) {
+        throw new ValidationError(`A new ${kind === "line" ? "line of business" : "agent"} needs a name.`);
+      }
   }
 
   const createdIds: number[] = [];
@@ -98,6 +102,16 @@ async function confirmNamedImports(
     let records = kind === "line" ? await listLinesOfBusiness(tx) : await listAgents(tx);
     for (const proposed of unmatched) {
       const decision = decisionsByKey.get(proposed.key) ?? { key: proposed.key, action: "create" as const };
+      if (decision.action === "ignore") {
+        if (kind === "agent") throw new ValidationError("Agents cannot be ignored.");
+        resolutions.set(proposed.key, {
+          key: proposed.key,
+          entityId: null,
+          sourceName: proposed.sourceName,
+          action: "ignore",
+        });
+        continue;
+      }
       if (decision.action === "match") {
         const existing = records.find((record) => record.id === decision.existingId);
         if (!existing) throw new ValidationError(`Select an existing ${kind === "line" ? "line of business" : "agent"} for ${proposed.sourceName}.`);

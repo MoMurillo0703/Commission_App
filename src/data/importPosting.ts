@@ -83,7 +83,7 @@ export async function previewImportPosting(db: AppDatabase | undefined, statemen
       lineResolutions: statement.preview.lineResolutions,
       agentResolutions: statement.preview.agentResolutions,
       preferCarrierGroupIdentity: statement.preview.pdf?.groupMatchStrategy === "carrier_group_identity"
-        || /california\s*choice/i.test(refs.statementCarrier?.name ?? ""),
+        || /cal(?:ifornia)?\s*choice/i.test(refs.statementCarrier?.name ?? ""),
     },
     postedKeys,
   );

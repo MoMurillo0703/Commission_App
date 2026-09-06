@@ -33,7 +33,7 @@ export function applyCarrierCoverageAlias(
   sourceValue: string | null | undefined,
   lines: NamedLine[],
 ): NameMatch {
-  if (match.status === "matched") return match;
+  if (match.status === "matched" || match.status === "ignored") return match;
   const alias = findCarrierCoverageAlias(aliases ?? [], carrierId, sourceValue);
   if (!alias) return match;
   const line = lines.find((item) => item.id === alias.lineOfBusinessId);
