@@ -4,7 +4,7 @@ Authoritative owner: **Alex**.
 
 ## Phase
 
-Commission App 1.0 Sprint 1 — **DEPLOYED — PRODUCT ACCEPTANCE PENDING**. Product Acceptance is pending Mo live retest of Individual Commission Reports (recipient + paid month from posted payout snapshots and matching PDF), including the Group-first compensation workflow. This is not Done. Do not mark Product Accepted or Done until Mo completes that workflow.
+Commission App 1.0 Sprint 1 — **DEPLOYED — PRODUCT ACCEPTANCE PENDING**. Production is `f065161` with migration **0008** applied. Product Acceptance is pending Mo’s live check of Report → Compensation exceptions and authorized historical compensation correction. This is not Done. Do not mark Product Accepted or Done until Mo completes that workflow. Do not correct Mo’s six commissions as a deploy test.
 
 ## Authorized work
 

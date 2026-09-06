@@ -7,10 +7,10 @@ Authoritative owner: **Alex**. Update this file when a release is deployed or ac
 | Field | Value |
 | --- | --- |
 | URL | https://commissionapp-iota.vercel.app |
-| SHA | `0f6d844f2a1875aadd7595aa8d1e41baa36ce6cd` |
-| Migrations | **0001–0007** applied (none required for this release) |
+| SHA | `f0651614091b9daac39a4ec4ba651c9245b0f9aa` |
+| Migrations | **0001–0008** applied (`0008_compensation_corrections.sql` applied explicitly before this application deploy; no backfill) |
 | Release state | **DEPLOYED — PRODUCT ACCEPTANCE PENDING** |
-| Product acceptance | Pending Mo live retest of Individual Commission Reports |
+| Product acceptance | Pending Mo live product acceptance of Report → Compensation exceptions and authorized historical compensation correction |
 
 This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 
@@ -29,6 +29,8 @@ This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 - Exact-term timeout/overlap recovery; no automatic mutation retry; queue advances only after a confirmed matching save
 - Person-first Compensation / Splits view from People, editing the complete Group + LOB allocation
 - Individual Commission Report: choose a recipient and paid month; rows and TOTAL PAYABLE come from posted `commission_payouts`; PDF uses the same document totals
+- Report compensation warnings can open Compensation on the exact Groups that need setup
+- Authorized historical compensation correction for proven Agency fallbacks, bound to the preview token, with append-only `0008` audit batches/items
 - Recipient commission statement + binary PDF from posted `commission_payouts`
 - Agency / Individual / Team reporting foundation with CSV, XLSX, printable HTML, and PDF export
 - Auth allow-list

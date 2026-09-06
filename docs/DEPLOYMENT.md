@@ -34,9 +34,7 @@ npm run db:migrate
 
 `npm run db:setup` is the same script. It takes an advisory transaction lock, applies missing files from `migrations/`, then prints `connected:` and `carriers table reachable`.
 
-Production currently has **0001–0007**. `0007_carrier_group_identities.sql` was applied explicitly before this correction build went live. Do not infer or backfill identities from existing `groups.group_number` values.
-
-`0008_compensation_corrections.sql` exists in the repo for authorized historical compensation-correction audit history. Do **not** apply it to production until Alex/Ben authorize that migrate.
+Production currently has **0001–0008**. `0008_compensation_corrections.sql` was applied explicitly before application SHA `f065161` went live. No backfill. Do not infer or backfill identities from existing `groups.group_number` values.
 
 Historical SQLite files in `migrations/sqlite/` are not applied.
 
