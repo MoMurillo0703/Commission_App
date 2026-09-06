@@ -31,11 +31,11 @@ export function recipientPayableReadiness(input: {
     lineOfBusinessName: string;
     paidMonth: string;
     grossCommissionCents: number;
-    hasAllocation: boolean;
+    isEligibleFallback: boolean;
   }>;
 }): RecipientPayableReadiness {
   const unallocated = input.postedCommissions
-    .filter((row) => !row.hasAllocation)
+    .filter((row) => row.isEligibleFallback)
     .map((row) => ({
       commissionId: row.id,
       groupId: row.groupId,

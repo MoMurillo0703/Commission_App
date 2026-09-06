@@ -10,7 +10,7 @@ Money: integer cents. Rates: integer basis points.
 
 Row-level security is enabled on application tables. Browser clients do not query these tables; the Next.js server uses the database URL.
 
-## Migrations (0001–0007)
+## Migrations (0001–0008)
 
 | File | Role |
 | --- | --- |
@@ -21,6 +21,7 @@ Row-level security is enabled on application tables. Browser clients do not quer
 | `0005_direct_person_limit.sql` | Active allocation: at most five direct Person entries |
 | `0006_carrier_coverage_aliases.sql` | Carrier-scoped statement coverage label → LOB |
 | `0007_carrier_group_identities.sql` | Carrier + external Group Number → internal Group |
+| `0008_compensation_corrections.sql` | Immutable compensation-correction audit batches/items and one-correction-per-commission protection |
 
 Do not rewrite an applied migration. Add a new numbered file. Runtime code must not apply these files. See [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
@@ -105,7 +106,11 @@ Posted snapshot per recipient, including expanded team members. `commission_payo
 
 **Business rule:** these rows are authoritative historical truth and must not be silently rewritten by later configuration changes.
 
-**Current mechanism:** there is **no** database immutability trigger on this table. Later allocation, team, or assignment changes do not rewrite already-posted payouts. When compensation for a specific commission is intentionally changed through an authorized commission-update workflow, application logic may delete and rebuild that commission’s payout rows. Physical database immutability is not the same as the no-silent-rewrite rule. Canonical Agency Net is the Agency payout when a complete allocation existed at post.
+**Current mechanism:** there is **no** database immutability trigger on this table. Later allocation, team, or assignment changes do not rewrite already-posted payouts. An authorized **compensation correction** may replace canonical payouts for a commission that is a proven missing-allocation Agency fallback; the original fallback is preserved on `compensation_correction_items` and does not participate in financial totals. When compensation for a specific commission is intentionally changed through an authorized commission-update workflow, application logic may delete and rebuild that commission’s payout rows. Physical database immutability is not the same as the no-silent-rewrite rule. Canonical Agency Net is the Agency payout when a complete allocation existed at post.
+
+### `compensation_correction_batches` / `compensation_correction_items`
+
+Audit-only history for an authorized fallback correction. One batch has a unique `confirmation_key`, reason, initiator, and timestamp. Each item stores one `commission_id` (unique — a commission can be corrected once), the original paid month, the allocation used, and JSON snapshots of original and corrected payouts plus header compensation / Agency Net. These rows are not payouts and must not be summed into reports. No production backfill.
 
 ### `import_statements`
 

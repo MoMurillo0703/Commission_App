@@ -200,6 +200,32 @@ export const commissionPayouts = pgTable("commission_payouts", {
   createdAt: text("created_at").notNull(),
 });
 
+export const compensationCorrectionBatches = pgTable("compensation_correction_batches", {
+  id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
+  confirmationKey: text("confirmation_key").notNull(),
+  reason: text("reason").notNull(),
+  initiatorId: text("initiator_id"),
+  initiatorEmail: text("initiator_email"),
+  initiatorName: text("initiator_name"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const compensationCorrectionItems = pgTable("compensation_correction_items", {
+  id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
+  batchId: integer("batch_id").notNull().references(() => compensationCorrectionBatches.id),
+  commissionId: integer("commission_id").notNull().references(() => commissionRecords.id),
+  paidMonth: text("paid_month").notNull(),
+  allocationId: integer("allocation_id").notNull().references(() => compensationAllocations.id),
+  originalPayoutsJson: text("original_payouts_json").notNull(),
+  originalAgentCompensationCents: integer("original_agent_compensation_cents").notNull(),
+  originalAgencyNetCents: integer("original_agency_net_cents").notNull(),
+  originalGrossCommissionCents: integer("original_gross_commission_cents").notNull(),
+  correctedPayoutsJson: text("corrected_payouts_json").notNull(),
+  correctedAgentCompensationCents: integer("corrected_agent_compensation_cents").notNull(),
+  correctedAgencyNetCents: integer("corrected_agency_net_cents").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
 export type Carrier = typeof carriers.$inferSelect;
 export type LineOfBusiness = typeof linesOfBusiness.$inferSelect;
 export type AccountManager = typeof accountManagers.$inferSelect;
@@ -216,3 +242,5 @@ export type TeamMembership = typeof teamMemberships.$inferSelect;
 export type CompensationAllocation = typeof compensationAllocations.$inferSelect;
 export type CompensationAllocationEntry = typeof compensationAllocationEntries.$inferSelect;
 export type CommissionPayout = typeof commissionPayouts.$inferSelect;
+export type CompensationCorrectionBatch = typeof compensationCorrectionBatches.$inferSelect;
+export type CompensationCorrectionItem = typeof compensationCorrectionItems.$inferSelect;

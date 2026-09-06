@@ -15,8 +15,10 @@ import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import { agents, carriers, commissionRecords, groups, linesOfBusiness } from "@/db/schema";
 import { compensationReviewHref } from "@/domain/compensationExceptions";
+import { isEligibleAgencyFallback } from "@/domain/compensationFallback";
 import { recipientPayableReadiness } from "@/domain/recipientStatement";
 import { individualRecipientTypeLabel } from "@/domain/reportWorkspace";
+import { listCorrectedCommissionIds } from "./compensationCorrections";
 import { listAllPayouts } from "./payouts";
 import { getAccountManager } from "./accountManagers";
 import { getAgent } from "./agents";
@@ -160,9 +162,13 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
       importStatementId: commission.importStatementId,
     });
   }
-  const commissionsWithAllocation = new Set(
-    payouts.filter((payout) => payout.allocationId != null).map((payout) => payout.commissionId),
-  );
+  const payoutsByCommission = new Map<number, typeof payouts>();
+  for (const payout of payouts) {
+    const current = payoutsByCommission.get(payout.commissionId) ?? [];
+    current.push(payout);
+    payoutsByCommission.set(payout.commissionId, current);
+  }
+  const corrected = await listCorrectedCommissionIds(database);
   const assignedGroupIds = filters.personId && filters.personKind
     ? new Set(
       (await listGroups(database)).flatMap((group) => {
@@ -185,7 +191,14 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
       lineOfBusinessName: commission.lineOfBusinessName,
       paidMonth: commission.paidMonth,
       grossCommissionCents: commission.grossCommissionCents,
-      hasAllocation: commissionsWithAllocation.has(commission.id),
+      isEligibleFallback: isEligibleAgencyFallback({
+        commissionId: commission.id,
+        grossCommissionCents: commission.grossCommissionCents,
+        agentCompensationCents: commission.compensationDistributedCents,
+        agencyNetCents: commission.agencyNetCents,
+        payouts: payoutsByCommission.get(commission.id) ?? [],
+        hasPriorCorrection: corrected.has(commission.id),
+      }),
     })),
   });
   const paidMonth = filters.paidMonth ?? payable.unallocated[0]?.paidMonth ?? "";

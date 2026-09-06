@@ -16,7 +16,7 @@ const commissions = [
     lineOfBusinessName: "Medical",
     paidMonth: "2026-09",
     grossCommissionCents: 10000,
-    hasAllocationSnapshot: false,
+    eligibleFallback: true,
   },
   {
     commissionId: 12,
@@ -26,7 +26,7 @@ const commissions = [
     lineOfBusinessName: "Dental",
     paidMonth: "2026-09",
     grossCommissionCents: 4000,
-    hasAllocationSnapshot: false,
+    eligibleFallback: true,
   },
   {
     commissionId: 13,
@@ -36,7 +36,7 @@ const commissions = [
     lineOfBusinessName: "Medical",
     paidMonth: "2026-09",
     grossCommissionCents: 2500,
-    hasAllocationSnapshot: false,
+    eligibleFallback: true,
   },
   {
     commissionId: 14,
@@ -46,12 +46,12 @@ const commissions = [
     lineOfBusinessName: "Medical",
     paidMonth: "2026-09",
     grossCommissionCents: 800,
-    hasAllocationSnapshot: true,
+    eligibleFallback: false,
   },
 ];
 
 describe("compensation exceptions from posted commissions", () => {
-  it("groups posted commissions that lack allocation snapshots and does not use Group assignment", () => {
+  it("groups only eligible Agency fallback commissions and does not use Group assignment", () => {
     const needing = postedCommissionsNeedingCompensationReview(commissions);
     expect(needing.map((row) => row.commissionId)).toEqual([11, 12, 13]);
     const grouped = groupCompensationExceptions(needing);
@@ -72,7 +72,7 @@ describe("compensation exceptions from posted commissions", () => {
     })).toContain("/compensation?review=1&paidMonth=2026-09&commissionIds=11%2C12%2C13");
   });
 
-  it("drops a Group from the work list after a covering allocation exists without rewriting payouts", () => {
+  it("keeps a Group on the work list after a covering paid-month allocation until correction", () => {
     const grouped = groupCompensationExceptions(commissions, [{
       id: 90,
       groupId: 1,
@@ -90,10 +90,23 @@ describe("compensation exceptions from posted commissions", () => {
       status: "active",
       entries: [{ recipientType: "agency", compensationBps: 10000 }],
     }]);
-    expect(grouped.find((group) => group.groupId === 1)?.lines.every((line) => line.status === "allocation_exists_history_unchanged")).toBe(true);
+    expect(grouped.find((group) => group.groupId === 1)?.lines.every((line) => line.status === "ready_to_correct")).toBe(true);
     const remaining = exceptionWorkSummary(grouped);
-    expect(remaining.groupCount).toBe(1);
-    expect(remaining.groups[0]?.groupName).toBe("XYZ COMPANY");
-    expect(remainingSettlementMessage(3)).toMatch(/original Agency 100% payout snapshot/);
+    expect(remaining.groupCount).toBe(2);
+    expect(remaining.readyCommissionIds).toEqual([12, 11]);
+    expect(remainingSettlementMessage(3)).toMatch(/Correct Compensation/);
+  });
+
+  it("marks newer-only allocations as blocked", () => {
+    const grouped = groupCompensationExceptions(commissions, [{
+      id: 92,
+      groupId: 2,
+      lineOfBusinessId: 1,
+      effectiveStart: "2026-10",
+      effectiveEnd: null,
+      status: "active",
+      entries: [{ recipientType: "person", personKind: "agent", personId: 7, compensationBps: 10000 }],
+    }]);
+    expect(grouped.find((group) => group.groupId === 2)?.lines[0]?.status).toBe("blocked_newer_allocation");
   });
 });

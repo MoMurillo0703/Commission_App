@@ -36,6 +36,8 @@ npm run db:migrate
 
 Production currently has **0001–0007**. `0007_carrier_group_identities.sql` was applied explicitly before this correction build went live. Do not infer or backfill identities from existing `groups.group_number` values.
 
+`0008_compensation_corrections.sql` exists in the repo for authorized historical compensation-correction audit history. Do **not** apply it to production until Alex/Ben authorize that migrate.
+
 Historical SQLite files in `migrations/sqlite/` are not applied.
 
 ## 4. Environment variables

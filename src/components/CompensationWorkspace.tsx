@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { AllocationRecipientEditor } from "@/components/AllocationRecipientEditor";
+import { CompensationCorrectionDialog } from "@/components/CompensationCorrectionDialog";
 import { GroupCoverageTable } from "@/components/GroupCoverageTable";
 import type { AllocationView } from "@/data/allocations";
 import {
@@ -98,6 +99,10 @@ export function CompensationWorkspace({
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [reviewActive, setReviewActive] = useState(Boolean(reviewContext));
+  const [reviewCommissions, setReviewCommissions] = useState(reviewContext?.commissions ?? []);
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [correctionIds, setCorrectionIds] = useState<number[]>([]);
+  const [confirmationKey, setConfirmationKey] = useState("");
   const [workspaceKeepLineIds, setWorkspaceKeepLineIds] = useState<number[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [lineModes, setLineModes] = useState<Record<number, LineApplyMode>>({});
@@ -381,7 +386,7 @@ export function CompensationWorkspace({
 
   const groupSummaries = filterCompensationGroups(compensationGroupSummaries(allocations, groups), query);
   const exceptionGroups = reviewActive && reviewContext
-    ? groupCompensationExceptions(reviewContext.commissions, allocations)
+    ? groupCompensationExceptions(reviewCommissions, allocations)
     : [];
   const exceptionWork = exceptionWorkSummary(exceptionGroups);
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) ?? null;
@@ -420,7 +425,7 @@ export function CompensationWorkspace({
     }
     // Close only after a refresh removes this Group from the remaining exception work list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allocations, reviewActive, selectedGroupId]);
+  }, [allocations, reviewActive, selectedGroupId, reviewCommissions]);
 
   useEffect(() => {
     if (pendingOverrideLineId.current != null) {
@@ -499,9 +504,18 @@ export function CompensationWorkspace({
             {exceptionWork.groupCount > 0 && (
               <p>{exceptionWork.groupCount} Group{exceptionWork.groupCount === 1 ? "" : "s"} / {exceptionWork.commissionCount} commission record{exceptionWork.commissionCount === 1 ? "" : "s"} require review</p>
             )}
-            <p>{remainingSettlementMessage(reviewContext.commissions.filter((row) => !row.hasAllocationSnapshot).length)}</p>
+            <p>{remainingSettlementMessage(reviewCommissions.length)}</p>
           </div>
-          <button type="button" className="secondary" onClick={() => setReviewActive(false)}>Exit filtered review</button>
+          <div className="form-actions">
+            {exceptionWork.readyCommissionIds.length > 0 && (
+              <button type="button" onClick={() => {
+                setCorrectionIds(exceptionWork.readyCommissionIds);
+                setConfirmationKey(crypto.randomUUID());
+                setCorrectionOpen(true);
+              }}>Correct Compensation</button>
+            )}
+            <button type="button" className="secondary" onClick={() => setReviewActive(false)}>Exit filtered review</button>
+          </div>
         </section>
       )}
 
@@ -510,15 +524,15 @@ export function CompensationWorkspace({
           <div className="panel-head">
             <div>
               <p className="eyebrow">Affected Groups</p>
-              <h2>Posted commissions without an allocation snapshot</h2>
-              <p>Open a Group to set the current Group + LOB allocation. Posted payout snapshots are not rewritten.</p>
+              <h2>Eligible Agency 100% fallback commissions</h2>
+              <p>Open a Group to create an allocation that covers the original paid month. Then use Correct Compensation. Allocations never rewrite payouts by themselves.</p>
             </div>
           </div>
           {exceptionWork.groups.map((group) => (
             <article key={group.groupId} className="allocation-card">
               <button type="button" className="linkish" onClick={() => openGroupWorkspace(
                 group.groupId,
-                group.lines.filter((line) => line.status === "needs_allocation").map((line) => line.lineOfBusinessId),
+                group.lines.map((line) => line.lineOfBusinessId),
               )}>
                 <strong>{group.groupName}</strong>
               </button>
@@ -543,6 +557,19 @@ export function CompensationWorkspace({
             </article>
           ))}
         </section>
+      )}
+
+      {correctionOpen && correctionIds.length > 0 && (
+        <CompensationCorrectionDialog
+          commissionIds={correctionIds}
+          confirmationKey={confirmationKey}
+          onClose={() => setCorrectionOpen(false)}
+          onCorrected={(correctedIds) => {
+            setReviewCommissions((current) => current.filter((row) => !correctedIds.includes(row.commissionId)));
+            setCorrectionOpen(false);
+            setSuccess("Compensation correction saved. Canonical payouts now use the paid-month allocation.");
+          }}
+        />
       )}
 
       {queue.length > 0 && !reviewActive && (

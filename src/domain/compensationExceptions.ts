@@ -1,5 +1,5 @@
-import { allocationNeedsReview } from "./compensationQueue";
-import { resolveCompensationAllocation, type AllocationCandidate } from "./allocations";
+import { historicalAllocationState, type HistoricalAllocationState } from "./compensationCorrection";
+import type { AllocationCandidate } from "./allocations";
 
 export type PostedCompensationException = {
   commissionId: number;
@@ -9,10 +9,12 @@ export type PostedCompensationException = {
   lineOfBusinessName: string;
   paidMonth: string;
   grossCommissionCents: number;
-  hasAllocationSnapshot: boolean;
+  carrierId?: number;
+  carrierName?: string;
+  eligibleFallback: boolean;
 };
 
-export type ExceptionLineStatus = "needs_allocation" | "allocation_exists_history_unchanged";
+export type ExceptionLineStatus = "needs_allocation" | "ready_to_correct" | "blocked_newer_allocation";
 
 export type GroupedCompensationException = {
   groupId: number;
@@ -30,7 +32,7 @@ export type GroupedCompensationException = {
 export function postedCommissionsNeedingCompensationReview(
   commissions: PostedCompensationException[],
 ) {
-  return commissions.filter((row) => !row.hasAllocationSnapshot);
+  return commissions.filter((row) => row.eligibleFallback);
 }
 
 export function compensationExceptionWarning(count: number) {
@@ -43,8 +45,8 @@ export function compensationExceptionWarning(count: number) {
 export function remainingSettlementMessage(count: number) {
   if (count <= 0) return null;
   return `${count} posted commission${count === 1 ? "" : "s"} still ${
-    count === 1 ? "has" : "have"
-  } the original Agency 100% payout snapshot. Adding a current allocation does not rewrite historical payouts.`;
+    count === 1 ? "is" : "are"
+  } the original Agency 100% fallback. Create a paid-month allocation, then use Correct Compensation. Allocations do not rewrite payouts automatically.`;
 }
 
 export function compensationReviewHref(input: {
@@ -74,17 +76,17 @@ export function parseCommissionIds(value: string | null | undefined) {
   )];
 }
 
-export function coveringAllocationExists(
-  allocations: AllocationCandidate[],
-  groupId: number,
-  lineOfBusinessId: number,
-  paidMonth: string,
-) {
-  const applicable = resolveCompensationAllocation(
-    allocations.filter((row) => row.groupId === groupId && row.lineOfBusinessId === lineOfBusinessId),
-    { groupId, lineOfBusinessId, paidMonth },
-  );
-  return Boolean(applicable && !allocationNeedsReview(applicable));
+function statusFromHistorical(state: HistoricalAllocationState): {
+  status: ExceptionLineStatus;
+  statusLabel: string;
+} {
+  if (state === "covers") {
+    return { status: "ready_to_correct", statusLabel: "Ready to correct" };
+  }
+  if (state === "newer_only") {
+    return { status: "blocked_newer_allocation", statusLabel: "Newer allocation only — blocked" };
+  }
+  return { status: "needs_allocation", statusLabel: "Needs allocation" };
 }
 
 export function groupCompensationExceptions(
@@ -112,20 +114,16 @@ export function groupCompensationExceptions(
       commissionCount: rows.length,
       lines: [...byLine.values()].map((lineRows) => {
         const line = lineRows[0]!;
-        const covered = coveringAllocationExists(
-          allocations,
-          line.groupId,
-          line.lineOfBusinessId,
-          line.paidMonth,
-        );
+        const classified = statusFromHistorical(historicalAllocationState(allocations, {
+          groupId: line.groupId,
+          lineOfBusinessId: line.lineOfBusinessId,
+          paidMonth: line.paidMonth,
+        }));
         return {
           lineOfBusinessId: line.lineOfBusinessId,
           lineOfBusinessName: line.lineOfBusinessName,
           commissionIds: lineRows.map((row) => row.commissionId),
-          status: covered ? "allocation_exists_history_unchanged" as const : "needs_allocation" as const,
-          statusLabel: covered
-            ? "Allocation exists — posted payouts were not rewritten"
-            : "Needs allocation",
+          ...classified,
         };
       }).sort((left, right) => left.lineOfBusinessName.localeCompare(right.lineOfBusinessName)),
     };
@@ -133,18 +131,19 @@ export function groupCompensationExceptions(
 }
 
 export function remainingExceptionGroups(groups: GroupedCompensationException[]) {
-  return groups.filter((group) => group.lines.some((line) => line.status === "needs_allocation"));
+  return groups.filter((group) => group.lines.length > 0);
 }
 
 export function exceptionWorkSummary(groups: GroupedCompensationException[]) {
   const remaining = remainingExceptionGroups(groups);
   return {
     groupCount: remaining.length,
-    commissionCount: remaining.reduce((sum, group) => (
-      sum + group.lines
-        .filter((line) => line.status === "needs_allocation")
-        .reduce((lineSum, line) => lineSum + line.commissionIds.length, 0)
-    ), 0),
+    commissionCount: remaining.reduce((sum, group) => sum + group.commissionCount, 0),
+    readyCommissionIds: remaining.flatMap((group) => (
+      group.lines
+        .filter((line) => line.status === "ready_to_correct")
+        .flatMap((line) => line.commissionIds)
+    )),
     groups: remaining,
   };
 }

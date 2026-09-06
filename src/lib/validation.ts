@@ -202,6 +202,16 @@ export const pdfLayoutSelectionSchema = z.object({
   dataEndLineNumber: z.coerce.number().int().positive(),
 });
 
+export const compensationCorrectionPreviewSchema = z.object({
+  commissionIds: z.array(z.coerce.number().int().positive()).min(1, "Select at least one commission."),
+});
+
+export const compensationCorrectionConfirmSchema = z.object({
+  commissionIds: z.array(z.coerce.number().int().positive()).min(1, "Select at least one commission."),
+  reason: z.string().trim().min(3, "Enter a correction reason."),
+  confirmationKey: z.string().trim().min(8, "Confirmation key is required."),
+});
+
 export function emptyToNull(value: string | null | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;

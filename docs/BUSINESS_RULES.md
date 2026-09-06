@@ -27,6 +27,7 @@ This is the canonical product/financial rulebook. Schema details live in [`DATA_
 - Changing a current assignment or split must **never** silently alter posted commission records or payouts.
 - Active or used allocations are **immutable**. A terms change closes the prior period and inserts a new allocation.
 - Posted `commission_records` and `commission_payouts` are historical truth. Later team, percentage, or assignment edits do not rewrite those rows.
+- An authorized **Correct Compensation** action may replace canonical payouts only for a proven missing-allocation Agency 100% fallback, using a complete allocation that covers the original paid month. The original fallback is preserved as immutable audit history and is never a second financial transaction. This never runs automatically when an allocation is created or changed.
 - Agency Net must not be double-counted. Canonical Agency Net is the explicit Agency allocation when a complete allocation exists. The commission header still stores `agency_net_cents = gross_commission_cents - agent_compensation_cents`, where agent compensation is all non-Agency distributed amounts.
 
 ## Settlement behavior (current)

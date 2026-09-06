@@ -19,7 +19,7 @@ describe("recipient payable readiness", () => {
         lineOfBusinessName: "Dental",
         paidMonth: "2026-08",
         grossCommissionCents: 5000,
-        hasAllocation: true,
+        isEligibleFallback: false,
       }],
     });
     expect(readiness.payableReady).toBe(true);
@@ -38,7 +38,7 @@ describe("recipient payable readiness", () => {
           lineOfBusinessName: "Dental",
           paidMonth: "2026-08",
           grossCommissionCents: 5000,
-          hasAllocation: false,
+          isEligibleFallback: true,
         },
         {
           id: 12,
@@ -48,7 +48,7 @@ describe("recipient payable readiness", () => {
           lineOfBusinessName: "Vision",
           paidMonth: "2026-08",
           grossCommissionCents: 2000,
-          hasAllocation: false,
+          isEligibleFallback: true,
         },
         {
           id: 13,
@@ -58,7 +58,7 @@ describe("recipient payable readiness", () => {
           lineOfBusinessName: "Medical",
           paidMonth: "2026-08",
           grossCommissionCents: 1000,
-          hasAllocation: true,
+          isEligibleFallback: false,
         },
       ],
     });
