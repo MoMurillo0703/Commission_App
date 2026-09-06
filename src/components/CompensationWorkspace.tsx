@@ -16,7 +16,12 @@ import {
 import { allocationProgressLabel, allocationTotals } from "@/domain/allocations";
 import { closeQueue, queueBannerLabel, queueSessionProgressLabel, skipQueueIndex } from "@/domain/compensationQueue";
 import { defaultLineApplyMode, plannedAllocationTargets, type LineApplyMode } from "@/domain/allocationBulkApply";
-import { allocationSavedMessage, isAllocationOverlapMessage, runAllocationSaveFlow } from "@/domain/allocationSaveFlow";
+import {
+  allocationSavedMessage,
+  runAllocationSaveFlow,
+  runBulkAllocationSaveFlow,
+} from "@/domain/allocationSaveFlow";
+import type { AllocationTerms } from "@/domain/allocationTerms";
 import {
   compensationGroupSummaries,
   currentAllocationsForGroup,
@@ -122,15 +127,29 @@ export function CompensationWorkspace({
     setSuccess("");
     try {
       await runBusyAction(setBusy, async () => {
+        const submitted: AllocationTerms = {
+          groupId: Number(draft.groupId),
+          lineOfBusinessId: Number(draft.lineOfBusinessId),
+          effectiveStart: draft.effectiveStart,
+          effectiveEnd: draft.effectiveEnd || null,
+          status: "active",
+          entries: allocationEntryPayload(draft.entries).map((entry) => ({
+            recipientType: entry.recipientType,
+            personKind: entry.personKind,
+            personId: entry.personId,
+            teamId: entry.teamId,
+            compensationBps: parsePercentToBps(entry.compensationPercent || "0"),
+          })),
+        };
         const result = await runAllocationSaveFlow({
           request: async () => {
             const response = await fetchWithDeadline("/api/allocations", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                groupId: Number(draft.groupId),
-                lineOfBusinessId: Number(draft.lineOfBusinessId),
-                effectiveStart: draft.effectiveStart,
+                groupId: submitted.groupId,
+                lineOfBusinessId: submitted.lineOfBusinessId,
+                effectiveStart: submitted.effectiveStart,
                 effectiveEnd: draft.effectiveEnd,
                 status: "active",
                 entries: allocationEntryPayload(draft.entries),
@@ -140,6 +159,7 @@ export function CompensationWorkspace({
             return { ok: response.ok, message: httpFailureMessage(response.status, body.message) };
           },
           refresh,
+          submitted,
           savedKey: advanceQueue && currentQueueItem ? currentQueueItem.key : null,
           queueIndex,
         });
@@ -190,43 +210,49 @@ export function CompensationWorkspace({
       setError("Select at least one line of business to apply this setup.");
       return;
     }
+    const submitted: AllocationTerms[] = targets.map((target) => ({
+      groupId: Number(draft.groupId),
+      lineOfBusinessId: target.lineOfBusinessId,
+      effectiveStart: draft.effectiveStart,
+      effectiveEnd: draft.effectiveEnd || null,
+      status: "active",
+      entries: target.entries,
+    }));
     try {
       await runBusyAction(setBusy, async () => {
-        const outcomes: string[] = [];
-        for (const target of targets) {
-          const response = await fetchWithDeadline("/api/allocations", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              groupId: Number(draft.groupId),
-              lineOfBusinessId: target.lineOfBusinessId,
-              effectiveStart: draft.effectiveStart,
-              effectiveEnd: draft.effectiveEnd,
-              status: "active",
-              entries: allocationEntryPayload(
-                target.mode === "agency"
-                  ? [{ recipientType: "agency", personKind: "", personId: "", teamId: "", percent: "100" }]
-                  : draft.entries,
-              ),
-            }),
-          });
-          const body = await readApiJson<{ message?: string }>(response);
-          const lineName = applyLines.find((line) => line.id === target.lineOfBusinessId)?.name ?? "Line";
-          if (!response.ok) {
-            outcomes.push(isAllocationOverlapMessage(body.message)
-              ? `${lineName}: already saved`
-              : `${lineName}: ${httpFailureMessage(response.status, body.message)}`);
-            continue;
-          }
-          outcomes.push(`${lineName}: saved`);
-        }
-        await refresh();
-        const failed = outcomes.filter((item) => !/: (saved|already saved)$/.test(item));
-        if (failed.length === targets.length) {
-          setError(failed.join(" "));
+        const result = await runBulkAllocationSaveFlow({
+          request: async () => {
+            const response = await fetchWithDeadline("/api/allocations/bulk", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                groupId: Number(draft.groupId),
+                effectiveStart: draft.effectiveStart,
+                effectiveEnd: draft.effectiveEnd,
+                status: "active",
+                targets: targets.map((target) => ({
+                  lineOfBusinessId: target.lineOfBusinessId,
+                  entries: allocationEntryPayload(
+                    target.mode === "agency"
+                      ? [{ recipientType: "agency", personKind: "", personId: "", teamId: "", percent: "100" }]
+                      : draft.entries,
+                  ),
+                })),
+              }),
+            });
+            const body = await readApiJson<{ message?: string }>(response);
+            return { ok: response.ok, message: httpFailureMessage(response.status, body.message) };
+          },
+          refresh,
+          submitted,
+        });
+        setQueue(result.queue);
+        if (result.error) {
+          setError(result.error);
           return;
         }
-        setSuccess(`Applied group compensation to ${targets.length - failed.length} line${targets.length - failed.length === 1 ? "" : "s"}. Posted commissions keep their original payout snapshots.${failed.length ? ` ${failed.join(" ")}` : ""}`);
+        setSuccess(result.success ?? allocationSavedMessage());
+        if (!queueOpen) resetDraft();
       });
     } catch (error) {
       setError(requestFailureMessage(error, "Unable to save group compensation."));

@@ -46,6 +46,21 @@ export const allocationInputSchema = z.object({
   entries: z.array(allocationEntrySchema).min(1, "Add at least one recipient."),
 });
 
+export const bulkAllocationInputSchema = z.object({
+  groupId: z.coerce.number().int().positive("Group is required."),
+  effectiveStart: z.string().regex(paidMonthPattern, "Enter an effective start month as YYYY-MM."),
+  effectiveEnd: z.union([
+    z.string().regex(paidMonthPattern, "Enter an effective end month as YYYY-MM."),
+    z.literal(""),
+    z.null(),
+  ]).optional(),
+  status: z.enum(["active", "inactive"]).optional(),
+  targets: z.array(z.object({
+    lineOfBusinessId: z.coerce.number().int().positive("Line of business is required."),
+    entries: z.array(allocationEntrySchema).min(1, "Add at least one recipient."),
+  })).min(1, "Select at least one line of business."),
+});
+
 export const allocationPatchSchema = z.object({
   status: z.enum(["active", "inactive"]).optional(),
   effectiveEnd: z.union([

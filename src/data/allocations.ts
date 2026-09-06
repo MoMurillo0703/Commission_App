@@ -10,6 +10,7 @@ import {
   type PersonKind,
   type RecipientType,
 } from "@/domain/allocations";
+import { allocationConflictReviewMessage, classifyRequestedAllocation, type AllocationTerms } from "@/domain/allocationTerms";
 import { isPaidMonth } from "@/domain/dates";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
@@ -239,10 +240,20 @@ export async function findApplicableAllocation(
   return candidate ? rows.find((row) => row.id === candidate.id) ?? null : null;
 }
 
-export async function createAllocation(db: AppDatabase | undefined, input: AllocationWrite) {
-  const database = await resolveDb(db);
-  if (!await getGroup(database, input.groupId)) throw new NotFoundError("Group not found.");
-  if (!await getLineOfBusiness(database, input.lineOfBusinessId)) throw new NotFoundError("Line of business not found.");
+function allocationTermsFromWrite(input: AllocationWrite, period: { effectiveStart: string; effectiveEnd: string | null }, status: AllocationStatus): AllocationTerms {
+  return {
+    groupId: input.groupId,
+    lineOfBusinessId: input.lineOfBusinessId,
+    effectiveStart: period.effectiveStart,
+    effectiveEnd: period.effectiveEnd,
+    status,
+    entries: input.entries,
+  };
+}
+
+async function prepareAllocationWrite(db: AppDatabase, input: AllocationWrite) {
+  if (!await getGroup(db, input.groupId)) throw new NotFoundError("Group not found.");
+  if (!await getLineOfBusiness(db, input.lineOfBusinessId)) throw new NotFoundError("Line of business not found.");
   const period = normalizePeriod(input.effectiveStart, input.effectiveEnd);
   const status = input.status ?? "active";
   try {
@@ -250,74 +261,163 @@ export async function createAllocation(db: AppDatabase | undefined, input: Alloc
   } catch (error) {
     throw new ValidationError(error instanceof Error ? error.message : "Invalid allocation.");
   }
-  for (const entry of input.entries) await recipientLabel(database, entry);
-
-  const siblings = await listAllocationsForPair(database, input.groupId, input.lineOfBusinessId);
-
-  const inserted = await database.transaction(async (tx) => {
-    if (status === "active") {
-      for (const prior of overlappingActiveAllocations(siblings, period.effectiveStart, period.effectiveEnd)) {
-        if (prior.effectiveStart >= period.effectiveStart) {
-          throw new ValidationError("An active compensation allocation already exists for this group, line, and period.");
-        }
-        const closeEnd = closePriorAllocationEnd(period.effectiveStart);
-        if (closeEnd < prior.effectiveStart) {
-          throw new ValidationError("The new start month overlaps the existing allocation start.");
-        }
-        await tx.update(compensationAllocations)
-          .set({ effectiveEnd: closeEnd, updatedAt: new Date().toISOString() })
-          .where(eq(compensationAllocations.id, prior.id));
-      }
-    }
-    const now = new Date().toISOString();
-    const [row] = await tx.insert(compensationAllocations).values({
-      groupId: input.groupId,
-      lineOfBusinessId: input.lineOfBusinessId,
-      effectiveStart: period.effectiveStart,
-      effectiveEnd: period.effectiveEnd,
-      status: "inactive",
-      createdAt: now,
-      updatedAt: now,
-    }).returning({ id: compensationAllocations.id });
-    for (const [index, entry] of input.entries.entries()) {
-      await tx.insert(compensationAllocationEntries).values({
-        allocationId: row.id,
-        recipientType: entry.recipientType,
-        personKind: entry.personKind ?? null,
-        personId: entry.personId ?? null,
-        teamId: entry.teamId ?? null,
-        compensationBps: entry.compensationBps,
-        sortOrder: index,
-      });
-    }
-    if (status === "active") {
-      await tx.update(compensationAllocations)
-        .set({ status: "active", updatedAt: now })
-        .where(eq(compensationAllocations.id, row.id));
-    }
-    return row;
-  });
-  return (await getAllocation(database, inserted.id))!;
+  for (const entry of input.entries) await recipientLabel(db, entry);
+  return { period, status };
 }
+
+async function writeAllocationRecord(
+  tx: AppDatabase,
+  input: AllocationWrite,
+  period: { effectiveStart: string; effectiveEnd: string | null },
+  status: AllocationStatus,
+  siblings: AllocationView[],
+) {
+  if (status === "active") {
+    for (const prior of overlappingActiveAllocations(siblings, period.effectiveStart, period.effectiveEnd)) {
+      if (prior.effectiveStart >= period.effectiveStart) {
+        throw new ValidationError("An active compensation allocation already exists for this group, line, and period.");
+      }
+      const closeEnd = closePriorAllocationEnd(period.effectiveStart);
+      if (closeEnd < prior.effectiveStart) {
+        throw new ValidationError("The new start month overlaps the existing allocation start.");
+      }
+      await tx.update(compensationAllocations)
+        .set({ effectiveEnd: closeEnd, updatedAt: new Date().toISOString() })
+        .where(eq(compensationAllocations.id, prior.id));
+    }
+  }
+  const now = new Date().toISOString();
+  const [row] = await tx.insert(compensationAllocations).values({
+    groupId: input.groupId,
+    lineOfBusinessId: input.lineOfBusinessId,
+    effectiveStart: period.effectiveStart,
+    effectiveEnd: period.effectiveEnd,
+    status: "inactive",
+    createdAt: now,
+    updatedAt: now,
+  }).returning({ id: compensationAllocations.id });
+  for (const [index, entry] of input.entries.entries()) {
+    await tx.insert(compensationAllocationEntries).values({
+      allocationId: row.id,
+      recipientType: entry.recipientType,
+      personKind: entry.personKind ?? null,
+      personId: entry.personId ?? null,
+      teamId: entry.teamId ?? null,
+      compensationBps: entry.compensationBps,
+      sortOrder: index,
+    });
+  }
+  if (status === "active") {
+    await tx.update(compensationAllocations)
+      .set({ status: "active", updatedAt: now })
+      .where(eq(compensationAllocations.id, row.id));
+  }
+  return row.id;
+}
+
+export async function createAllocation(db: AppDatabase | undefined, input: AllocationWrite) {
+  const database = await resolveDb(db);
+  const prepared = await prepareAllocationWrite(database, input);
+  const siblings = await listAllocationsForPair(database, input.groupId, input.lineOfBusinessId);
+  const insertedId = await database.transaction(async (tx) => (
+    writeAllocationRecord(tx as unknown as AppDatabase, input, prepared.period, prepared.status, siblings)
+  ));
+  return (await getAllocation(database, insertedId))!;
+}
+
+export type BulkAllocationWrite = {
+  groupId: number;
+  effectiveStart: string;
+  effectiveEnd?: string | null;
+  status?: AllocationStatus;
+  targets: Array<{ lineOfBusinessId: number; entries: AllocationEntryInput[] }>;
+};
+
+export type BulkAllocationResult = {
+  allocations: AllocationView[];
+  createdCount: number;
+  reusedCount: number;
+};
 
 export async function createAllocationsForLines(
   db: AppDatabase | undefined,
-  input: Omit<AllocationWrite, "lineOfBusinessId"> & { lineOfBusinessIds: number[] },
-) {
-  const results: Array<{ lineOfBusinessId: number; ok: boolean; allocation?: AllocationView; error?: string }> = [];
-  for (const lineOfBusinessId of input.lineOfBusinessIds) {
-    try {
-      const allocation = await createAllocation(db, { ...input, lineOfBusinessId });
-      results.push({ lineOfBusinessId, ok: true, allocation });
-    } catch (error) {
-      results.push({
-        lineOfBusinessId,
-        ok: false,
-        error: error instanceof Error ? error.message : "Unable to save allocation.",
-      });
-    }
+  input: BulkAllocationWrite,
+): Promise<BulkAllocationResult> {
+  const database = await resolveDb(db);
+  if (input.targets.length === 0) throw new ValidationError("Select at least one line of business.");
+  const lineIds = input.targets.map((target) => target.lineOfBusinessId);
+  if (new Set(lineIds).size !== lineIds.length) {
+    throw new ValidationError("Each line of business can be selected only once.");
   }
-  return results;
+  if (!await getGroup(database, input.groupId)) throw new NotFoundError("Group not found.");
+  const period = normalizePeriod(input.effectiveStart, input.effectiveEnd);
+  const status = input.status ?? "active";
+
+  const prepared: Array<{
+    write: AllocationWrite;
+    terms: AllocationTerms;
+    exact: AllocationView | null;
+  }> = [];
+
+  for (const target of input.targets) {
+    const write = {
+      groupId: input.groupId,
+      lineOfBusinessId: target.lineOfBusinessId,
+      effectiveStart: period.effectiveStart,
+      effectiveEnd: period.effectiveEnd,
+      status,
+      entries: target.entries,
+    };
+    await prepareAllocationWrite(database, write);
+    const siblings = await listAllocationsForPair(database, write.groupId, write.lineOfBusinessId);
+    const terms = allocationTermsFromWrite(write, period, status);
+    const classified = classifyRequestedAllocation(siblings, terms);
+    if (classified.status === "conflict") {
+      throw new ValidationError(allocationConflictReviewMessage());
+    }
+    prepared.push({
+      write,
+      terms,
+      exact: classified.status === "exact" ? siblings.find((row) => row.id === classified.allocation?.id) ?? null : null,
+    });
+  }
+
+  const reused = prepared.filter((item) => item.exact);
+  const toCreate = prepared.filter((item) => !item.exact);
+  if (toCreate.length === 0) {
+    return {
+      allocations: reused.map((item) => item.exact!),
+      createdCount: 0,
+      reusedCount: reused.length,
+    };
+  }
+
+  const createdIds = await database.transaction(async (tx) => {
+    const ids: number[] = [];
+    for (const item of toCreate) {
+      const siblings = await listAllocationsForPair(tx as unknown as AppDatabase, item.write.groupId, item.write.lineOfBusinessId);
+      const classified = classifyRequestedAllocation(siblings, item.terms);
+      if (classified.status === "conflict") {
+        throw new ValidationError(allocationConflictReviewMessage());
+      }
+      if (classified.status === "exact") continue;
+      ids.push(await writeAllocationRecord(
+        tx as unknown as AppDatabase,
+        item.write,
+        period,
+        status,
+        siblings,
+      ));
+    }
+    return ids;
+  });
+
+  const created = await Promise.all(createdIds.map((id) => getAllocation(database, id)));
+  return {
+    allocations: [...reused.map((item) => item.exact!), ...created.filter((row): row is AllocationView => Boolean(row))],
+    createdCount: createdIds.length,
+    reusedCount: reused.length,
+  };
 }
 
 export async function updateAllocation(

@@ -9,6 +9,7 @@ import { createGroup } from "./groups";
 import { createLineOfBusiness } from "./linesOfBusiness";
 import { listPayoutsForCommission } from "./payouts";
 import { createTeam, listTeams, replaceTeamMembers } from "./teams";
+import { classifyRequestedAllocation } from "@/domain/allocationTerms";
 import { createTestDb } from "@/db/test-db";
 import { ValidationError } from "@/lib/errors";
 
@@ -211,18 +212,19 @@ describe("compensation allocations", () => {
 
     const applied = await createAllocationsForLines(db, {
       groupId: group.id,
-      lineOfBusinessIds: [dental.id, vision.id],
       effectiveStart: "2026-09",
-      entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }],
+      targets: [
+        { lineOfBusinessId: dental.id, entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }] },
+        { lineOfBusinessId: vision.id, entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }] },
+      ],
     });
-    expect(applied.every((item) => item.ok)).toBe(true);
+    expect(applied.createdCount).toBe(2);
     const agencyOnly = await createAllocationsForLines(db, {
       groupId: group.id,
-      lineOfBusinessIds: [chiro.id],
       effectiveStart: "2026-09",
-      entries: [{ recipientType: "agency", compensationBps: 10000 }],
+      targets: [{ lineOfBusinessId: chiro.id, entries: [{ recipientType: "agency", compensationBps: 10000 }] }],
     });
-    expect(agencyOnly[0]?.ok).toBe(true);
+    expect(agencyOnly.createdCount).toBe(1);
 
     const listed = await listAllocations(db);
     expect(listed.filter((row) => row.groupId === group.id && row.status === "active")).toHaveLength(4);
@@ -233,18 +235,70 @@ describe("compensation allocations", () => {
     expect(await listPayoutsForCommission(db, posted.id)).toEqual(historicalPayouts);
     expect((await getCommission(db, posted.id))?.agentCompensationCents).toBe(4000);
 
-    const overlap = await createAllocationsForLines(db, {
+    const beforeConflict = listed.filter((row) => row.lineOfBusinessId === dental.id);
+    await expect(createAllocationsForLines(db, {
       groupId: group.id,
-      lineOfBusinessIds: [dental.id],
       effectiveStart: "2026-09",
-      entries: [{ recipientType: "agency", compensationBps: 10000 }],
-    });
-    expect(overlap[0]?.ok).toBe(false);
-    expect(overlap[0]?.error).toMatch(/already exists for this group, line, and period/);
-    expect((await listAllocations(db)).filter((row) => row.lineOfBusinessId === dental.id && row.status === "active")).toHaveLength(1);
+      targets: [
+        { lineOfBusinessId: dental.id, entries: [{ recipientType: "agency", compensationBps: 10000 }] },
+      ],
+    })).rejects.toThrow(/different compensation allocation already exists/);
+    expect((await listAllocations(db)).filter((row) => row.lineOfBusinessId === dental.id)).toEqual(beforeConflict);
 
     const queue = await listCompensationQueue(db);
     expect(queue.some((item) => item.groupId === group.id && [medical.id, dental.id, vision.id, chiro.id].includes(item.lineOfBusinessId))).toBe(false);
+  });
+
+  it("creates every selected LOB in one transaction and rolls back all rows when one target conflicts", async () => {
+    const { db, john, group, medical } = await seed();
+    const dental = await createLineOfBusiness(db, { name: "Dental" });
+    const vision = await createLineOfBusiness(db, { name: "Vision" });
+    await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: medical.id,
+      effectiveStart: "2026-09",
+      entries: [{ recipientType: "agency", compensationBps: 10000 }],
+    });
+    const before = await listAllocations(db);
+    await expect(createAllocationsForLines(db, {
+      groupId: group.id,
+      effectiveStart: "2026-09",
+      targets: [
+        { lineOfBusinessId: dental.id, entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }] },
+        { lineOfBusinessId: vision.id, entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }] },
+        { lineOfBusinessId: medical.id, entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }] },
+      ],
+    })).rejects.toThrow(/different compensation allocation already exists/);
+    const after = await listAllocations(db);
+    expect(after).toEqual(before);
+    expect(after.filter((row) => [dental.id, vision.id].includes(row.lineOfBusinessId))).toHaveLength(0);
+  });
+
+  it("treats an exact retry of a committed bulk apply as success without creating duplicates", async () => {
+    const { db, john, group } = await seed();
+    const dental = await createLineOfBusiness(db, { name: "Dental" });
+    const vision = await createLineOfBusiness(db, { name: "Vision" });
+    const first = await createAllocationsForLines(db, {
+      groupId: group.id,
+      effectiveStart: "2026-09",
+      targets: [
+        { lineOfBusinessId: dental.id, entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }] },
+        { lineOfBusinessId: vision.id, entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }] },
+      ],
+    });
+    expect(first.createdCount).toBe(2);
+    const retry = await createAllocationsForLines(db, {
+      groupId: group.id,
+      effectiveStart: "2026-09",
+      targets: [
+        { lineOfBusinessId: dental.id, entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }] },
+        { lineOfBusinessId: vision.id, entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }] },
+      ],
+    });
+    expect(retry.createdCount).toBe(0);
+    expect(retry.reusedCount).toBe(2);
+    expect(retry.allocations.map((row) => row.id).sort()).toEqual(first.allocations.map((row) => row.id).sort());
+    expect((await listAllocations(db)).filter((row) => [dental.id, vision.id].includes(row.lineOfBusinessId) && row.status === "active")).toHaveLength(2);
   });
 
   it("treats a persisted allocation as covered after an ambiguous client timeout without requiring a duplicate POST", async () => {
@@ -281,6 +335,20 @@ describe("compensation allocations", () => {
     expect(afterTimeoutReload.some((item) => item.groupId === group.id && item.lineOfBusinessId === medical.id)).toBe(false);
     expect(afterTimeoutReload.some((item) => item.lineOfBusinessId === dental.id)).toBe(true);
 
+    const requested = {
+      groupId: group.id,
+      lineOfBusinessId: medical.id,
+      effectiveStart: "2026-09",
+      effectiveEnd: null,
+      status: "active" as const,
+      entries: [{ recipientType: "person" as const, personKind: "agent" as const, personId: john.id, compensationBps: 10000 }],
+    };
+    expect(classifyRequestedAllocation(await listAllocations(db), requested).status).toBe("exact");
+    expect(classifyRequestedAllocation(await listAllocations(db), {
+      ...requested,
+      entries: [{ recipientType: "agency", compensationBps: 10000 }],
+    }).status).toBe("conflict");
+
     await expect(createAllocation(db, {
       groupId: group.id,
       lineOfBusinessId: medical.id,
@@ -290,5 +358,6 @@ describe("compensation allocations", () => {
       ],
     })).rejects.toThrow(/already exists for this group, line, and period/);
     expect((await listAllocations(db)).filter((row) => row.lineOfBusinessId === medical.id && row.status === "active")).toHaveLength(1);
+    expect((await listCompensationQueue(db)).some((item) => item.lineOfBusinessId === dental.id)).toBe(true);
   });
 });
