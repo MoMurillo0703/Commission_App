@@ -7,10 +7,10 @@ Authoritative owner: **Alex**. Update this file when a release is deployed or ac
 | Field | Value |
 | --- | --- |
 | URL | https://commissionapp-iota.vercel.app |
-| SHA | `28ca513578b37f154c8ec57c9569a2e1e29a7103` |
+| SHA | `ba14ce5835546fb84b029b142cfc5ad4ca0b700b` |
 | Migrations | **0001–0007** applied (none required for this release) |
 | Release state | **DEPLOYED — PRODUCT ACCEPTANCE PENDING** |
-| Product acceptance | Pending Mo live retest of the statement workflow correction batch |
+| Product acceptance | Pending Mo live retest of the Group-first compensation workflow |
 
 This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 
@@ -23,6 +23,8 @@ This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 - Groups, Carriers, LOBs, Agents, Account Managers
 - Exception-oriented Group Account Manager / Primary Agent assignment with Save All (assignment ≠ compensation; missing assignment does not block posting)
 - Compensation allocations (Agency / Person / Team), effective dating, payout snapshots, setup queue
+- Missing Compensation is Group-first: one queue item per Group, all coverage lines visible together, default selection of unconfigured LOBs only
+- One entered split applies to selected LOBs through the existing atomic bulk allocation write; configured LOBs are not silently overwritten; Agency 100% remains available without inventing a Person
 - Group-level compensation apply across selected LOBs through one atomic server transaction; LOB overrides remain Group + LOB allocations
 - Exact-term timeout/overlap recovery; no automatic mutation retry; queue advances only after a confirmed matching save
 - Person-first Compensation / Splits view from People, editing the complete Group + LOB allocation

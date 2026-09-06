@@ -4,7 +4,7 @@ Authoritative owner: **Alex**.
 
 ## Phase
 
-Commission App 1.0 Sprint 1 — **DEPLOYED — PRODUCT ACCEPTANCE PENDING**. Product Acceptance is pending Mo live retest of the statement workflow correction batch (searchable Group matching, exception assignments, atomic Group-level compensation, exact-term queue recovery), including the earlier CaliforniaChoice import-blocker fix. This is not Done. Do not mark Product Accepted or Done until Mo completes that workflow.
+Commission App 1.0 Sprint 1 — **DEPLOYED — PRODUCT ACCEPTANCE PENDING**. Product Acceptance is pending Mo live retest of the Group-first compensation workflow (one Missing Compensation item per Group, all coverage lines together, one split applied through the existing atomic bulk write), including the earlier statement workflow correction batch. This is not Done. Do not mark Product Accepted or Done until Mo completes that workflow.
 
 ## Authorized work
 
@@ -22,7 +22,7 @@ End-to-end payable commission workflow:
 10. Person-first Compensation / Splits view from People, editing the complete Group + LOB allocation (UX-002).
 11. Compensation work queue Save & Next must advance without stale success/draft state (QA-001).
 12. CaliforniaChoice continuation rows must stay on the current Group; LOB names are not Groups (QA-003).
-13. Compensation home is Group-first; work queue remains a separate operational tool (UX-003).
+13. Compensation home and Missing Compensation are Group-first; opening a Group shows all coverage lines together (UX-003).
 14. Correct CaliforniaChoice carrier Group identity, row Paid Month semantics, and ADJ CD retention (Ben review blockers).
 15. CaliforniaChoice Product must be the LOB candidate; `$` and carrier Paid Month tokens must not block import (QA-005).
 16. Searchable / suggested Group matching with teach-once carrier identity; exception assignment Save All; atomic multi-LOB compensation; exact-term timeout recovery.
