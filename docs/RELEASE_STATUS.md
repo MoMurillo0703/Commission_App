@@ -7,17 +7,17 @@ Authoritative owner: **Alex**. Update this file when a release is deployed or ac
 | Field | Value |
 | --- | --- |
 | URL | https://commissionapp-iota.vercel.app |
-| SHA | `11a640c98d834ea3ec7f486191c59eff36c483ed` |
-| Migrations | **0001–0007** applied (`0007_carrier_group_identities.sql` applied this release) |
-| Release state | **Deployed** |
-| Product acceptance | Pending Mo live retest |
+| SHA | `7e72de369858f9f48083764ec4e66eeb43e34a97` |
+| Migrations | **0001–0007** applied (none required for this release) |
+| Release state | **DEPLOYED — PRODUCT ACCEPTANCE PENDING** |
+| Product acceptance | Pending Mo live retest of the CaliforniaChoice import |
 
 This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 
 ## What this release includes (verified capabilities)
 
 - CSV and XLSX statement intake
-- Readable text-PDF intake, including Choice Builder inference
+- Readable text-PDF intake, including Choice Builder inference and CaliforniaChoice Product/LOB interpretation (`Cal Choice` filename, no `$` / Paid Month LOB review, session Ignore for unknown Products)
 - Unmatched group review; create or match; fingerprint and source-row duplicate protection
 - Private original-file storage
 - Groups, Carriers, LOBs, Agents, Account Managers
@@ -34,6 +34,8 @@ Carrier-specific learning includes layouts, `0006` coverage aliases (label → L
 ## Production data caution
 
 Statement 4 (`Choice Builder - 08 2026.PDF`): 30 preview rows, 11 unmatched groups, source file and mapping retained, **0** posted commissions. Do not delete, recreate, or post it for testing.
+
+Statement 5 (`Cal Choice - 08 2026.pdf`) is Mo’s live CaliforniaChoice Product Acceptance import. Do not create `$` or month LOBs, write parser-garbage aliases, or post it merely to test the deploy.
 
 Posted Anthem commissions from an earlier statement remain historical truth.
 
