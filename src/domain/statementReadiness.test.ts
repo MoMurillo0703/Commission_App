@@ -53,6 +53,15 @@ describe("statement readiness", () => {
     expect(reason).toMatch(/Line/);
   });
 
+  it("does not treat missing group assignments as a posting blocker", () => {
+    const readiness = statementReadiness({
+      readyCount: 18,
+      blockedCount: 0,
+    });
+    expect(readiness.canContinue).toBe(true);
+    expect(readiness.blockers.some((blocker) => /assign/i.test(blocker.message))).toBe(false);
+  });
+
   it("does not describe a fully posted statement as a blocked import", () => {
     const readiness = statementReadiness({
       readyCount: 0,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runBusyAction } from "@/lib/apiClient";
 import {
+  allocationRecoveredMessage,
   allocationSaveErrorMessage,
   allocationSavedMessage,
   allocationStillQueuedMessage,
@@ -110,5 +111,59 @@ describe("allocation save flow", () => {
       });
     })).rejects.toThrow(/timed out/);
     expect(seen).toEqual([true, false]);
+  });
+
+  it("recovers when save persisted but the client sees a timeout, then advances without a second POST", async () => {
+    let posts = 0;
+    const result = await runAllocationSaveFlow({
+      request: async () => {
+        posts += 1;
+        throw new Error("The request timed out. Try again.");
+      },
+      refresh: async () => ({
+        queue: [{ key: "2:20" }, { key: "3:30" }],
+      }),
+      savedKey: "1:10",
+      queueIndex: 0,
+    });
+    expect(posts).toBe(1);
+    expect(result.error).toBeNull();
+    expect(result.recovered).toBe(true);
+    expect(result.loadNext).toBe(true);
+    expect(result.notice).toBe(allocationRecoveredMessage());
+    expect(result.queue.map((item) => item.key)).toEqual(["2:20", "3:30"]);
+    expect(result.queue.some((item) => item.key === "1:10")).toBe(false);
+  });
+
+  it("recovers from an overlap error when the refreshed queue no longer includes the saved pair", async () => {
+    const result = await runAllocationSaveFlow({
+      request: async () => ({
+        ok: false,
+        message: "An active compensation allocation already exists for this group, line, and period.",
+      }),
+      refresh: async () => ({ queue: [{ key: "2:20" }] }),
+      savedKey: "1:10",
+      queueIndex: 0,
+    });
+    expect(result.recovered).toBe(true);
+    expect(result.loadNext).toBe(true);
+    expect(result.error).toBeNull();
+    expect(result.queue.map((item) => item.key)).toEqual(["2:20"]);
+  });
+
+  it("keeps the overlap error when the pair is still missing a covering allocation", async () => {
+    const result = await runAllocationSaveFlow({
+      request: async () => ({
+        ok: false,
+        message: "An active compensation allocation already exists for this group, line, and period.",
+      }),
+      refresh: async () => ({ queue: [{ key: "1:10" }, { key: "2:20" }] }),
+      savedKey: "1:10",
+      queueIndex: 0,
+    });
+    expect(result.error).toMatch(/already exists for this group, line, and period/);
+    expect(result.loadNext).toBe(false);
+    expect(result.recovered).toBe(false);
+    expect(result.queue.map((item) => item.key)).toEqual(["1:10", "2:20"]);
   });
 });

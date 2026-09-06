@@ -3,7 +3,7 @@ export type GroupMatchStatus = "matched" | "new_group" | "missing" | "ambiguous"
 export type GroupCandidate = {
   id: number;
   name: string;
-  groupNumber: string | null;
+  groupNumber?: string | null;
   primaryAgentId?: number | null;
   defaultCompensationBps?: number | null;
 };
@@ -23,6 +23,113 @@ const premiumMonthHeader = /^(premium|coverage|policy|paid)\s*month$|^(coverage|
 export function normalizeGroupText(value: string | null | undefined) {
   const collapsed = value?.trim().replace(/\s+/g, " ");
   return collapsed ? collapsed.toLowerCase() : null;
+}
+
+const businessSuffix = /\b(llc|l\.l\.c|inc|incorporated|corp|corporation|ltd|limited|llp|pc|co|company)\b/g;
+
+export function normalizeGroupSearchKey(value: string | null | undefined) {
+  const text = normalizeGroupText(value);
+  if (!text) return null;
+  const collapsed = text
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(businessSuffix, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return collapsed || null;
+}
+
+export function groupSearchTokens(value: string | null | undefined) {
+  return (normalizeGroupSearchKey(value) ?? "").split(" ").filter(Boolean);
+}
+
+export function groupMatchesQuery(
+  group: Pick<GroupCandidate, "name" | "groupNumber">,
+  query: string | null | undefined,
+) {
+  const tokens = groupSearchTokens(query);
+  if (tokens.length === 0) return true;
+  const haystack = [
+    normalizeGroupSearchKey(group.name),
+    normalizeGroupText(group.name),
+    normalizeGroupText(group.groupNumber),
+    normalizeGroupSearchKey(group.groupNumber),
+  ].filter(Boolean).join(" ");
+  return tokens.every((token) => haystack.includes(token));
+}
+
+export type GroupSuggestion = {
+  id: number;
+  name: string;
+  groupNumber?: string | null;
+  score: number;
+  strong: boolean;
+  reason: string;
+};
+
+export function suggestGroupCandidates(
+  groups: GroupCandidate[],
+  sourceName: string | null | undefined,
+  sourceNumber: string | null | undefined,
+  limit = 5,
+): GroupSuggestion[] {
+  const name = normalizeGroupText(sourceName);
+  const number = normalizeGroupText(sourceNumber);
+  const searchKey = normalizeGroupSearchKey(sourceName);
+  const sourceTokens = groupSearchTokens(sourceName);
+  const ranked = groups.map((group) => {
+    const groupName = normalizeGroupText(group.name);
+    const groupNumber = normalizeGroupText(group.groupNumber);
+    const groupKey = normalizeGroupSearchKey(group.name);
+    let score = 0;
+    let reason = "";
+    let strong = false;
+    if (number && groupNumber && number === groupNumber) {
+      score = 100;
+      reason = "Group number matches";
+      strong = true;
+    } else if (name && groupName && name === groupName) {
+      score = 95;
+      reason = "Name matches";
+      strong = true;
+    } else if (searchKey && groupKey && searchKey === groupKey) {
+      score = 90;
+      reason = "Name matches after formatting";
+      strong = true;
+    } else if (sourceTokens.length >= 2 && groupKey) {
+      const hits = sourceTokens.filter((token) => groupKey.includes(token)).length;
+      if (hits === sourceTokens.length) {
+        score = 75;
+        reason = "All name words found";
+      } else if (hits >= Math.max(2, sourceTokens.length - 1) && hits / sourceTokens.length >= 0.75) {
+        score = 70;
+        reason = "Most name words found";
+      }
+    }
+    if (!score && searchKey && groupKey && (groupKey.includes(searchKey) || searchKey.includes(groupKey)) && Math.min(searchKey.length, groupKey.length) >= 8) {
+      score = 65;
+      reason = "Partial name match";
+    }
+    return { id: group.id, name: group.name, groupNumber: group.groupNumber ?? null, score, strong, reason };
+  }).filter((item) => item.score >= 70).sort((left, right) => right.score - left.score || left.name.localeCompare(right.name));
+
+  const strongCount = ranked.filter((item) => item.strong).length;
+  return ranked.slice(0, limit).map((item) => (
+    item.strong && strongCount !== 1 ? { ...item, strong: false } : item
+  ));
+}
+
+export function defaultGroupImportAction(
+  groups: GroupCandidate[],
+  sourceName: string | null | undefined,
+  sourceNumber: string | null | undefined,
+) {
+  const suggestions = suggestGroupCandidates(groups, sourceName, sourceNumber);
+  const strong = suggestions.filter((item) => item.strong);
+  if (strong.length === 1) {
+    return { action: "match" as const, existingGroupId: strong[0]!.id, suggestion: strong[0]! };
+  }
+  return { action: "create" as const, existingGroupId: null, suggestion: null };
 }
 
 export function displayGroupText(value: string | null | undefined) {

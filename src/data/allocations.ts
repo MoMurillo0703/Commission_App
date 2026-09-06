@@ -300,6 +300,26 @@ export async function createAllocation(db: AppDatabase | undefined, input: Alloc
   return (await getAllocation(database, inserted.id))!;
 }
 
+export async function createAllocationsForLines(
+  db: AppDatabase | undefined,
+  input: Omit<AllocationWrite, "lineOfBusinessId"> & { lineOfBusinessIds: number[] },
+) {
+  const results: Array<{ lineOfBusinessId: number; ok: boolean; allocation?: AllocationView; error?: string }> = [];
+  for (const lineOfBusinessId of input.lineOfBusinessIds) {
+    try {
+      const allocation = await createAllocation(db, { ...input, lineOfBusinessId });
+      results.push({ lineOfBusinessId, ok: true, allocation });
+    } catch (error) {
+      results.push({
+        lineOfBusinessId,
+        ok: false,
+        error: error instanceof Error ? error.message : "Unable to save allocation.",
+      });
+    }
+  }
+  return results;
+}
+
 export async function updateAllocation(
   db: AppDatabase | undefined,
   id: number,

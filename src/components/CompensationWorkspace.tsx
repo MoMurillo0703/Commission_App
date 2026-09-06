@@ -15,7 +15,8 @@ import {
 } from "@/domain/allocationEditor";
 import { allocationProgressLabel, allocationTotals } from "@/domain/allocations";
 import { closeQueue, queueBannerLabel, queueSessionProgressLabel, skipQueueIndex } from "@/domain/compensationQueue";
-import { allocationSavedMessage, runAllocationSaveFlow } from "@/domain/allocationSaveFlow";
+import { defaultLineApplyMode, plannedAllocationTargets, type LineApplyMode } from "@/domain/allocationBulkApply";
+import { allocationSavedMessage, isAllocationOverlapMessage, runAllocationSaveFlow } from "@/domain/allocationSaveFlow";
 import {
   compensationGroupSummaries,
   currentAllocationsForGroup,
@@ -70,6 +71,7 @@ export function CompensationWorkspace({
   const [queueSessionPosition, setQueueSessionPosition] = useState(0);
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [lineModes, setLineModes] = useState<Record<number, LineApplyMode>>({});
   const allocationsRef = useRef(allocations);
   allocationsRef.current = allocations;
 
@@ -155,6 +157,9 @@ export function CompensationWorkspace({
           setSuccess("");
           setQueueSessionPosition((position) => position + 1);
           loadQueueItem(result.queue[result.queueIndex] ?? null, allocationsRef.current);
+        } else if (result.recovered) {
+          setSuccess(result.success ?? allocationSavedMessage());
+          if (!result.queueOpen) resetDraft();
         } else if (result.stillQueued) {
           setSuccess(result.success ?? allocationSavedMessage());
         } else {
@@ -164,6 +169,67 @@ export function CompensationWorkspace({
       });
     } catch (error) {
       setError(requestFailureMessage(error, "Unable to save allocation."));
+    }
+  }
+
+  async function saveSelectedLines() {
+    setError("");
+    setSuccess("");
+    const targets = plannedAllocationTargets({
+      lineIds: applyLines.map((line) => line.id),
+      modes: lineModes,
+      templateEntries: allocationEntryPayload(draft.entries).map((entry) => ({
+        recipientType: entry.recipientType,
+        personKind: entry.personKind,
+        personId: entry.personId,
+        teamId: entry.teamId,
+        compensationBps: parsePercentToBps(entry.compensationPercent || "0"),
+      })),
+    });
+    if (targets.length === 0) {
+      setError("Select at least one line of business to apply this setup.");
+      return;
+    }
+    try {
+      await runBusyAction(setBusy, async () => {
+        const outcomes: string[] = [];
+        for (const target of targets) {
+          const response = await fetchWithDeadline("/api/allocations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              groupId: Number(draft.groupId),
+              lineOfBusinessId: target.lineOfBusinessId,
+              effectiveStart: draft.effectiveStart,
+              effectiveEnd: draft.effectiveEnd,
+              status: "active",
+              entries: allocationEntryPayload(
+                target.mode === "agency"
+                  ? [{ recipientType: "agency", personKind: "", personId: "", teamId: "", percent: "100" }]
+                  : draft.entries,
+              ),
+            }),
+          });
+          const body = await readApiJson<{ message?: string }>(response);
+          const lineName = applyLines.find((line) => line.id === target.lineOfBusinessId)?.name ?? "Line";
+          if (!response.ok) {
+            outcomes.push(isAllocationOverlapMessage(body.message)
+              ? `${lineName}: already saved`
+              : `${lineName}: ${httpFailureMessage(response.status, body.message)}`);
+            continue;
+          }
+          outcomes.push(`${lineName}: saved`);
+        }
+        await refresh();
+        const failed = outcomes.filter((item) => !/: (saved|already saved)$/.test(item));
+        if (failed.length === targets.length) {
+          setError(failed.join(" "));
+          return;
+        }
+        setSuccess(`Applied group compensation to ${targets.length - failed.length} line${targets.length - failed.length === 1 ? "" : "s"}. Posted commissions keep their original payout snapshots.${failed.length ? ` ${failed.join(" ")}` : ""}`);
+      });
+    } catch (error) {
+      setError(requestFailureMessage(error, "Unable to save group compensation."));
     }
   }
 
@@ -326,6 +392,27 @@ export function CompensationWorkspace({
   const selectedMissing = selectedGroupId
     ? missingLinesForGroup(selectedGroupId, groupLineEvidence, linesOfBusiness, allocations)
     : [];
+  const coveredLineIds = selectedCurrent.map((row) => row.lineOfBusinessId);
+  const applyLines = draftGroupId ? visibleLines : [];
+
+  useEffect(() => {
+    setLineModes({});
+  }, [draftGroupId]);
+
+  useEffect(() => {
+    if (!draftGroupId) return;
+    const missingIds = selectedMissing.map((item) => item.id);
+    const selectedLineId = Number(draft.lineOfBusinessId) || null;
+    setLineModes((current) => {
+      const next: Record<number, LineApplyMode> = {};
+      for (const line of applyLines) {
+        next[line.id] = current[line.id] ?? defaultLineApplyMode(line.id, selectedLineId, missingIds, coveredLineIds);
+      }
+      return next;
+    });
+    // Recalculate defaults for newly visible lines, not on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftGroupId, draft.lineOfBusinessId, applyLines.map((line) => line.id).join(","), selectedMissing.map((line) => line.id).join(","), coveredLineIds.join(",")]);
 
   const editor = (
     <AllocationRecipientEditor
@@ -534,6 +621,26 @@ export function CompensationWorkspace({
             <p className="muted-note full">Only lines of business evidenced for this group are listed. Historical inactive lines remain preserved in history.</p>
           )}
           {editor}
+          {applyLines.length > 0 && (
+            <div className="related-block full">
+              <strong>Apply this setup to lines of business</strong>
+              <p>Enter recipients once. Apply the same split to selected lines, set a line to Agency 100% when it has no recipient compensation, or skip a line. This creates separate Group + LOB allocations and does not rewrite posted payouts.</p>
+              {applyLines.map((line) => (
+                <label key={line.id} style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
+                  <span style={{ minWidth: 140 }}>{line.name}</span>
+                  <select
+                    aria-label={`Apply mode for ${line.name}`}
+                    value={lineModes[line.id] ?? "skip"}
+                    onChange={(event) => setLineModes((current) => ({ ...current, [line.id]: event.target.value as LineApplyMode }))}
+                  >
+                    <option value="template">Use this setup</option>
+                    <option value="agency">Agency 100% / no recipient compensation</option>
+                    <option value="skip">Skip</option>
+                  </select>
+                </label>
+              ))}
+            </div>
+          )}
           <p className={totals.complete ? "form-success full" : "allocation-progress full"}>{allocationProgressLabel(draft.entries.flatMap((entry) => {
             try { return [{ compensationBps: parsePercentToBps(entry.percent || "0") }]; } catch { return []; }
           }))}</p>
@@ -541,6 +648,9 @@ export function CompensationWorkspace({
           {success && !queueOpen && <p className="form-success">{success}</p>}
           <div className="form-actions full">
             <button disabled={busy || !totals.complete}>{busy ? "Saving…" : "Save allocation"}</button>
+            <button type="button" disabled={busy || !totals.complete || applyLines.length === 0} onClick={() => void saveSelectedLines()}>
+              Save for selected lines
+            </button>
             <button type="button" className="secondary" onClick={resetDraft}>Cancel</button>
           </div>
         </form>

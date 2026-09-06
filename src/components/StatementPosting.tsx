@@ -5,6 +5,8 @@ import type { ImportStatementView } from "@/data/statements";
 import { fetchWithDeadline, httpFailureMessage, readApiJson, requestFailureMessage, runBusyAction } from "@/lib/apiClient";
 import { collectPreviewHeaders, mappingFieldLabels, mappingFields, mappingLooksAutomatic, omitStatementCompensationMapping, suggestColumnMapping, type ColumnMapping } from "@/domain/columnMapping";
 import type { UnmatchedImportGroup, GroupImportDecision } from "@/domain/importGroups";
+import { partitionStatementGroupAssignments } from "@/domain/groupAssignment";
+import { defaultGroupImportAction, groupMatchesQuery, suggestGroupCandidates, type GroupSuggestion } from "@/domain/groupMatch";
 import type { ValidatedImportRow } from "@/domain/importRows";
 import { formatCents } from "@/domain/money";
 import type { NamedImportDecision, UnmatchedNamedImport } from "@/domain/namedImport";
@@ -86,9 +88,32 @@ export function StatementPosting({
     ]);
   }, []);
 
-  function applyReview(body: PreviewResponse) {
+  useEffect(() => {
+    if (!review || groups.length === 0) return;
+    setGroupDecisions((current) => {
+      const next = { ...current };
+      for (const group of review.unmatchedGroups ?? []) {
+        const existing = next[group.key];
+        if (existing && existing.action !== "create") continue;
+        const suggested = defaultGroupImportAction(groups, group.sourceName, group.sourceNumber);
+        if (suggested.action === "match") {
+          next[group.key] = { key: group.key, action: "match", existingGroupId: suggested.existingGroupId };
+        }
+      }
+      return next;
+    });
+  }, [groups, review]);
+
+  function applyReview(body: PreviewResponse, groupOptions = groups) {
     setReview(body);
-    setGroupDecisions(Object.fromEntries((body.unmatchedGroups ?? []).map((group) => [group.key, { key: group.key, action: "create" }])));
+    setGroupDecisions(Object.fromEntries((body.unmatchedGroups ?? []).map((group) => {
+      const suggested = defaultGroupImportAction(groupOptions, group.sourceName, group.sourceNumber);
+      return [group.key, {
+        key: group.key,
+        action: suggested.action,
+        existingGroupId: suggested.existingGroupId,
+      }];
+    })));
     setLineDecisions(defaultNamedDecisions(body.unmatchedLines ?? []));
     setAgentDecisions(defaultNamedDecisions(body.unmatchedAgents ?? []));
     if (variant !== "extracted-confirm" && body.readiness?.blockers.some((blocker) => blocker.kind === "mapping")) {
@@ -393,19 +418,21 @@ export function StatementPosting({
         <ResolveTable
           id="resolve-groups"
           title={`${unmatchedGroups.length} Group${unmatchedGroups.length === 1 ? "" : "s"} need review`}
-          help="These names are not on file. Match an existing group, create a new group, or ignore. Ignore skips posting those rows and does not create a group. Parser errors such as Medical, Dental, Vision, or Chiro should not appear here. Creating a group does not create compensation or assignments."
+          help="These names are not on file. Search to match an existing group, create a new group, or ignore. A suggested match is never applied until you confirm. Ignore skips posting those rows and does not create a group. Creating a group does not create compensation or assignments."
           rows={unmatchedGroups.map((group) => ({
             key: group.key,
             label: group.sourceName || group.sourceNumber || group.key,
             detail: group.sourceName && group.sourceNumber ? group.sourceNumber : null,
             rowCount: group.rowCount,
             decision: groupDecisions[group.key] ?? { key: group.key, action: "create" as const },
+            suggestions: suggestGroupCandidates(groups, group.sourceName, group.sourceNumber),
           }))}
-          options={groups.map((option) => ({ id: option.id, label: `${option.name}${option.groupNumber ? ` · ${option.groupNumber}` : ""}` }))}
+          options={groups.map((option) => ({ id: option.id, label: `${option.name}${option.groupNumber ? ` · ${option.groupNumber}` : ""}`, name: option.name, groupNumber: option.groupNumber }))}
           createLabel="Create new group"
           matchLabel="Match existing group"
           ignoreLabel="Ignore"
           confirmLabel="Confirm group decisions"
+          searchable
           busy={busy}
           onDecision={(key, action, existingId) => setGroupDecision(key, { action: action as "create" | "match" | "ignore", existingGroupId: existingId ?? null })}
           onConfirm={() => confirm("groups", Object.values(groupDecisions))}
@@ -552,113 +579,188 @@ function StatementGroupAssignment({
       .map((id) => groups.find((group) => group.id === id))
       .filter((group): group is NamedOption => Boolean(group));
   }, [groups, rows]);
+  const { assigned: assignedGroups, needsAssignment } = partitionStatementGroupAssignments(statementGroups);
   const [drafts, setDrafts] = useState<Record<number, { accountManagerId: string; primaryAgentId: string }>>({});
+  const [selected, setSelected] = useState<Record<number, boolean>>({});
   const [saved, setSaved] = useState("");
+  const [bulkManagerId, setBulkManagerId] = useState("");
+  const [bulkAgentId, setBulkAgentId] = useState("");
 
   useEffect(() => {
-    setDrafts(Object.fromEntries(statementGroups.map((group) => [group.id, {
+    const missing = partitionStatementGroupAssignments(statementGroups).needsAssignment;
+    setDrafts(Object.fromEntries(missing.map((group) => [group.id, {
       accountManagerId: group.accountManagerId ? String(group.accountManagerId) : "",
       primaryAgentId: group.primaryAgentId ? String(group.primaryAgentId) : "",
     }])));
+    setSelected((current) => Object.fromEntries(missing.map((group) => [group.id, current[group.id] ?? true])));
   }, [statementGroups]);
 
   if (statementGroups.length === 0) return null;
 
-  async function saveAssignment(group: NamedOption) {
-    const draft = drafts[group.id] ?? { accountManagerId: "", primaryAgentId: "" };
+  async function refreshGroups() {
+    const listed = await fetchWithDeadline("/api/groups");
+    if (listed.ok) onGroupsChange(await readApiJson<NamedOption[]>(listed));
+  }
+
+  async function saveAssignments(targets: NamedOption[]) {
     onError("");
     setSaved("");
     try {
       await runBusyAction(onBusy, async () => {
-        const response = await fetchWithDeadline(`/api/groups/${group.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: group.name,
-            groupNumber: group.groupNumber ?? null,
-            accountManagerId: draft.accountManagerId ? Number(draft.accountManagerId) : null,
-            primaryAgentId: draft.primaryAgentId ? Number(draft.primaryAgentId) : null,
-          }),
-        });
-        const body = await readApiJson<{ message?: string }>(response);
-        if (!response.ok) {
-          onError(httpFailureMessage(response.status, body.message));
-          return;
+        for (const group of targets) {
+          const draft = drafts[group.id] ?? { accountManagerId: "", primaryAgentId: "" };
+          const response = await fetchWithDeadline(`/api/groups/${group.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: group.name,
+              groupNumber: group.groupNumber ?? null,
+              accountManagerId: draft.accountManagerId ? Number(draft.accountManagerId) : null,
+              primaryAgentId: draft.primaryAgentId ? Number(draft.primaryAgentId) : null,
+            }),
+          });
+          const body = await readApiJson<{ message?: string }>(response);
+          if (!response.ok) {
+            onError(httpFailureMessage(response.status, body.message));
+            return;
+          }
         }
-        const listed = await fetchWithDeadline("/api/groups");
-        if (listed.ok) onGroupsChange(await readApiJson<NamedOption[]>(listed));
-        setSaved(`Saved assignment for ${group.name}. Assignment does not create compensation.`);
+        await refreshGroups();
+        setSaved(`Saved assignments for ${targets.length} group${targets.length === 1 ? "" : "s"}. Assignment does not create compensation and does not block posting.`);
       });
     } catch (error) {
       onError(requestFailureMessage(error, "Unable to save group assignment."));
     }
   }
 
+  function applyToSelected() {
+    const ids = needsAssignment.filter((group) => selected[group.id]);
+    setDrafts((current) => {
+      const next = { ...current };
+      for (const group of ids) {
+        next[group.id] = {
+          accountManagerId: bulkManagerId || current[group.id]?.accountManagerId || "",
+          primaryAgentId: bulkAgentId || current[group.id]?.primaryAgentId || "",
+        };
+      }
+      return next;
+    });
+  }
+
+  const selectedNeeds = needsAssignment.filter((group) => selected[group.id]);
+
   return (
     <div className="related-block" id="statement-group-assignment">
-      <strong>Assign people to groups on this statement</strong>
+      <strong>Group assignments</strong>
       <p>
-        Set Account Manager and Primary Agent when needed. Assignment does not create compensation.
+        Assignments belong to the Group. Missing Account Manager or Primary Agent does not block posting.
         Confirm Group + line of business splits on <a href="/compensation">Compensation</a>.
       </p>
-      <table>
-        <thead>
-          <tr>
-            <th>Group</th>
-            <th>Account Manager</th>
-            <th>Primary Agent</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {statementGroups.map((group) => {
-            const draft = drafts[group.id] ?? { accountManagerId: "", primaryAgentId: "" };
-            return (
-              <tr key={group.id}>
-                <td>
-                  <strong>{group.name}</strong>
-                  {group.groupNumber ? <small> · {group.groupNumber}</small> : null}
-                </td>
-                <td>
-                  <select
-                    aria-label={`Account manager for ${group.name}`}
-                    value={draft.accountManagerId}
-                    onChange={(event) => setDrafts((current) => ({
-                      ...current,
-                      [group.id]: { ...draft, accountManagerId: event.target.value },
-                    }))}
-                  >
-                    <option value="">Unassigned</option>
-                    {accountManagers.map((manager) => (
-                      <option key={manager.id} value={manager.id}>{manager.name}</option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <select
-                    aria-label={`Primary agent for ${group.name}`}
-                    value={draft.primaryAgentId}
-                    onChange={(event) => setDrafts((current) => ({
-                      ...current,
-                      [group.id]: { ...draft, primaryAgentId: event.target.value },
-                    }))}
-                  >
-                    <option value="">Unassigned</option>
-                    {agents.map((agent) => (
-                      <option key={agent.id} value={agent.id}>{agent.name}</option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <button type="button" className="secondary" disabled={busy} onClick={() => void saveAssignment(group)}>
-                    Save assignment
-                  </button>
-                </td>
+      {assignedGroups.length > 0 && (
+        <p className="muted-note">
+          {assignedGroups.length} group{assignedGroups.length === 1 ? " already has" : "s already have"} saved assignments
+          {assignedGroups.length <= 8 ? `: ${assignedGroups.map((group) => group.name).join(", ")}` : ""}.
+        </p>
+      )}
+      {needsAssignment.length === 0 ? (
+        <p className="form-success">No groups on this statement still need assignment.</p>
+      ) : (
+        <>
+          <div className="form-actions" style={{ margin: "10px 0", flexWrap: "wrap" }}>
+            <select aria-label="Apply account manager to selected groups" value={bulkManagerId} onChange={(event) => setBulkManagerId(event.target.value)}>
+              <option value="">Account manager for selected</option>
+              {accountManagers.map((manager) => (
+                <option key={manager.id} value={manager.id}>{manager.name}</option>
+              ))}
+            </select>
+            <select aria-label="Apply primary agent to selected groups" value={bulkAgentId} onChange={(event) => setBulkAgentId(event.target.value)}>
+              <option value="">Primary agent for selected</option>
+              {agents.map((agent) => (
+                <option key={agent.id} value={agent.id}>{agent.name}</option>
+              ))}
+            </select>
+            <button type="button" className="secondary" disabled={busy || selectedNeeds.length === 0} onClick={applyToSelected}>
+              Apply to selected
+            </button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>
+                  <input
+                    type="checkbox"
+                    aria-label="Select all groups needing assignment"
+                    checked={needsAssignment.length > 0 && needsAssignment.every((group) => selected[group.id])}
+                    onChange={(event) => setSelected(Object.fromEntries(needsAssignment.map((group) => [group.id, event.target.checked])))}
+                  />
+                </th>
+                <th>Group</th>
+                <th>Account Manager</th>
+                <th>Primary Agent</th>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            </thead>
+            <tbody>
+              {needsAssignment.map((group) => {
+                const draft = drafts[group.id] ?? { accountManagerId: "", primaryAgentId: "" };
+                return (
+                  <tr key={group.id}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${group.name}`}
+                        checked={Boolean(selected[group.id])}
+                        onChange={(event) => setSelected((current) => ({ ...current, [group.id]: event.target.checked }))}
+                      />
+                    </td>
+                    <td>
+                      <strong>{group.name}</strong>
+                      {group.groupNumber ? <small> · {group.groupNumber}</small> : null}
+                    </td>
+                    <td>
+                      <select
+                        aria-label={`Account manager for ${group.name}`}
+                        value={draft.accountManagerId}
+                        onChange={(event) => setDrafts((current) => ({
+                          ...current,
+                          [group.id]: { ...draft, accountManagerId: event.target.value },
+                        }))}
+                      >
+                        <option value="">Unassigned</option>
+                        {accountManagers.map((manager) => (
+                          <option key={manager.id} value={manager.id}>{manager.name}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <select
+                        aria-label={`Primary agent for ${group.name}`}
+                        value={draft.primaryAgentId}
+                        onChange={(event) => setDrafts((current) => ({
+                          ...current,
+                          [group.id]: { ...draft, primaryAgentId: event.target.value },
+                        }))}
+                      >
+                        <option value="">Unassigned</option>
+                        {agents.map((agent) => (
+                          <option key={agent.id} value={agent.id}>{agent.name}</option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className="form-actions" style={{ marginTop: 12 }}>
+            <button type="button" disabled={busy || needsAssignment.length === 0} onClick={() => void saveAssignments(needsAssignment)}>
+              {busy ? "Saving…" : "Save all assignments"}
+            </button>
+            <button type="button" className="secondary" disabled={busy || selectedNeeds.length === 0} onClick={() => void saveAssignments(selectedNeeds)}>
+              Save selected
+            </button>
+          </div>
+        </>
+      )}
       {saved && <p className="form-success">{saved}</p>}
     </div>
   );
@@ -674,6 +776,7 @@ function ResolveTable({
   matchLabel,
   ignoreLabel,
   confirmLabel,
+  searchable,
   busy,
   onDecision,
   onConfirm,
@@ -681,16 +784,25 @@ function ResolveTable({
   id: string;
   title: string;
   help: string;
-  rows: Array<{ key: string; label: string; detail: string | null; rowCount: number; decision: { action: "create" | "match" | "ignore" } }>;
-  options: Array<{ id: number; label: string }>;
+  rows: Array<{
+    key: string;
+    label: string;
+    detail: string | null;
+    rowCount: number;
+    decision: { action: "create" | "match" | "ignore" };
+    suggestions?: GroupSuggestion[];
+  }>;
+  options: Array<{ id: number; label: string; name?: string; groupNumber?: string | null }>;
   createLabel: string;
   matchLabel: string;
   ignoreLabel?: string;
   confirmLabel: string;
+  searchable?: boolean;
   busy: boolean;
   onDecision: (key: string, action: "create" | "match" | "ignore", existingId?: number | null) => void;
   onConfirm: () => void;
 }) {
+  const [queries, setQueries] = useState<Record<string, string>>({});
   return (
     <div className="related-block" id={id}>
       <strong>{title}</strong>
@@ -706,15 +818,28 @@ function ResolveTable({
         <tbody>
           {rows.map((row) => {
             const decision = row.decision;
+            const selectedId = "existingId" in decision
+              ? String((decision as NamedImportDecision).existingId ?? "")
+              : String((decision as GroupImportDecision).existingGroupId ?? "");
+            const query = queries[row.key] ?? "";
+            const filtered = searchable
+              ? options.filter((option) => groupMatchesQuery({ name: option.name ?? option.label, groupNumber: option.groupNumber ?? null }, query))
+              : options;
+            const suggestions = row.suggestions ?? [];
             return (
               <tr key={row.key}>
                 <td>
                   <strong>{row.label}</strong>
                   {row.detail ? <small> · {row.detail}</small> : null}
+                  {suggestions.filter((item) => item.strong).map((item) => (
+                    <div key={item.id}>
+                      <small>Suggested match: {item.name}{item.groupNumber ? ` · ${item.groupNumber}` : ""} ({item.reason})</small>
+                    </div>
+                  ))}
                 </td>
                 <td>{row.rowCount}</td>
                 <td>
-                  <div className="form-actions">
+                  <div className="form-actions" style={{ flexWrap: "wrap" }}>
                     <select
                       aria-label={`Decision for ${row.label}`}
                       value={decision.action}
@@ -725,16 +850,35 @@ function ResolveTable({
                       {ignoreLabel && <option value="ignore">{ignoreLabel}</option>}
                     </select>
                     {decision.action === "match" && (
-                      <select
-                        aria-label={`Existing record for ${row.label}`}
-                        value={"existingId" in decision ? String((decision as NamedImportDecision).existingId ?? "") : String((decision as GroupImportDecision).existingGroupId ?? "")}
-                        onChange={(event) => onDecision(row.key, "match", event.target.value ? Number(event.target.value) : null)}
-                      >
-                        <option value="">Select a record</option>
-                        {options.map((option) => (
-                          <option key={option.id} value={option.id}>{option.label}</option>
-                        ))}
-                      </select>
+                      <>
+                        {searchable && (
+                          <input
+                            aria-label={`Search existing records for ${row.label}`}
+                            placeholder="Search name or number"
+                            value={query}
+                            onChange={(event) => setQueries((current) => ({ ...current, [row.key]: event.target.value }))}
+                          />
+                        )}
+                        <select
+                          aria-label={`Existing record for ${row.label}`}
+                          value={selectedId}
+                          onChange={(event) => onDecision(row.key, "match", event.target.value ? Number(event.target.value) : null)}
+                        >
+                          <option value="">Select a record</option>
+                          {suggestions.length > 0 && (
+                            <optgroup label="Suggested">
+                              {suggestions.map((item) => (
+                                <option key={`suggested-${item.id}`} value={item.id}>{item.name}{item.groupNumber ? ` · ${item.groupNumber}` : ""}</option>
+                              ))}
+                            </optgroup>
+                          )}
+                          <optgroup label={searchable ? "Search results" : "All records"}>
+                            {filtered.map((option) => (
+                              <option key={option.id} value={option.id}>{option.label}</option>
+                            ))}
+                          </optgroup>
+                        </select>
+                      </>
                     )}
                   </div>
                 </td>

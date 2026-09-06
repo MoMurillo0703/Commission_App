@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { applyGroupResolutions, detectGroupHeaders, findNormalizedGroup, matchImportedGroup } from "./groupMatch";
+import {
+  applyGroupResolutions,
+  defaultGroupImportAction,
+  detectGroupHeaders,
+  findNormalizedGroup,
+  groupMatchesQuery,
+  matchImportedGroup,
+  suggestGroupCandidates,
+} from "./groupMatch";
 
 const groups = [
   { id: 1, name: "Acme Benefits", groupNumber: "A1" },
@@ -59,6 +67,50 @@ describe("imported group matching", () => {
       sourceNumber: "Z9",
       action: "ignore",
     }], groups).status).toBe("ignored");
+  });
+
+  it("searches existing groups by partial name, words, and group number", () => {
+    const willow = { id: 9, name: "WILLOW CREEK LAND AND CATTLE LLC", groupNumber: "W-441" };
+    expect(groupMatchesQuery(willow, "willow cattle")).toBe(true);
+    expect(groupMatchesQuery(willow, "W-441")).toBe(true);
+    expect(groupMatchesQuery(willow, "land & cattle")).toBe(true);
+    expect(groupMatchesQuery(willow, "acme")).toBe(false);
+  });
+
+  it("suggests a formatted-name match without silently merging & vs AND", () => {
+    const existing = [{ id: 9, name: "WILLOW CREEK LAND AND CATTLE LLC", groupNumber: null }];
+    const imported = matchImportedGroup(existing, "WILLOW CREEK LAND & CATTLE LLC", "W-441");
+    expect(imported.status).toBe("new_group");
+    expect(imported.groupId).toBeNull();
+    const suggestions = suggestGroupCandidates(existing, "WILLOW CREEK LAND & CATTLE LLC", "W-441");
+    expect(suggestions).toEqual([expect.objectContaining({
+      id: 9,
+      strong: true,
+      reason: "Name matches after formatting",
+    })]);
+    expect(defaultGroupImportAction(existing, "WILLOW CREEK LAND & CATTLE LLC", "W-441")).toEqual({
+      action: "match",
+      existingGroupId: 9,
+      suggestion: suggestions[0],
+    });
+  });
+
+  it("does not default to Create New when one strong unique match exists, and does not auto-pick among several", () => {
+    const uniqueNumber = [
+      { id: 1, name: "Acme Benefits", groupNumber: "A1" },
+      { id: 2, name: "Other Shop", groupNumber: "B2" },
+    ];
+    expect(defaultGroupImportAction(uniqueNumber, "Acme Benefits LLC", "A1")).toMatchObject({
+      action: "match",
+      existingGroupId: 1,
+    });
+    const twins = [
+      { id: 3, name: "Willow Creek Land & Cattle LLC", groupNumber: null },
+      { id: 4, name: "Willow Creek Land and Cattle LLC", groupNumber: null },
+    ];
+    const suggested = suggestGroupCandidates(twins, "WILLOW CREEK LAND AND CATTLE LLC", null);
+    expect(suggested.every((item) => item.strong === false)).toBe(true);
+    expect(defaultGroupImportAction(twins, "WILLOW CREEK LAND AND CATTLE LLC", null).action).toBe("create");
   });
 
   it("detects group and premium-month columns without treating premium month as the paid month", () => {
