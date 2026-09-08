@@ -5,20 +5,23 @@ import { carrierGroupIdentities, commissionRecords, compensationAllocations, gro
 import { rememberCarrierCoverageAlias } from "./carrierCoverage";
 import { getCarrier } from "./carriers";
 import { getCommission, listPostedSourceRowKeys, type CommissionView } from "./commissions";
-import { getGroup } from "./groups";
+import { getGroup, listGroups } from "./groups";
 import { getImportStatement } from "./statements";
 import { getLineOfBusiness, listLinesOfBusiness } from "./linesOfBusiness";
 import { listPayoutsForCommission, type PayoutView } from "./payouts";
 import { listAllocations } from "./allocations";
-import { repointCarrierGroupIdentity } from "./carrierGroupIdentities";
+import { listCarrierGroupIdentities, repointCarrierGroupIdentity } from "./carrierGroupIdentities";
+import { failIfTestHook } from "./transactionTestHook";
 import {
   applyDeterministicCoverageMapping,
   DETERMINISTIC_ANTHEM_COVERAGE_CODES,
   deterministicCoverageFamily,
   isAnthemFamilyCarrier,
 } from "@/domain/deterministicCoverage";
-import { normalizeCoverageValue } from "@/domain/carrierCoverage";
+import { matchCarrierGroupIdentity } from "@/domain/carrierGroupIdentity";
+import { normalizeGroupSearchKey, normalizeGroupText } from "@/domain/groupMatch";
 import { sourceRowKey } from "@/domain/importRows";
+import { parseDollarsToCents } from "@/domain/money";
 import {
   assertPayoutSnapshotsUnchanged,
   payoutIdentitySnapshot,
@@ -79,6 +82,61 @@ function findPreviewSourceRow(preview: StatementPreview | null | undefined, key:
     }
   }
   return null;
+}
+
+function signedCommissionCentsFromSourceRow(
+  values: Record<string, string>,
+  mappedGrossHeader: string | null | undefined,
+) {
+  const headers = [
+    mappedGrossHeader,
+    "Commission",
+    "Commission Amount",
+    "Gross Commission",
+    "Amount",
+  ].filter((header): header is string => Boolean(header));
+  for (const header of headers) {
+    const raw = values[header];
+    if (raw == null || String(raw).trim() === "") continue;
+    try {
+      return parseDollarsToCents(String(raw));
+    } catch {
+      throw new ValidationError("Source row commission amount is not a valid signed amount.");
+    }
+  }
+  throw new ValidationError("Source row commission amount cannot be proven.");
+}
+
+function sourceRowGroupIdentity(row: { group?: { sourceName?: string | null; groupName?: string | null; sourceNumber?: string | null }; values: Record<string, string> }) {
+  return {
+    sourceName: row.group?.sourceName || row.group?.groupName || row.values.Group || row.values["Group Name"] || row.values["Company Name"] || null,
+    sourceNumber: row.group?.sourceNumber || row.values["Group Number"] || row.values["Group #"] || null,
+  };
+}
+
+function sourceRowCorrespondsToCommissionGroup(
+  commission: CommissionView,
+  sourceName: string | null,
+  sourceNumber: string | null,
+  groups: Array<{ id: number; name: string; groupNumber?: string | null }>,
+  identities: Array<{ carrierId: number; externalGroupNumber: string; groupId: number }>,
+) {
+  const match = matchCarrierGroupIdentity(groups, sourceName, sourceNumber, {
+    carrierId: commission.carrierId,
+    identities,
+  });
+  if (match.status === "matched") return match.groupId === commission.groupId;
+  const commissionKeys = [
+    normalizeGroupSearchKey(commission.groupName),
+    normalizeGroupSearchKey(commission.sourceGroupLabel),
+    normalizeGroupText(commission.groupName),
+    normalizeGroupText(commission.sourceGroupLabel),
+  ].filter(Boolean);
+  const sourceKeys = [
+    normalizeGroupSearchKey(sourceName),
+    normalizeGroupText(sourceName),
+  ].filter(Boolean);
+  return sourceKeys.some((key) => commissionKeys.includes(key));
 }
 
 async function reconcileGroupAssignments(
@@ -150,6 +208,7 @@ export async function reassignCommissionsToCanonicalGroup(
         sourceGroupLabel: current?.sourceGroupLabel || source.name,
         updatedAt: now,
       }).where(eq(commissionRecords.id, row.id));
+      failIfTestHook("hr-after-commission");
     }
 
     const identities = await transaction
@@ -239,12 +298,23 @@ export async function repairImportStatementLinkage(
     if (postedKeys.includes(input.sourceRowKey) && before.commission.sourceRowKey !== input.sourceRowKey) {
       throw new ValidationError("That import source-row key is already linked to another commission.");
     }
+    const sourceGroup = sourceRowGroupIdentity(previewRow.row);
+    const groups = await listGroups(transaction);
+    const identities = await listCarrierGroupIdentities(transaction, before.commission.carrierId);
+    if (!sourceRowCorrespondsToCommissionGroup(before.commission, sourceGroup.sourceName, sourceGroup.sourceNumber, groups, identities)) {
+      throw new ValidationError("Source row Group does not correspond to the commission.");
+    }
+    const sourceCents = signedCommissionCentsFromSourceRow(previewRow.row.values, statement.columnMapping?.grossCommission);
+    if (sourceCents !== before.commission.grossCommissionCents) {
+      throw new ValidationError("Source row commission amount does not correspond to the commission.");
+    }
 
     await transaction.update(commissionRecords).set({
       importStatementId: input.importStatementId,
       sourceRowKey: input.sourceRowKey,
       updatedAt: new Date().toISOString(),
     }).where(eq(commissionRecords.id, input.commissionId));
+    failIfTestHook("linkage-after-update");
 
     const after = await frozenFinancials(transaction, input.commissionId);
     assertIdentityRepairUnchanged(before, after);
@@ -310,40 +380,57 @@ export async function normalizePostedAnthemCoverage(
     if (commissions.length !== uniqueIds.length) {
       throw new ValidationError("Anthem LOB repair includes commissions that are not on the target Anthem carrier.");
     }
-    for (const row of commissions) {
-      const before = await frozenFinancials(transaction, row.id);
+    for (const commissionId of uniqueIds) {
+      const before = await frozenFinancials(transaction, commissionId);
       if (input.importStatementId != null && before.commission.importStatementId !== input.importStatementId) {
-        continue;
+        throw new ValidationError("Anthem LOB repair includes commissions that are not on the target statement.");
+      }
+      if (before.commission.carrierId !== input.carrierId) {
+        throw new ValidationError("Anthem LOB repair includes commissions that are not on the target Anthem carrier.");
       }
       const rawCode = before.commission.sourceLobLabel
         || before.commission.sourceCoverageLabel
         || null;
-      const normalized = normalizeCoverageValue(rawCode);
-      if (!normalized || !(normalized in DETERMINISTIC_ANTHEM_COVERAGE_CODES)) continue;
       const family = deterministicCoverageFamily(carrier.name, rawCode);
-      if (!family) continue;
+      if (!rawCode || !family) {
+        throw new ValidationError("Anthem LOB repair includes a commission that cannot be safely mapped.");
+      }
       const mapped = applyDeterministicCoverageMapping(
         { status: "matched", id: before.commission.lineOfBusinessId, name: before.commission.lineOfBusinessName, source: rawCode },
         { carrierName: carrier.name, sourceValue: rawCode, lines },
       );
-      if (mapped.status !== "matched" || mapped.id == null || mapped.id === before.commission.lineOfBusinessId) {
-        if (!before.commission.sourceLobLabel && rawCode) {
-          await transaction.update(commissionRecords).set({
-            sourceLobLabel: rawCode,
-            updatedAt: new Date().toISOString(),
-          }).where(eq(commissionRecords.id, row.id));
-        }
-        continue;
+      if (mapped.status !== "matched" || mapped.id == null) {
+        throw new ValidationError("Anthem LOB repair includes a commission that cannot be safely mapped.");
       }
-      if (!await getLineOfBusiness(transaction, mapped.id)) continue;
-      await transaction.update(commissionRecords).set({
-        lineOfBusinessId: mapped.id,
-        sourceLobLabel: before.commission.sourceLobLabel || rawCode,
-        updatedAt: new Date().toISOString(),
-      }).where(eq(commissionRecords.id, row.id));
-      const after = await frozenFinancials(transaction, row.id);
+      if (!await getLineOfBusiness(transaction, mapped.id)) {
+        throw new ValidationError("Anthem LOB repair cannot resolve the canonical line of business.");
+      }
+      if (mapped.id !== before.commission.lineOfBusinessId || !before.commission.sourceLobLabel) {
+        await transaction.update(commissionRecords).set({
+          lineOfBusinessId: mapped.id,
+          sourceLobLabel: before.commission.sourceLobLabel || rawCode,
+          updatedAt: new Date().toISOString(),
+        }).where(eq(commissionRecords.id, commissionId));
+        failIfTestHook("anthem-after-update");
+      }
+      const after = await frozenFinancials(transaction, commissionId);
       assertIdentityRepairUnchanged(before, after);
-      remapped.push(row.id);
+      if (after.commission.carrierId !== input.carrierId) {
+        throw new ValidationError("Anthem LOB repair changed Carrier.");
+      }
+      if (after.commission.lineOfBusinessId !== mapped.id || after.commission.lineOfBusinessName !== mapped.name) {
+        throw new ValidationError("Anthem LOB repair did not reach the canonical line of business.");
+      }
+      if ((after.commission.sourceLobLabel || "").toUpperCase() !== rawCode.toUpperCase()) {
+        throw new ValidationError("Anthem LOB repair did not preserve the raw source LOB.");
+      }
+      if (after.commission.importStatementId !== before.commission.importStatementId) {
+        throw new ValidationError("Anthem LOB repair cannot change statement linkage.");
+      }
+      remapped.push(commissionId);
+    }
+    if (remapped.length !== uniqueIds.length || remapped.some((id, index) => id !== uniqueIds[index])) {
+      throw new ValidationError("Anthem LOB repair must complete the exact requested commission set.");
     }
     await rememberDeterministicCoverageAliases(transaction, input.carrierId);
     return {

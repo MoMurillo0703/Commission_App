@@ -53,7 +53,7 @@ describe("relationships and persistence", () => {
     expect(row.agentName).toBe("Alex Morgan");
     expect(row.sourceReference).toBe("principal-2026-08-row-12");
 
-    const updated = await updateCommission(db, row.id, {
+    await expect(updateCommission(db, row.id, {
       statementMonth: "2026-08",
       groupId: group.id,
       carrierId: carrier.id,
@@ -63,10 +63,8 @@ describe("relationships and persistence", () => {
       grossCommissionCents: 50000,
       compensationBps: 5000,
       sourceReference: "principal-2026-08-row-12",
-    });
-    expect(updated.id).toBe(row.id);
-    expect(updated.agentCompensationCents).toBe(25000);
-    expect(updated.agencyNetCents).toBe(25000);
+    })).rejects.toThrow(/payout snapshots exist/);
+    expect((await db.select().from(commissionRecords).then((rows) => rows[0]))?.agentCompensationCents).toBe(20000);
   });
 
   it("does not pay an assigned agent from the agent-level default when no group agreement exists", async () => {
@@ -161,17 +159,16 @@ describe("relationships and persistence", () => {
     });
     const replacement = await createAgent(db, { name: "Replacement" });
 
-    const updated = await updateCommission(db, original.id, {
+    await expect(updateCommission(db, original.id, {
       statementMonth: original.statementMonth,
       groupId: original.groupId,
       carrierId: original.carrierId,
       lineOfBusinessId: original.lineOfBusinessId,
       agentId: replacement.id,
       grossCommissionCents: original.grossCommissionCents,
-    });
-    expect(updated.agentId).toBe(replacement.id);
-    expect(updated.compensationBps).toBe(0);
-    expect(updated.agentCompensationCents).toBe(0);
+    })).rejects.toThrow(/payout snapshots exist/);
+    expect((await db.select().from(commissionRecords).then((rows) => rows[0]))?.agentId).toBe(agent.id);
+    expect((await db.select().from(commissionRecords).then((rows) => rows[0]))?.agentCompensationCents).toBe(4000);
   });
 
   it("assigns the full gross to agency net when no agent is present", async () => {

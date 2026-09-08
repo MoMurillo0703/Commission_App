@@ -1,25 +1,40 @@
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
-import { commissionRecords, importStatements, statementPaidMonthChanges } from "@/db/schema";
-import { allocationCandidates, listAllocations } from "./allocations";
+import {
+  commissionPayouts,
+  commissionRecords,
+  compensationAllocationEntries,
+  compensationAllocations,
+  importStatements,
+  statementPaidMonthChanges,
+  teamMemberships,
+  teams,
+} from "@/db/schema";
+import { allocationCandidates, listAllocations, type AllocationView } from "./allocations";
 import { listCorrectedCommissionIds } from "./compensationCorrections";
 import type { CorrectionInitiator } from "./compensationCorrections";
 import { getCommission, type CommissionView } from "./commissions";
 import { listPayoutsForCommission } from "./payouts";
 import { getImportStatement } from "./statements";
+import { currentTeamMembers, listTeams, type TeamView } from "./teams";
+import { failIfTestHook } from "./transactionTestHook";
 import { ConflictError, isUniqueConstraintError, NotFoundError, ValidationError } from "@/lib/errors";
 import { isPaidMonth } from "@/domain/dates";
 import {
   classifyPaidMonthImpact,
+  invariantStateAfterPaidMonthMove,
+  paidMonthBoundState,
   paidMonthImpactAllowsConfirm,
   paidMonthPreviewToken,
   paidMonthRequestFingerprint,
   PAID_MONTH_IMPACT,
   resolvePaidMonthAllocations,
   stalePaidMonthPreviewMessage,
-  statementPayoutFingerprint,
+  type PaidMonthAllocationBind,
+  type PaidMonthCommissionBind,
   type PaidMonthImpactClass,
+  type PaidMonthTeamMembershipBind,
 } from "@/domain/statementPaidMonthChange";
 
 export type StatementPaidMonthImpactItem = {
@@ -75,6 +90,10 @@ export type StatementPaidMonthChangeResult = {
   replayed: boolean;
 };
 
+type AssembledPlan = StatementPaidMonthPreview & {
+  boundInvariant: string;
+};
+
 function blockedReasonFor(impactClass: PaidMonthImpactClass) {
   if (impactClass === "different_terms") {
     return "The new paid month selects different compensation terms. Use historical compensation correction before moving this statement.";
@@ -83,6 +102,46 @@ function blockedReasonFor(impactClass: PaidMonthImpactClass) {
     return "The new paid month has no valid allocation. Financial settlement is blocked until terms are resolved.";
   }
   return null;
+}
+
+function allocationBind(row: AllocationView): PaidMonthAllocationBind {
+  return {
+    id: row.id,
+    groupId: row.groupId,
+    lineOfBusinessId: row.lineOfBusinessId,
+    effectiveStart: row.effectiveStart,
+    effectiveEnd: row.effectiveEnd,
+    status: row.status,
+    entries: row.entries.map((entry) => ({
+      id: entry.id,
+      recipientType: entry.recipientType,
+      personKind: entry.personKind,
+      personId: entry.personId,
+      teamId: entry.teamId,
+      compensationBps: entry.compensationBps,
+    })),
+  };
+}
+
+function teamBinds(teamRows: TeamView[], paidMonth: string, teamIds: number[]): PaidMonthTeamMembershipBind[] {
+  return teamRows
+    .filter((team) => teamIds.includes(team.id))
+    .flatMap((team) => currentTeamMembers(team, paidMonth).map((member) => ({
+      teamId: team.id,
+      membershipId: member.id,
+      personKind: member.personKind,
+      personId: member.personId,
+      shareBps: member.shareBps,
+      effectiveStart: member.effectiveStart,
+      effectiveEnd: member.effectiveEnd,
+      status: member.status,
+    })));
+}
+
+function teamIdsFromAllocations(allocations: Array<{ entries: Array<{ teamId?: number | null }> }>) {
+  return [...new Set(allocations.flatMap((allocation) => (
+    allocation.entries.flatMap((entry) => (entry.teamId != null ? [entry.teamId] : []))
+  )))].sort((left, right) => left - right);
 }
 
 async function commissionsForStatement(db: AppDatabase, statementId: number): Promise<CommissionView[]> {
@@ -98,11 +157,73 @@ async function commissionsForStatement(db: AppDatabase, statementId: number): Pr
   return commissions.sort((left, right) => left.id - right.id);
 }
 
+async function lockTeams(db: AppDatabase, teamIds: number[]) {
+  const unique = [...new Set(teamIds)].sort((left, right) => left - right);
+  if (unique.length === 0) return;
+  await db.select({ id: teams.id })
+    .from(teams)
+    .where(inArray(teams.id, unique))
+    .orderBy(teams.id)
+    .for("update");
+  await db.select({ id: teamMemberships.id })
+    .from(teamMemberships)
+    .where(inArray(teamMemberships.teamId, unique))
+    .orderBy(teamMemberships.id)
+    .for("update");
+}
+
+async function lockPaidMonthSources(db: AppDatabase, statementId: number, commissions: CommissionView[]) {
+  await db.select({ id: importStatements.id })
+    .from(importStatements)
+    .where(eq(importStatements.id, statementId))
+    .for("update");
+  const commissionIds = commissions.map((row) => row.id).sort((left, right) => left - right);
+  const payoutTeamIds: number[] = [];
+  if (commissionIds.length > 0) {
+    await db.select({ id: commissionRecords.id })
+      .from(commissionRecords)
+      .where(inArray(commissionRecords.id, commissionIds))
+      .orderBy(commissionRecords.id)
+      .for("update");
+    const payoutRows = await db.select({ id: commissionPayouts.id, teamId: commissionPayouts.teamId })
+      .from(commissionPayouts)
+      .where(inArray(commissionPayouts.commissionId, commissionIds))
+      .orderBy(commissionPayouts.id)
+      .for("update");
+    payoutTeamIds.push(...payoutRows.flatMap((row) => (row.teamId != null ? [row.teamId] : [])));
+  }
+  const pairClauses = commissions.map((row) => and(
+    eq(compensationAllocations.groupId, row.groupId),
+    eq(compensationAllocations.lineOfBusinessId, row.lineOfBusinessId),
+  ));
+  const allocationTeamIds: number[] = [];
+  if (pairClauses.length > 0) {
+    const allocationRows = await db.select({ id: compensationAllocations.id })
+      .from(compensationAllocations)
+      .where(or(...pairClauses))
+      .orderBy(compensationAllocations.id)
+      .for("update");
+    const allocationIds = allocationRows.map((row) => row.id);
+    if (allocationIds.length > 0) {
+      const entryRows = await db.select({
+        id: compensationAllocationEntries.id,
+        teamId: compensationAllocationEntries.teamId,
+      })
+        .from(compensationAllocationEntries)
+        .where(inArray(compensationAllocationEntries.allocationId, allocationIds))
+        .orderBy(compensationAllocationEntries.id)
+        .for("update");
+      allocationTeamIds.push(...entryRows.flatMap((row) => (row.teamId != null ? [row.teamId] : [])));
+    }
+  }
+  await lockTeams(db, [...payoutTeamIds, ...allocationTeamIds]);
+}
+
 async function assemblePreview(
   db: AppDatabase,
   statementId: number,
   newPaidMonth: string,
-): Promise<StatementPaidMonthPreview> {
+): Promise<AssembledPlan> {
   if (!isPaidMonth(newPaidMonth)) throw new ValidationError("Enter a paid month as YYYY-MM.");
   const statement = await getImportStatement(db, statementId);
   if (!statement) throw new NotFoundError("Statement not found.");
@@ -117,13 +238,18 @@ async function assemblePreview(
   if (commissions.some((row) => row.statementMonth !== statement.paidMonth)) {
     throw new ValidationError("Linked commissions do not all match the statement paid month.");
   }
-  const allocations = allocationCandidates(await listAllocations(db));
+  const allocationRows = await listAllocations(db);
+  const allocations = allocationCandidates(allocationRows);
+  const teamRows = await listTeams(db);
   const corrected = await listCorrectedCommissionIds(db);
   const items: StatementPaidMonthImpactItem[] = [];
   let recipientPayoutsAffected = 0;
   const allocationIds = new Set<number>();
+  const relevantAllocations: PaidMonthAllocationBind[] = [];
+  const payoutBinds = [];
   for (const commission of commissions) {
     const payouts = await listPayoutsForCommission(db, commission.id);
+    payoutBinds.push(...payouts.map((payout) => ({ ...payout, commissionId: commission.id })));
     recipientPayoutsAffected += payouts.filter((payout) => payout.recipientType !== "team").length;
     const { oldAllocation, newAllocation } = resolvePaidMonthAllocations(
       allocations,
@@ -131,13 +257,25 @@ async function assemblePreview(
       statement.paidMonth,
       newPaidMonth,
     );
+    const pairAllocations = allocationRows.filter((row) => (
+      row.groupId === commission.groupId && row.lineOfBusinessId === commission.lineOfBusinessId
+    ));
+    pairAllocations.forEach((row) => {
+      if (!relevantAllocations.some((item) => item.id === row.id)) relevantAllocations.push(allocationBind(row));
+    });
     if (oldAllocation) allocationIds.add(oldAllocation.id);
     if (newAllocation) allocationIds.add(newAllocation.id);
+    const compared = [oldAllocation, newAllocation].flatMap((item) => (item ? [item] : []));
+    const teamIds = teamIdsFromAllocations(compared);
+    const currentTeamMemberships = teamBinds(teamRows, statement.paidMonth, teamIds);
+    const proposedTeamMemberships = teamBinds(teamRows, newPaidMonth, teamIds);
     const impactClass = classifyPaidMonthImpact({
       payouts,
       corrected: corrected.has(commission.id),
       oldAllocation,
       newAllocation,
+      currentTeamMemberships,
+      proposedTeamMemberships,
     });
     items.push({
       commissionId: commission.id,
@@ -155,14 +293,34 @@ async function assemblePreview(
       blockedReason: blockedReasonFor(impactClass),
     });
   }
+  const commissionBinds: PaidMonthCommissionBind[] = commissions.map((commission) => ({
+    id: commission.id,
+    groupId: commission.groupId,
+    carrierId: commission.carrierId,
+    lineOfBusinessId: commission.lineOfBusinessId,
+    grossCommissionCents: commission.grossCommissionCents,
+    statementMonth: commission.statementMonth,
+    premiumMonth: commission.premiumMonth,
+    sourceGroupLabel: commission.sourceGroupLabel,
+    sourceLobLabel: commission.sourceLobLabel,
+    sourcePeriodLabel: commission.sourcePeriodLabel,
+    sourceReference: commission.sourceReference,
+    sourceRowKey: commission.sourceRowKey,
+    importStatementId: commission.importStatementId,
+    corrected: corrected.has(commission.id),
+  }));
+  const allTeamIds = teamIdsFromAllocations(relevantAllocations);
+  const bound = paidMonthBoundState({
+    statementId: statement.id,
+    currentPaidMonth: statement.paidMonth,
+    newPaidMonth,
+    commissions: commissionBinds,
+    payouts: payoutBinds,
+    allocations: relevantAllocations,
+    currentTeamMemberships: teamBinds(teamRows, statement.paidMonth, allTeamIds),
+    proposedTeamMemberships: teamBinds(teamRows, newPaidMonth, allTeamIds),
+  });
   const commissionIds = commissions.map((row) => row.id);
-  const grossAffectedCents = commissions.reduce((sum, row) => sum + row.grossCommissionCents, 0);
-  const payoutFingerprint = statementPayoutFingerprint(
-    await Promise.all(commissions.map(async (commission) => ({
-      id: commission.id,
-      payouts: await listPayoutsForCommission(db, commission.id),
-    }))),
-  );
   const confirmable = items.every((item) => paidMonthImpactAllowsConfirm(item.impactClass));
   return {
     statementId: statement.id,
@@ -172,7 +330,7 @@ async function assemblePreview(
     newPaidMonth,
     commissionCount: commissions.length,
     commissionIds,
-    grossAffectedCents,
+    grossAffectedCents: commissions.reduce((sum, row) => sum + row.grossCommissionCents, 0),
     recipientPayoutsAffected,
     historicalAllocationsAffected: allocationIds.size,
     reportsAffected: [
@@ -186,14 +344,8 @@ async function assemblePreview(
     items,
     confirmable,
     payoutCorrectionRequired: items.some((item) => item.impactClass === "different_terms" || item.impactClass === "no_allocation"),
-    previewToken: paidMonthPreviewToken({
-      statementId: statement.id,
-      currentPaidMonth: statement.paidMonth,
-      newPaidMonth,
-      commissionIds,
-      grossAffectedCents,
-      payoutFingerprint,
-    }),
+    previewToken: paidMonthPreviewToken(bound),
+    boundInvariant: invariantStateAfterPaidMonthMove(bound),
   };
 }
 
@@ -238,7 +390,8 @@ export async function previewStatementPaidMonthChange(
   statementId: number,
   newPaidMonth: string,
 ) {
-  return assemblePreview(await resolveDb(db), statementId, newPaidMonth);
+  const { boundInvariant: _boundInvariant, ...preview } = await assemblePreview(await resolveDb(db), statementId, newPaidMonth);
+  return preview;
 }
 
 export async function confirmStatementPaidMonthChange(
@@ -276,10 +429,8 @@ export async function confirmStatementPaidMonthChange(
       const replay = await getChangeByConfirmationKey(transaction, confirmationKey);
       if (replay) return replayOrConflict(replay, incomingFingerprint);
 
-      await transaction.select({ id: importStatements.id })
-        .from(importStatements)
-        .where(eq(importStatements.id, input.statementId))
-        .for("update");
+      const unlocked = await commissionsForStatement(transaction, input.statementId);
+      await lockPaidMonthSources(transaction, input.statementId, unlocked);
 
       const plan = await assemblePreview(transaction, input.statementId, input.newPaidMonth);
       if (plan.previewToken !== previewToken) {
@@ -291,18 +442,12 @@ export async function confirmStatementPaidMonthChange(
       }
 
       const commissionIds = plan.commissionIds;
-      if (commissionIds.length > 0) {
-        await transaction.select({ id: commissionRecords.id })
-          .from(commissionRecords)
-          .where(eq(commissionRecords.importStatementId, input.statementId))
-          .for("update");
-      }
-
       const now = new Date().toISOString();
       await transaction.update(importStatements).set({
         paidMonth: input.newPaidMonth,
         updatedAt: now,
       }).where(eq(importStatements.id, input.statementId));
+      failIfTestHook("paid-month-after-statement");
       for (const commissionId of commissionIds) {
         const before = await getCommission(transaction, commissionId);
         if (!before) throw new ValidationError("Commission not found.");
@@ -317,6 +462,9 @@ export async function confirmStatementPaidMonthChange(
         }
         if (after.grossCommissionCents !== before.grossCommissionCents) {
           throw new ValidationError("Paid-month change cannot alter gross commission.");
+        }
+        if (after.groupId !== before.groupId || after.carrierId !== before.carrierId || after.lineOfBusinessId !== before.lineOfBusinessId) {
+          throw new ValidationError("Paid-month change cannot alter Group, Carrier, or LOB.");
         }
         if (after.sourceRowKey !== before.sourceRowKey || after.importStatementId !== before.importStatementId) {
           throw new ValidationError("Paid-month change cannot alter source identity.");
@@ -349,6 +497,13 @@ export async function confirmStatementPaidMonthChange(
 
       const moved = await commissionsForStatement(transaction, input.statementId);
       if (moved.length !== commissionIds.length || moved.some((row) => row.statementMonth !== input.newPaidMonth)) {
+        throw new ValidationError("Paid-month change failed post-condition validation.");
+      }
+      if ([...moved.map((row) => row.id)].sort((left, right) => left - right).join(",") !== [...commissionIds].sort((left, right) => left - right).join(",")) {
+        throw new ValidationError("Paid-month change failed post-condition validation.");
+      }
+      const afterPlan = await assemblePreview(transaction, input.statementId, plan.currentPaidMonth);
+      if (afterPlan.boundInvariant !== plan.boundInvariant) {
         throw new ValidationError("Paid-month change failed post-condition validation.");
       }
 

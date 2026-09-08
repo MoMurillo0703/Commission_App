@@ -10,7 +10,7 @@ import {
 import { calculateAgencyNetCents, calculateAgentCompensationCents } from "@/domain/compensation";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
-import { agents, carriers, commissionRecords, groups, linesOfBusiness } from "@/db/schema";
+import { agents, carriers, commissionRecords, groups, importStatements, linesOfBusiness } from "@/db/schema";
 import { getAgent, listAgents } from "./agents";
 import { listAccountManagers } from "./accountManagers";
 import { findApplicableAgreement } from "./agreements";
@@ -18,8 +18,9 @@ import { findApplicableAllocation } from "./allocations";
 import { getCarrier } from "./carriers";
 import { getGroup } from "./groups";
 import { getLineOfBusiness } from "./linesOfBusiness";
-import { replaceCommissionPayouts } from "./payouts";
+import { listPayoutsForCommission, replaceCommissionPayouts, type PayoutView } from "./payouts";
 import { currentTeamMembers, listTeams } from "./teams";
+import { failIfTestHook } from "./transactionTestHook";
 import { isForeignKeyError, NotFoundError, ValidationError } from "@/lib/errors";
 import { emptyToNull } from "@/lib/validation";
 
@@ -272,6 +273,52 @@ async function resolveNewCompensation(db: AppDatabase, input: CommissionWrite, a
   return settleCommissionCompensation(db, input, agentId);
 }
 
+export function assertHeaderPayoutConsistency(commission: CommissionView, payouts: PayoutView[]) {
+  if (commission.agencyNetCents !== commission.grossCommissionCents - commission.agentCompensationCents) {
+    throw new ValidationError("Header Agency Net is inconsistent with gross and compensation.");
+  }
+  if (payouts.length === 0) return;
+  const recipientCents = payouts
+    .filter((payout) => payout.recipientType === "person" || payout.recipientType === "team_member")
+    .reduce((sum, payout) => sum + payout.compensationCents, 0);
+  if (recipientCents !== commission.agentCompensationCents) {
+    throw new ValidationError("Canonical payout snapshots are inconsistent with header compensation.");
+  }
+  const agencyCents = payouts
+    .filter((payout) => payout.recipientType === "agency")
+    .reduce((sum, payout) => sum + payout.compensationCents, 0);
+  if (agencyCents > 0 && agencyCents !== commission.agencyNetCents) {
+    throw new ValidationError("Canonical payout snapshots are inconsistent with header Agency Net.");
+  }
+}
+
+function financialIdentityChanged(existing: CommissionView, merged: CommissionWrite, patch: CommissionPatch) {
+  const compensationChanged = Object.prototype.hasOwnProperty.call(patch, "compensationBps")
+    && patch.compensationBps !== existing.compensationBps;
+  return merged.statementMonth !== existing.statementMonth
+    || merged.groupId !== existing.groupId
+    || merged.carrierId !== existing.carrierId
+    || merged.lineOfBusinessId !== existing.lineOfBusinessId
+    || merged.grossCommissionCents !== existing.grossCommissionCents
+    || (merged.agentId ?? null) !== existing.agentId
+    || compensationChanged;
+}
+
+async function assertPostedPaidMonthNotBypassed(db: AppDatabase, existing: CommissionView, merged: CommissionWrite) {
+  if (merged.statementMonth === existing.statementMonth) return;
+  if (existing.importStatementId == null) return;
+  const [statement] = await db.select({
+    id: importStatements.id,
+    status: importStatements.status,
+  })
+    .from(importStatements)
+    .where(eq(importStatements.id, existing.importStatementId))
+    .limit(1);
+  if (statement && (statement.status === "posted" || statement.status === "partially_posted")) {
+    throw new ValidationError("Posted-statement paid month must be changed through Change Paid Month preview and confirm.");
+  }
+}
+
 function mergeCommissionPatch(existing: CommissionView, patch: CommissionPatch): CommissionWrite {
   return {
     statementMonth: patch.statementMonth ?? existing.statementMonth,
@@ -303,8 +350,10 @@ async function resolveUpdatedCompensation(
   existing: CommissionView,
 ): Promise<CompensationSnapshot> {
   const agentId = merged.agentId ?? null;
-  const agentUnchanged = agentId === existing.agentId;
-  if (agentUnchanged && !Object.prototype.hasOwnProperty.call(patch, "compensationBps")) {
+  if (
+    !financialIdentityChanged(existing, merged, patch)
+    && !Object.prototype.hasOwnProperty.call(patch, "compensationBps")
+  ) {
     return {
       compensationBps: existing.compensationBps,
       agentCompensationCents: existing.agentCompensationCents,
@@ -370,9 +419,13 @@ export async function createCommission(db: AppDatabase | undefined, input: Commi
         ...valuesFrom(resolved, settled, now),
         createdAt: now,
       }).returning({ id: commissionRecords.id });
+      failIfTestHook("header-payout-after-header");
       if (settled.settled) {
         await replaceCommissionPayouts(transaction, row.id, settled.settled.payouts, settled.allocationId);
       }
+      const created = await getCommission(transaction, row.id);
+      if (!created) throw new ValidationError("Commission record not found after create.");
+      assertHeaderPayoutConsistency(created, await listPayoutsForCommission(transaction, row.id));
       return row;
     });
     return (await getCommission(database, inserted.id))!;
@@ -388,16 +441,25 @@ export async function updateCommission(db: AppDatabase | undefined, id: number, 
   if (!existing) throw new NotFoundError("Commission record not found.");
   const merged = mergeCommissionPatch(existing, input);
   await assertReferences(database, merged);
+  await assertPostedPaidMonthNotBypassed(database, existing, merged);
   try {
     await database.transaction(async (tx) => {
       const transaction = tx as unknown as AppDatabase;
+      const existingPayouts = await listPayoutsForCommission(transaction, id);
+      if (existingPayouts.length > 0 && financialIdentityChanged(existing, merged, input)) {
+        throw new ValidationError("Financial identity cannot be changed while payout snapshots exist. Use the explicit correction workflow.");
+      }
       const settled = await resolveUpdatedCompensation(transaction, input, merged, existing);
       await transaction.update(commissionRecords)
         .set(valuesFrom(merged, settled, new Date().toISOString(), existing))
         .where(eq(commissionRecords.id, id));
       if (settled.settled) {
+        failIfTestHook("header-payout-after-header");
         await replaceCommissionPayouts(transaction, id, settled.settled.payouts, settled.allocationId);
       }
+      const updated = await getCommission(transaction, id);
+      if (!updated) throw new ValidationError("Commission record not found after update.");
+      assertHeaderPayoutConsistency(updated, await listPayoutsForCommission(transaction, id));
     });
   } catch (error) {
     if (isForeignKeyError(error)) throw new ValidationError("Commission records must reference existing groups, carriers, lines of business, and agents.");
