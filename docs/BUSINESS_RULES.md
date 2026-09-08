@@ -6,9 +6,12 @@ This is the canonical product/financial rulebook. Schema details live in [`DATA_
 
 ## Organization of time and money
 
-- Commission records are organized by **paid month**: the month the agency received the commission.
-- **Premium / coverage month** is separate when known. Do not assume they are the same.
+- Commission records are organized by **paid month**: the month Murillo Insurance Agency received the commission payment. That is the month selected during statement upload.
+- Paid month controls Agency monthly commission received, recipient compensation period, Individual pay statement period, historical allocation selection, payout settlement, and paid-month reporting.
+- **Premium / coverage month** is separate when known. Do not assume they are the same. Coverage/source months are secondary Agency detail only.
+- A raw source-period label that is not a proven coverage month (including CaliforniaChoice `09-26`-style values) is evidence only. Do not treat it as an authoritative coverage month and do not let it drive compensation or missing-commission logic.
 - **Paid month** selects which effective-dated compensation plan applies.
+- A posted statement’s paid month may be changed through the authorized **Change Paid Month** action only. That action moves the entire statement population together. It does not delete or re-upload the statement, does not change coverage/source fields or gross, and does not silently rewrite payout history. If the new month would select different compensation terms or no valid allocation for a settled/corrected commission, the change is blocked until an explicit historical compensation correction/review. The change is transactional and append-only audited.
 - Persist money as **integer cents**. Persist rates and splits as **integer basis points** (10,000 bps = 100%). Do not persist financial values as binary floating point.
 - Financial relationships use **stable database IDs**, not mutable display names.
 

@@ -328,6 +328,7 @@ describe("statement compensation from agreements", () => {
     });
     expect(row?.paidMonth).toBe("2026-08");
     expect(row?.premiumMonth).toBeNull();
+    expect(row?.importedSourcePeriod).toBe("09-26");
     expect(row?.notes).toBe("Carrier paid month: 09-26 · ADJ CD: CR");
     expect(row?.groupId).toBe(9);
     expect(row?.grossCommissionCents).toBe(23881);

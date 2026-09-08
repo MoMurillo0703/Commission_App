@@ -10,7 +10,7 @@ Money: integer cents. Rates: integer basis points.
 
 Row-level security is enabled on application tables. Browser clients do not query these tables; the Next.js server uses the database URL.
 
-## Migrations (0001–0010)
+## Migrations (0001–0011)
 
 | File | Role |
 | --- | --- |
@@ -22,7 +22,9 @@ Row-level security is enabled on application tables. Browser clients do not quer
 | `0006_carrier_coverage_aliases.sql` | Carrier-scoped statement coverage label → LOB |
 | `0007_carrier_group_identities.sql` | Carrier + external Group Number → internal Group |
 | `0008_compensation_corrections.sql` | Immutable compensation-correction audit batches/items and one-correction-per-commission protection |
-| `0010_commission_source_identity.sql` | Optional `source_coverage_label` and `source_group_label` on `commission_records` so carrier raw Group/LOB text stays auditable after canonical mapping |
+| `0009_agency_compensation_owners.sql` | Empty Agency compensation-owner table and overlap triggers. No production owner row is inserted by the migration |
+| `0010_commission_source_identity.sql` | Optional `source_coverage_label` and `source_group_label` on `commission_records`. `source_coverage_label` was later overloaded for imported LOB text; do not reuse it for new writes |
+| `0011_source_labels_and_paid_month_changes.sql` | Independent `source_lob_label` and `source_period_label` on commissions, plus immutable `statement_paid_month_changes` audit |
 
 Do not rewrite an applied migration. Add a new numbered file. Runtime code must not apply these files. See [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
@@ -93,9 +95,20 @@ Changing terms closes the prior period and inserts a new row. Historical allocat
 
 ### `commission_records`
 
-Required: `statement_month` (paid month), group, carrier, LOB, gross cents, agent-compensation cents, agency-net cents. Optional: header `agent_id`, premium cents, applied bps, source reference, notes, premium month (coverage/source month), import statement, source-row key, `source_coverage_label`, `source_group_label`.
+Required: `statement_month` (authoritative paid month — when the agency received the commission payment), group, carrier, LOB, gross cents, agent-compensation cents, agency-net cents. Optional: header `agent_id`, premium cents, applied bps, source reference, notes, premium month (authoritative coverage month only when the source format proves YYYY-MM / named month / full date), import statement, source-row key, and raw source labels.
 
-`source_coverage_label` and `source_group_label` preserve the carrier’s raw statement identities after canonical Group/LOB mapping. They are audit/detail fields. They do not select paid month, allocations, or recipient pay.
+Raw source labels are independent:
+
+| Column | Meaning |
+| --- | --- |
+| `source_group_label` | Raw Group / source Group text from the statement |
+| `source_lob_label` | Raw LOB / product label or code |
+| `source_period_label` | Raw coverage / source-period label that is **not** proven as an authoritative coverage month |
+| `source_coverage_label` | Legacy 0010 column. Existing values are kept. New posts do not write imported LOB into this field |
+
+These labels are audit/detail fields. They do not select paid month, allocations, recipient pay, or missing-commission logic. Existing rows are not inferred/backfilled. Populate a label only when source evidence exists.
+
+`premium_month` is the authoritative coverage month when known. CaliforniaChoice `09-26`-style values stay on `source_period_label` and must not be promoted to `premium_month` automatically.
 
 Database enforces `agency_net_cents = gross_commission_cents - agent_compensation_cents`.
 
@@ -117,7 +130,13 @@ Audit-only history for an authorized fallback correction. One batch has a unique
 
 ### `import_statements`
 
-Paid month, optional carrier, original and display names, source type, status, unique `fingerprint`, preview and mapping JSON, optional storage path, extraction path, layout id/version, row counts.
+Paid month (authoritative agency-receipt month), optional carrier, original and display names, source type, status, unique `fingerprint`, preview and mapping JSON, optional storage path, extraction path, layout id/version, row counts.
+
+Posted statements are not deleted. An authorized **Change Paid Month** action may move `import_statements.paid_month` and every linked `commission_records.statement_month` together. It does not change source file, source row identity, coverage/source fields, gross, or payout snapshots. If any linked commission is settled/corrected and the new month selects different terms or no valid allocation, the change is blocked. The entire move is one database transaction.
+
+### `statement_paid_month_changes`
+
+Immutable audit of posted-statement Paid Month changes. Records statement ID, old/new paid month, affected commission IDs/count, gross affected, initiator, reason, preview token, request fingerprint, impact classification JSON, and whether payout correction was required/performed. Triggers reject UPDATE and DELETE. Confirmation is bound to the current statement state; a stale preview is rejected. The same confirmation key is idempotent.
 
 ### `carrier_statement_layouts`
 
@@ -165,6 +184,7 @@ Examples the schema currently enforces:
   - exactly one of `agent_id` / `account_manager_id`
   - valid YYYY-MM start/end months
   - owner periods must not overlap (`prevent_overlapping_agency_compensation_owners`)
+- **Paid-month change audit triggers** (0011): `statement_paid_month_changes` rejects UPDATE and DELETE
 
 ### Application-enforced integrity
 
@@ -182,7 +202,7 @@ These are **not** fully covered by conventional database foreign keys or trigger
 | Agent-to-account | Current primary agent field; not effective-dated assignment history |
 | Compensation | 100% allocations + payout snapshots |
 | Gross / Agency Net | Cents; see [`BUSINESS_RULES.md`](BUSINESS_RULES.md) |
-| Missing commission | Feature not implemented. Posted rows retain paid month, coverage/source month (`premium_month`), carrier, Group, LOB, and optional raw source labels so later analysis can ask which coverage months were received and in which paid month. |
+| Missing commission | Feature not implemented. Posted rows retain paid month, authoritative coverage month (`premium_month`), optional raw source-period label, carrier, Group, LOB, and independent raw Group/LOB labels so later analysis can ask which coverage months were received and in which paid month. |
 
 ## Alignment notes
 

@@ -114,6 +114,10 @@ describe("excel row posting", () => {
     expect(row.agencyNetCents).toBe(30000);
     expect(row.importStatementId).toBe(statement.id);
     expect(row.sourceRowKey).toBe("Commissions:2");
+    expect(row.sourceLobLabel).toBe("Dental");
+    expect(row.sourceGroupLabel).toBe("Acme Benefits");
+    expect(row.sourceCoverageLabel).toBeNull();
+    expect(row.sourcePeriodLabel).toBeNull();
   });
 
   it("blocks unmatched groups and does not create them", async () => {

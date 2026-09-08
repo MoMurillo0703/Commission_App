@@ -5,6 +5,7 @@ import { createAgent } from "./agents";
 import { createAllocation } from "./allocations";
 import { createCarrier } from "./carriers";
 import {
+  CANONICAL_HR_LABOR_GROUP_ID,
   normalizePostedAnthemCoverage,
   reassignCommissionsToCanonicalGroup,
   repairImportStatementLinkage,
@@ -49,7 +50,11 @@ describe("September commission reporting and identity reconciliation", () => {
     const medical = await createLineOfBusiness(db, { name: "Medical" });
     const dental = await createLineOfBusiness(db, { name: "Dental" });
     const vision = await createLineOfBusiness(db, { name: "Vision" });
+    const groupMedical = await createLineOfBusiness(db, { name: "Group Medical" });
+    await createLineOfBusiness(db, { name: "Group Dental" });
+    await createLineOfBusiness(db, { name: "Group Vision" });
     const rawMed = await createLineOfBusiness(db, { name: "MED" });
+    expect(CANONICAL_HR_LABOR_GROUP_ID).toBe(29);
     const canonicalHr = await createGroup(db, { name: "H & R LABOR CONTRACTING INC" });
     const anthemHr = await createGroup(db, { name: "H & R LABOR CONTRACTING INC" });
     const integrity = await createGroup(db, { name: "Integrity Bookkeeping" });
@@ -94,6 +99,7 @@ describe("September commission reporting and identity reconciliation", () => {
         grossCommissionCents: row.cents,
         premiumMonth: row.coverage,
         sourceCoverageLabel: "sourceCoverage" in row ? row.sourceCoverage : null,
+        sourceLobLabel: "sourceCoverage" in row ? row.sourceCoverage : null,
         sourceGroupLabel: row.group.name,
       }));
     }
@@ -157,7 +163,12 @@ describe("September commission reporting and identity reconciliation", () => {
     })).totals.compensationCents;
 
     await reassignCommissionsToCanonicalGroup(db, { sourceGroupId: anthemHr.id, canonicalGroupId: canonicalHr.id });
-    await normalizePostedAnthemCoverage(db, anthem.id);
+    const anthemMed = johnSource.find((row) => row.grossCommissionCents === 35196)!;
+    const anthemDen = johnSource.find((row) => row.grossCommissionCents === 4522)!;
+    await normalizePostedAnthemCoverage(db, {
+      carrierId: anthem.id,
+      commissionIds: [anthemMed.id, anthemDen.id],
+    });
     const anthemStatement = await createImportStatement(db, {
       originalFilename: "anthem-statement-3.csv",
       paidMonth: "2026-09",
@@ -165,7 +176,24 @@ describe("September commission reporting and identity reconciliation", () => {
       sourceType: "csv",
       status: "posted",
       fingerprint: fingerprintBuffer(new TextEncoder().encode("anthem-statement-3")),
-      preview: { sheets: [], unmatchedGroups: [], rowCount: 2, newGroupCount: 0 },
+      preview: {
+        sheets: [{
+          name: "Commissions",
+          headerRowNumber: 1,
+          rowCount: 2,
+          headers: ["Group", "Commission"],
+          groupNameHeader: "Group",
+          groupNumberHeader: null,
+          premiumMonthHeader: null,
+          rows: [
+            { rowNumber: 43, values: { Group: "RELYON", Commission: "33.33" }, premiumMonth: null, group: { status: "matched", groupId: relyon.id, groupName: "RELYON", sourceName: "RELYON", sourceNumber: null }, sourceIdentity: "Commissions:43" },
+            { rowNumber: 49, values: { Group: "ACKEE HOLDING", Commission: "0.00" }, premiumMonth: null, group: { status: "matched", groupId: ackee.id, groupName: "ACKEE HOLDING", sourceName: "ACKEE HOLDING", sourceNumber: null }, sourceIdentity: "Commissions:49" },
+          ],
+        }],
+        unmatchedGroups: [],
+        rowCount: 2,
+        newGroupCount: 0,
+      },
     });
     const relyonPosted = johnSource.find((row) => row.groupId === relyon.id)!;
     const ackeePosted = johnSource.find((row) => row.groupId === ackee.id)!;
@@ -210,8 +238,9 @@ describe("September commission reporting and identity reconciliation", () => {
     expect(after.filter((row) => row.groupId === canonicalHr.id).reduce((sum, row) => sum + row.grossCommissionCents, 0)).toBe(HR_GROSS);
     expect(after.filter((row) => row.groupId === anthemHr.id)).toHaveLength(0);
     const anthemMedical = after.find((row) => row.grossCommissionCents === 35196);
-    expect(anthemMedical?.lineOfBusinessId).toBe(medical.id);
+    expect(anthemMedical?.lineOfBusinessId).toBe(groupMedical.id);
     expect(anthemMedical?.sourceCoverageLabel).toBe("MED");
+    expect(anthemMedical?.sourceLobLabel).toBe("MED");
     expect(anthemMedical?.premiumMonth).toBe("2026-07");
     expect(anthemMedical?.carrierId).toBe(anthem.id);
     expect((await getCommission(db, relyonPosted.id))?.importStatementId).toBe(anthemStatement.id);
@@ -236,7 +265,7 @@ describe("September commission reporting and identity reconciliation", () => {
     expect(html).not.toMatch(/premium_month|statement_month/);
 
     const receipts = await listPostedGroupCarrierCoverageMonths(db);
-    expect(coverageReceiptsFor(receipts, canonicalHr.id, anthem.id, medical.id)).toEqual([
+    expect(coverageReceiptsFor(receipts, canonicalHr.id, anthem.id, groupMedical.id)).toEqual([
       { coverageMonth: "2026-07", paidMonth: "2026-09", grossCommissionCents: 35196 },
     ]);
     const readiness = missingCommissionDataReadiness(receipts);

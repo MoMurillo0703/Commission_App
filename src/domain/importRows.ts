@@ -11,7 +11,7 @@ import { mappingValue, type ColumnMapping } from "./columnMapping";
 import { calculateAgentCompensationCents } from "./compensation";
 import { matchCarrierGroupIdentity, type CarrierGroupIdentity } from "./carrierGroupIdentity";
 import { applyGroupResolutions, matchImportedGroup, type GroupCandidate, type GroupImportResolution } from "./groupMatch";
-import { parseFlexibleMonth } from "./dates";
+import { classifyImportedPeriod } from "./sourcePeriod";
 import { parseDollarsToCents } from "./money";
 import { applyCarrierCoverageAlias, type CarrierCoverageAlias } from "./carrierCoverage";
 import { applyDeterministicCoverageMapping } from "./deterministicCoverage";
@@ -49,6 +49,7 @@ export type ValidatedImportRow = {
   importedGroupNumber: string | null;
   importedLineName: string | null;
   importedAgentName: string | null;
+  importedSourcePeriod: string | null;
   exceptions: string[];
 };
 
@@ -105,11 +106,20 @@ function parseOptionalMoney(value: string | null, label: string, exceptions: str
 }
 
 function normalizeImportedMonth(value: string | null, exceptions: string[]) {
-  if (!value) return null;
-  const parsed = parseFlexibleMonth(value);
-  if (parsed) return parsed;
-  exceptions.push("Premium / coverage month is not a valid month or date.");
-  return null;
+  if (!value) return { coverageMonth: null, sourcePeriodLabel: null };
+  const classified = classifyImportedPeriod(value);
+  if (classified.invalid) {
+    exceptions.push("Premium / coverage month is not a valid month or date.");
+  }
+  return { coverageMonth: classified.coverageMonth, sourcePeriodLabel: classified.sourcePeriodLabel };
+}
+
+function unmappedSourcePeriod(values: Record<string, string>, mappedPeriod: string | null) {
+  if (mappedPeriod) return null;
+  const raw = values["Paid Month"] || values["paid month"] || null;
+  if (!raw) return null;
+  const classified = classifyImportedPeriod(raw);
+  return classified.invalid ? null : classified.sourcePeriodLabel;
 }
 
 export function validateMappedRows(
@@ -159,7 +169,10 @@ export function validateMappedRows(
       const matchedGroup = references.groups.find((candidate) => candidate.id === group.groupId);
       const agent = resolveNamedImport(references.agents, importedAgentName, references.agentResolutions);
       const grossText = mappingValue(row.values, mapping.grossCommission);
-      const premiumMonth = normalizeImportedMonth(mappingValue(row.values, mapping.premiumMonth) ?? row.premiumMonth, exceptions);
+      const rawPeriod = mappingValue(row.values, mapping.premiumMonth) ?? row.premiumMonth;
+      const period = normalizeImportedMonth(rawPeriod, exceptions);
+      const premiumMonth = period.coverageMonth;
+      const importedSourcePeriod = period.sourcePeriodLabel ?? unmappedSourcePeriod(row.values, rawPeriod);
       const notes = mappingValue(row.values, mapping.notes);
 
       if (!mapping.groupName && !mapping.groupNumber) exceptions.push("Map a group name or group number column.");
@@ -290,6 +303,7 @@ export function validateMappedRows(
         importedGroupNumber: group.sourceNumber,
         importedLineName,
         importedAgentName,
+        importedSourcePeriod,
         exceptions: postedKeys.has(key) ? ["Already posted from this statement."] : exceptions,
       };
     }),

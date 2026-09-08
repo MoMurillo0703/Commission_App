@@ -39,6 +39,28 @@ export type CommissionWrite = {
   sourceRowKey?: string | null;
   sourceCoverageLabel?: string | null;
   sourceGroupLabel?: string | null;
+  sourceLobLabel?: string | null;
+  sourcePeriodLabel?: string | null;
+};
+
+export type CommissionPatch = {
+  statementMonth?: string;
+  groupId?: number;
+  carrierId?: number;
+  lineOfBusinessId?: number;
+  agentId?: number | null;
+  premiumCents?: number | null;
+  grossCommissionCents?: number;
+  compensationBps?: number | null;
+  sourceReference?: string | null;
+  notes?: string | null;
+  premiumMonth?: string | null;
+  importStatementId?: number | null;
+  sourceRowKey?: string | null;
+  sourceCoverageLabel?: string | null;
+  sourceGroupLabel?: string | null;
+  sourceLobLabel?: string | null;
+  sourcePeriodLabel?: string | null;
 };
 
 export type CommissionView = {
@@ -64,6 +86,8 @@ export type CommissionView = {
   sourceRowKey: string | null;
   sourceCoverageLabel: string | null;
   sourceGroupLabel: string | null;
+  sourceLobLabel: string | null;
+  sourcePeriodLabel: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -92,6 +116,8 @@ function commissionSelect() {
     sourceRowKey: commissionRecords.sourceRowKey,
     sourceCoverageLabel: commissionRecords.sourceCoverageLabel,
     sourceGroupLabel: commissionRecords.sourceGroupLabel,
+    sourceLobLabel: commissionRecords.sourceLobLabel,
+    sourcePeriodLabel: commissionRecords.sourcePeriodLabel,
     createdAt: commissionRecords.createdAt,
     updatedAt: commissionRecords.updatedAt,
   };
@@ -246,22 +272,48 @@ async function resolveNewCompensation(db: AppDatabase, input: CommissionWrite, a
   return settleCommissionCompensation(db, input, agentId);
 }
 
+function mergeCommissionPatch(existing: CommissionView, patch: CommissionPatch): CommissionWrite {
+  return {
+    statementMonth: patch.statementMonth ?? existing.statementMonth,
+    groupId: patch.groupId ?? existing.groupId,
+    carrierId: patch.carrierId ?? existing.carrierId,
+    lineOfBusinessId: patch.lineOfBusinessId ?? existing.lineOfBusinessId,
+    agentId: patch.agentId !== undefined ? patch.agentId : existing.agentId,
+    premiumCents: patch.premiumCents !== undefined ? patch.premiumCents : existing.premiumCents,
+    grossCommissionCents: patch.grossCommissionCents ?? existing.grossCommissionCents,
+    compensationBps: Object.prototype.hasOwnProperty.call(patch, "compensationBps")
+      ? patch.compensationBps
+      : undefined,
+    sourceReference: patch.sourceReference !== undefined ? patch.sourceReference : existing.sourceReference,
+    notes: patch.notes !== undefined ? patch.notes : existing.notes,
+    premiumMonth: patch.premiumMonth !== undefined ? patch.premiumMonth : existing.premiumMonth,
+    importStatementId: patch.importStatementId !== undefined ? patch.importStatementId : existing.importStatementId,
+    sourceRowKey: patch.sourceRowKey !== undefined ? patch.sourceRowKey : existing.sourceRowKey,
+    sourceCoverageLabel: patch.sourceCoverageLabel !== undefined ? patch.sourceCoverageLabel : existing.sourceCoverageLabel,
+    sourceGroupLabel: patch.sourceGroupLabel !== undefined ? patch.sourceGroupLabel : existing.sourceGroupLabel,
+    sourceLobLabel: patch.sourceLobLabel !== undefined ? patch.sourceLobLabel : existing.sourceLobLabel,
+    sourcePeriodLabel: patch.sourcePeriodLabel !== undefined ? patch.sourcePeriodLabel : existing.sourcePeriodLabel,
+  };
+}
+
 async function resolveUpdatedCompensation(
   db: AppDatabase,
-  input: CommissionWrite,
+  patch: CommissionPatch,
+  merged: CommissionWrite,
   existing: CommissionView,
 ): Promise<CompensationSnapshot> {
-  const agentUnchanged = (input.agentId ?? null) === existing.agentId;
-  if (agentUnchanged && input.compensationBps == null) {
+  const agentId = merged.agentId ?? null;
+  const agentUnchanged = agentId === existing.agentId;
+  if (agentUnchanged && !Object.prototype.hasOwnProperty.call(patch, "compensationBps")) {
     return {
       compensationBps: existing.compensationBps,
       agentCompensationCents: existing.agentCompensationCents,
-      agencyNetCents: calculateAgencyNetCents(input.grossCommissionCents, existing.agentCompensationCents),
+      agencyNetCents: calculateAgencyNetCents(merged.grossCommissionCents, existing.agentCompensationCents),
       settled: null,
       allocationId: null,
     };
   }
-  return resolveNewCompensation(db, input, input.agentId ?? null);
+  return resolveNewCompensation(db, merged, agentId);
 }
 
 async function assertReferences(db: AppDatabase, input: CommissionWrite) {
@@ -276,19 +328,21 @@ function valuesFrom(input: CommissionWrite, settled: CompensationSnapshot, times
     groupId: input.groupId,
     carrierId: input.carrierId,
     lineOfBusinessId: input.lineOfBusinessId,
-    agentId: input.agentId ?? null,
-    premiumCents: input.premiumCents ?? null,
+    agentId: input.agentId !== undefined ? input.agentId ?? null : existing?.agentId ?? null,
+    premiumCents: input.premiumCents !== undefined ? input.premiumCents ?? null : existing?.premiumCents ?? null,
     grossCommissionCents: input.grossCommissionCents,
-    compensationBps: input.agentId ? settled.compensationBps : null,
+    compensationBps: (input.agentId !== undefined ? input.agentId : existing?.agentId) ? settled.compensationBps : null,
     agentCompensationCents: settled.agentCompensationCents,
     agencyNetCents: settled.agencyNetCents,
-    sourceReference: emptyToNull(input.sourceReference),
-    notes: emptyToNull(input.notes),
-    premiumMonth: emptyToNull(input.premiumMonth),
+    sourceReference: input.sourceReference !== undefined ? emptyToNull(input.sourceReference) : existing?.sourceReference ?? null,
+    notes: input.notes !== undefined ? emptyToNull(input.notes) : existing?.notes ?? null,
+    premiumMonth: input.premiumMonth !== undefined ? emptyToNull(input.premiumMonth) : existing?.premiumMonth ?? null,
     importStatementId: input.importStatementId !== undefined ? input.importStatementId ?? null : existing?.importStatementId ?? null,
     sourceRowKey: input.sourceRowKey !== undefined ? emptyToNull(input.sourceRowKey) : existing?.sourceRowKey ?? null,
     sourceCoverageLabel: input.sourceCoverageLabel !== undefined ? emptyToNull(input.sourceCoverageLabel) : existing?.sourceCoverageLabel ?? null,
     sourceGroupLabel: input.sourceGroupLabel !== undefined ? emptyToNull(input.sourceGroupLabel) : existing?.sourceGroupLabel ?? null,
+    sourceLobLabel: input.sourceLobLabel !== undefined ? emptyToNull(input.sourceLobLabel) : existing?.sourceLobLabel ?? null,
+    sourcePeriodLabel: input.sourcePeriodLabel !== undefined ? emptyToNull(input.sourcePeriodLabel) : existing?.sourcePeriodLabel ?? null,
     updatedAt: timestamp,
   };
 }
@@ -328,16 +382,27 @@ export async function createCommission(db: AppDatabase | undefined, input: Commi
   }
 }
 
-export async function updateCommission(db: AppDatabase | undefined, id: number, input: CommissionWrite): Promise<CommissionView> {
+export async function updateCommission(db: AppDatabase | undefined, id: number, input: CommissionPatch): Promise<CommissionView> {
   const database = await resolveDb(db);
   const existing = await getCommission(database, id);
   if (!existing) throw new NotFoundError("Commission record not found.");
-  await assertReferences(database, input);
-  const settled = await resolveUpdatedCompensation(database, input, existing);
-  await database.update(commissionRecords)
-    .set(valuesFrom(input, settled, new Date().toISOString(), existing))
-    .where(eq(commissionRecords.id, id));
-  if (settled.settled) await replaceCommissionPayouts(database, id, settled.settled.payouts, settled.allocationId);
+  const merged = mergeCommissionPatch(existing, input);
+  await assertReferences(database, merged);
+  try {
+    await database.transaction(async (tx) => {
+      const transaction = tx as unknown as AppDatabase;
+      const settled = await resolveUpdatedCompensation(transaction, input, merged, existing);
+      await transaction.update(commissionRecords)
+        .set(valuesFrom(merged, settled, new Date().toISOString(), existing))
+        .where(eq(commissionRecords.id, id));
+      if (settled.settled) {
+        await replaceCommissionPayouts(transaction, id, settled.settled.payouts, settled.allocationId);
+      }
+    });
+  } catch (error) {
+    if (isForeignKeyError(error)) throw new ValidationError("Commission records must reference existing groups, carriers, lines of business, and agents.");
+    throw error;
+  }
   return (await getCommission(database, id))!;
 }
 

@@ -154,8 +154,9 @@ export async function postImportStatement(db: AppDatabase | undefined, statement
         premiumMonth: row.premiumMonth,
         importStatementId: statementId,
         sourceRowKey: row.sourceRowKey,
-        sourceCoverageLabel: row.importedLineName,
         sourceGroupLabel: row.importedGroupName,
+        sourceLobLabel: row.importedLineName,
+        sourcePeriodLabel: row.importedSourcePeriod,
       });
       posted.push(created.id);
     }

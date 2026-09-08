@@ -36,6 +36,10 @@ const namedMonthIndex: Record<string, string> = {
   dec: "12",
 };
 
+export function isCaliforniaChoicePeriodLabel(value: string | null | undefined) {
+  return /^(0?[1-9]|1[0-2])[/-](\d{2}|\d{4})$/.test(value?.trim() ?? "");
+}
+
 export function parseCaliforniaChoiceMonth(value: string | null | undefined) {
   const fromFlexible = parseFlexibleMonth(value);
   if (fromFlexible) return fromFlexible;

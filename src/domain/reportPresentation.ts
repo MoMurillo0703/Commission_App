@@ -1,4 +1,5 @@
 import { formatPaidMonthLong, formatStatementMonth } from "./dates";
+import { coverageOrSourcePeriod } from "./sourcePeriod";
 import { formatCents } from "./money";
 import { formatAllocationPercent } from "./recipientStatement";
 import {
@@ -173,11 +174,22 @@ export function individualStatementSummary(
   };
 }
 
+export function formatCoverageOrSourcePeriod(row: {
+  premiumMonth?: string | null;
+  coverageMonth?: string | null;
+  sourcePeriodLabel?: string | null;
+}) {
+  const period = coverageOrSourcePeriod(row);
+  if (period.kind === "coverage" && period.value) return formatStatementMonth(period.value);
+  if (period.kind === "source_period" && period.value) return period.value;
+  return "—";
+}
+
 export function individualTransactionCells(row: IndividualReportRow, informalName: string) {
   return {
     carrier: row.carrierName,
     lob: row.lineOfBusinessName,
-    coverageMonth: row.premiumMonth ? formatStatementMonth(row.premiumMonth) : "—",
+    coverageMonth: formatCoverageOrSourcePeriod(row),
     agencyCommission: formatCents(row.grossCommissionCents),
     share: recipientShareLabel(row),
     recipientCommission: formatCents(row.compensationCents),

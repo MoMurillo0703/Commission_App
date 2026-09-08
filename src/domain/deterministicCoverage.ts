@@ -10,9 +10,9 @@ export const DETERMINISTIC_ANTHEM_COVERAGE_CODES = {
 } as const;
 
 export const CANONICAL_COVERAGE_NAMES = {
-  medical: ["Medical", "Group Medical"],
-  dental: ["Dental", "Group Dental"],
-  vision: ["Vision", "Group Vision"],
+  medical: ["Group Medical", "Medical"],
+  dental: ["Group Dental", "Dental"],
+  vision: ["Group Vision", "Vision"],
 } as const;
 
 export type CanonicalCoverageFamily = keyof typeof CANONICAL_COVERAGE_NAMES;

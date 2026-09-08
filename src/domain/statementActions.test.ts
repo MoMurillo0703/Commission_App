@@ -35,7 +35,9 @@ describe("statement list actions and intake files", () => {
     expect(unposted.reviewLabel).not.toBe("Inspect");
     const posted = statementListActions({ status: "posted", sourceType: "csv", postedRowCount: 2, rowCount: 2, storedPath: "statements/2-a.csv" });
     expect(posted.showDelete).toBe(false);
+    expect(posted.canChangePaidMonth).toBe(true);
     expect(posted.deleteBlockedReason).toMatch(/audit trail/);
+    expect(unposted.canChangePaidMonth).toBe(false);
   });
 
   it("exposes Review Statement for needs_layout and leftover extracted needs_profile rows", () => {

@@ -21,6 +21,7 @@ export type ReportFilters = {
 export type AgencyReportRow = {
   paidMonth: string;
   coverageMonth?: string | null;
+  sourcePeriodLabel?: string | null;
   groupId: number;
   groupName: string;
   carrierId: number;
@@ -56,6 +57,7 @@ export type IndividualReportRow = {
   allocationId?: number | null;
   premiumCents?: number | null;
   premiumMonth?: string | null;
+  sourcePeriodLabel?: string | null;
   importStatementId?: number | null;
 };
 

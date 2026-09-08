@@ -10,6 +10,7 @@ import type { StatementPreview } from "@/domain/workbook";
 import { acceptedStatementFiles, pdfNeedsLayoutConfirmation, STATEMENT_INTAKE_FORMATS, STATEMENT_INTAKE_LEAD, statementListActions } from "@/domain/statementActions";
 import { pdfShouldUseExtractedConfirmation } from "@/domain/pdfIntakeSurface";
 import { canReviewRows, isUnparsedStatement, statementCanBeDeleted, statementCanOpenReview, statementGuidance, statementHasExtractedText, statementStatusLabel } from "@/domain/statementWorkflow";
+import { ChangePaidMonthDialog } from "./ChangePaidMonthDialog";
 import { PdfLayoutReview } from "./PdfLayoutReview";
 import { StatementPosting } from "./StatementPosting";
 
@@ -55,6 +56,7 @@ export function StatementIntake({
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [manualReadHelp, setManualReadHelp] = useState(false);
+  const [paidMonthChange, setPaidMonthChange] = useState<{ id: number; paidMonth: string; key: string } | null>(null);
 
   useEffect(() => {
     onPaidMonthChange?.(paidMonth);
@@ -218,6 +220,7 @@ export function StatementIntake({
   }
 
   return (
+    <>
     <section className="panel upload-panel">
       <div>
         <p className="eyebrow">Statement intake</p>
@@ -479,6 +482,20 @@ export function StatementIntake({
                         Rename
                       </button>
                     )}
+                    {actions.canChangePaidMonth && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={busy}
+                        onClick={() => setPaidMonthChange({
+                          id: statement.id,
+                          paidMonth: statement.paidMonth,
+                          key: crypto.randomUUID(),
+                        })}
+                      >
+                        Change Paid Month
+                      </button>
+                    )}
                     {actions.showDelete ? (
                       <button type="button" className="secondary" disabled={busy} onClick={() => removeStatement(statement)}>
                         Delete
@@ -497,5 +514,22 @@ export function StatementIntake({
         </table>
       )}
     </section>
+    {paidMonthChange && (
+      <ChangePaidMonthDialog
+        statementId={paidMonthChange.id}
+        currentPaidMonth={paidMonthChange.paidMonth}
+        confirmationKey={paidMonthChange.key}
+        onClose={() => setPaidMonthChange(null)}
+        onChanged={async (nextMonth) => {
+          setPaidMonthChange(null);
+          await loadStatements(paidMonth);
+          if (nextMonth !== paidMonth) setResult({
+            status: "moved",
+            message: `Paid month changed. This statement now belongs to ${formatStatementMonth(nextMonth)}.`,
+          });
+        }}
+      />
+    )}
+    </>
   );
 }

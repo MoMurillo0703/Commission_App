@@ -66,6 +66,7 @@ describe("CaliforniaChoice production LOB import regression", () => {
     expect(unmatchedNames).not.toEqual(expect.arrayContaining(["$", "05-26", "08-26", "09-26"]));
     expect(unmatchedNames).toEqual(["Acupuncture"]);
     expect(review.rows.every((row) => row.premiumMonth == null)).toBe(true);
+    expect(review.rows.some((row) => row.importedSourcePeriod != null)).toBe(true);
     expect(review.rows.every((row) => (row.notes ?? "").includes("Carrier paid month:"))).toBe(true);
     expect(review.readiness.blockers.filter((item) => item.kind === "mapping")).toEqual([]);
     expect(review.unmatchedGroups).toHaveLength(0);
@@ -88,6 +89,8 @@ describe("CaliforniaChoice production LOB import regression", () => {
     expect(posted.postedCount).toBe(confirmed.rows.filter((row) => row.status === "ready").length);
     expect((await listCommissions(db)).every((row) => row.statementMonth === "2026-09")).toBe(true);
     expect((await listCommissions(db)).every((row) => row.premiumMonth == null)).toBe(true);
+    expect((await listCommissions(db)).some((row) => row.sourcePeriodLabel != null)).toBe(true);
+    expect((await listCommissions(db)).every((row) => row.sourceLobLabel != null)).toBe(true);
     expect((await listCommissions(db)).some((row) => (row.notes ?? "").includes("ADJ CD: RV"))).toBe(true);
   });
 

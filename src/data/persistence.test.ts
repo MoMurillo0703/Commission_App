@@ -201,6 +201,58 @@ describe("relationships and persistence", () => {
     ).rejects.toThrow(NotFoundError);
   });
 
+  it("preserves omitted commission fields instead of clearing them", async () => {
+    const { db, group, carrier, lineOfBusiness, agent } = await seed();
+    const original = await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: lineOfBusiness.id,
+      agentId: agent.id,
+      premiumCents: 1000000,
+      grossCommissionCents: 50000,
+      compensationBps: 4000,
+      sourceReference: "keep-me",
+      notes: "original notes",
+      premiumMonth: "2026-07",
+      sourceGroupLabel: "Acme",
+      sourceLobLabel: "DENPPO",
+      sourcePeriodLabel: "09-26",
+    });
+    const updated = await updateCommission(db, original.id, { notes: "reviewed" });
+    expect(updated.notes).toBe("reviewed");
+    expect(updated.agentId).toBe(agent.id);
+    expect(updated.premiumCents).toBe(1000000);
+    expect(updated.premiumMonth).toBe("2026-07");
+    expect(updated.sourceReference).toBe("keep-me");
+    expect(updated.sourceGroupLabel).toBe("Acme");
+    expect(updated.sourceLobLabel).toBe("DENPPO");
+    expect(updated.sourcePeriodLabel).toBe("09-26");
+    expect(updated.statementMonth).toBe("2026-08");
+    expect(updated.grossCommissionCents).toBe(50000);
+    expect(updated.compensationBps).toBe(4000);
+    expect(updated.agentCompensationCents).toBe(20000);
+  });
+
+  it("clears a nullable field only when the patch sends an explicit null", async () => {
+    const { db, group, carrier, lineOfBusiness, agent } = await seed();
+    const original = await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: lineOfBusiness.id,
+      agentId: agent.id,
+      premiumCents: 1000000,
+      grossCommissionCents: 50000,
+      notes: "keep until cleared",
+    });
+    const updated = await updateCommission(db, original.id, { notes: null, premiumCents: null });
+    expect(updated.notes).toBeNull();
+    expect(updated.premiumCents).toBeNull();
+    expect(updated.agentId).toBe(agent.id);
+    expect(updated.grossCommissionCents).toBe(50000);
+  });
+
   it("enforces foreign keys at the database when an ID is fabricated", async () => {
     const db = await createTestDb();
     await expect(

@@ -12,6 +12,7 @@ const lines = [
   { id: 3, name: "Dental" },
   { id: 4, name: "Vision" },
   { id: 5, name: "DENPPO" },
+  { id: 6, name: "Group Medical" },
 ];
 
 describe("deterministic Anthem coverage mapping", () => {
@@ -31,13 +32,13 @@ describe("deterministic Anthem coverage mapping", () => {
     expect(deterministicCoverageFamily("ChoiceBuilder", "MED")).toBeNull();
   });
 
-  it("prefers canonical Medical over a raw MED name match", () => {
+  it("prefers canonical Group Medical over a raw MED name match", () => {
     const raw = { status: "matched" as const, id: 1, name: "MED", source: "MED" };
     expect(applyDeterministicCoverageMapping(raw, {
       carrierName: "Anthem",
       sourceValue: "MED",
       lines,
-    })).toMatchObject({ status: "matched", id: 2, name: "Medical", source: "MED" });
+    })).toMatchObject({ status: "matched", id: 6, name: "Group Medical", source: "MED" });
   });
 
   it("does not guess unknown coverage labels", () => {

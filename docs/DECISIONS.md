@@ -7,6 +7,10 @@ Record only intentional decisions and why. Do not restate the full rulebook.
 | Date | Decision | Why | See |
 | --- | --- | --- | --- |
 | 2026 | Paid month drives compensation | Agency cash received is the organizing event; coverage month is extra when known | [`BUSINESS_RULES.md`](BUSINESS_RULES.md) |
+| 2026-09 | Posted statement Paid Month may be corrected without delete/re-upload | Mo needs to move a posted statement to the month the agency actually received it; payouts must not be silently recalculated | [`BUSINESS_RULES.md`](BUSINESS_RULES.md), [`DATA_MODEL.md`](DATA_MODEL.md) (`0011`) |
+| 2026-09 | H&R canonical Group is 29 | Group 8 is re-pointed into 29 without deleting Group 8 or copying its current allocations | [`BUSINESS_RULES.md`](BUSINESS_RULES.md) |
+| 2026-09 | Anthem group-business LOB codes are bounded | MED/MEDHMO → Group Medical; DENPPO → Group Dental; VIS → Group Vision. Carrier-scoped, deterministic, raw-source preserving | [`DATA_MODEL.md`](DATA_MODEL.md) |
+| 2026-09 | Raw Group, LOB, and source-period labels are independent | Do not overload `source_coverage_label` for imported LOB | [`DATA_MODEL.md`](DATA_MODEL.md) (`0011`) |
 | 2026 | Exact integer cents and basis points | Avoid float drift on money and splits | [`BUSINESS_RULES.md`](BUSINESS_RULES.md) |
 | 2026 | Payout snapshots at post | Later allocation or team edits must not rewrite history | [`BUSINESS_RULES.md`](BUSINESS_RULES.md), [`DATA_MODEL.md`](DATA_MODEL.md) |
 | 2026 | Agency is an explicit recipient when an allocation exists | Agency Net must be auditable, not a leftover | [`BUSINESS_RULES.md`](BUSINESS_RULES.md) |

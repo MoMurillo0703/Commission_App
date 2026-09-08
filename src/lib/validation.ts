@@ -115,9 +115,29 @@ export const commissionInputSchema = z.object({
   compensationPercent: z.string().optional().nullable(),
   sourceReference: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
+  premiumMonth: z.string().optional().nullable(),
+  importStatementId: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
+  sourceRowKey: z.string().optional().nullable(),
+  sourceCoverageLabel: z.string().optional().nullable(),
+  sourceGroupLabel: z.string().optional().nullable(),
+  sourceLobLabel: z.string().optional().nullable(),
+  sourcePeriodLabel: z.string().optional().nullable(),
 });
 
+export const commissionPatchSchema = commissionInputSchema.partial();
+
 export const paidMonthSchema = z.string().regex(paidMonthPattern, "Enter a paid month as YYYY-MM.");
+
+export const statementPaidMonthPreviewSchema = z.object({
+  newPaidMonth: paidMonthSchema,
+});
+
+export const statementPaidMonthConfirmSchema = z.object({
+  newPaidMonth: paidMonthSchema,
+  reason: z.string().trim().min(1, "A reason is required to change paid month."),
+  confirmationKey: z.string().trim().min(1, "A confirmation key is required."),
+  previewToken: z.string().trim().min(1, "Confirm the exact preview. Preview again if it is missing."),
+});
 
 export const agreementInputSchema = z.object({
   groupId: z.coerce.number().int().positive("Group is required."),

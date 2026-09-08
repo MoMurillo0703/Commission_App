@@ -19,6 +19,7 @@ import {
 import {
   agencyExecutiveSummary,
   commissionStatementPeriod,
+  formatCoverageOrSourcePeriod,
   individualStatementSummary,
   individualTransactionCells,
   type IndividualGroupSection,
@@ -105,10 +106,10 @@ export function agencyReportDocument(
     formatCents(row.cents),
     row.percent,
   ]);
-  const detailHeaders = ["Paid Month", "Coverage Month", "Group", "Carrier", "LOB", "Premium", "Gross Commission", "Compensation Distributed", "Agency Net"];
+  const detailHeaders = ["Paid Month", "Coverage Month / Source Period", "Group", "Carrier", "LOB", "Premium", "Gross Commission", "Compensation Distributed", "Agency Net"];
   const detailRows = rows.map((row) => [
     formatStatementMonth(row.paidMonth),
-    row.coverageMonth ? formatStatementMonth(row.coverageMonth) : "—",
+    formatCoverageOrSourcePeriod(row),
     row.groupName,
     row.carrierName,
     row.lineOfBusinessName,
@@ -168,7 +169,7 @@ function individualGroupSection(section: IndividualGroupSection, informalName: s
   return {
     title: section.groupName,
     subtitle: section.subtitle,
-    headers: ["Carrier", "LOB", "Coverage Month", "Agency Comm", shareHeader, recipientHeader],
+    headers: ["Carrier", "LOB", "Coverage Month / Source Period", "Agency Comm", shareHeader, recipientHeader],
     rows: section.rows.map((row) => {
       const cells = individualTransactionCells(row, informalName);
       return [cells.carrier, cells.lob, cells.coverageMonth, cells.agencyCommission, cells.share, cells.recipientCommission];
@@ -210,7 +211,7 @@ export function individualReportDocument(
     totals: statement.cards,
     footerTotals: statement.grandTotals,
     groupSections: statement.groups.map((group) => individualGroupSection(group, informal)),
-    headers: ["Group", "Carrier", "LOB", "Coverage Month", "Agency Comm", `${informal}'s %`, `${informal}'s Comm`],
+    headers: ["Group", "Carrier", "LOB", "Coverage Month / Source Period", "Agency Comm", `${informal}'s %`, `${informal}'s Comm`],
     rows: statement.groups.flatMap((group) => group.rows.map((row) => {
       const cells = individualTransactionCells(row, informal);
       return [group.groupName, cells.carrier, cells.lob, cells.coverageMonth, cells.agencyCommission, cells.share, cells.recipientCommission];

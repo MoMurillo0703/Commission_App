@@ -69,6 +69,7 @@ async function postedCommissions(db: AppDatabase, filters: ReportFilters) {
       agentName: agents.name,
       premiumCents: commissionRecords.premiumCents,
       premiumMonth: commissionRecords.premiumMonth,
+      sourcePeriodLabel: commissionRecords.sourcePeriodLabel,
       importStatementId: commissionRecords.importStatementId,
       grossCommissionCents: commissionRecords.grossCommissionCents,
       compensationDistributedCents: commissionRecords.agentCompensationCents,
@@ -117,6 +118,7 @@ export async function buildAgencyReport(db: AppDatabase | undefined, input: Repo
   const rows: AgencyReportRow[] = (await postedCommissions(database, filters)).map((row) => ({
     paidMonth: row.paidMonth,
     coverageMonth: row.premiumMonth,
+    sourcePeriodLabel: row.sourcePeriodLabel,
     groupId: row.groupId,
     groupName: row.groupName,
     carrierId: row.carrierId,
@@ -187,6 +189,7 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
       allocationId: payout.allocationId,
       premiumCents: commission.premiumCents,
       premiumMonth: commission.premiumMonth,
+      sourcePeriodLabel: commission.sourcePeriodLabel,
       importStatementId: commission.importStatementId,
     });
   }

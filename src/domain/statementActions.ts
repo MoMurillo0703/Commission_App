@@ -61,6 +61,7 @@ export function statementListActions(statement: StatementActionSource) {
     showDownload: Boolean(statement.storedPath),
     showDelete: statementCanBeDeleted(statement),
     deleteBlockedReason: statementCanBeDeleted(statement) ? null : statementDeleteBlockedReason(),
+    canChangePaidMonth: statement.status === "posted" || statement.status === "partially_posted",
     isUnparsed: isUnparsedStatement(statement, hasRows),
   };
 }

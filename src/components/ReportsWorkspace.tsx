@@ -9,6 +9,7 @@ import type { AgencyReportRow, IndividualReportRow, ReportKind, TeamReportRow } 
 import {
   SHARE_PERCENT_UNAVAILABLE,
   groupIndividualReportRows,
+  formatCoverageOrSourcePeriod,
   individualTransactionCells,
   informalRecipientName,
   topClientRowKey,
@@ -365,7 +366,7 @@ function AgencyReportView({
         <thead>
             <tr>
               <th>Paid Month</th>
-              <th>Coverage Month</th>
+              <th>Coverage Month / Source Period</th>
               <th>Group</th>
               <th>Carrier</th>
               <th>LOB</th>
@@ -379,7 +380,7 @@ function AgencyReportView({
           {rows.map((row, index) => (
             <tr key={`${row.groupId}-${row.carrierId}-${row.lineOfBusinessId}-${row.paidMonth}-${index}`}>
               <td>{formatStatementMonth(row.paidMonth)}</td>
-              <td>{row.coverageMonth ? formatStatementMonth(row.coverageMonth) : "—"}</td>
+              <td>{formatCoverageOrSourcePeriod(row)}</td>
               <td>{row.groupName}</td>
               <td>{row.carrierName}</td>
               <td>{row.lineOfBusinessName}</td>
@@ -421,7 +422,7 @@ function IndividualStatement({
                 <tr>
                   <th>Carrier</th>
                   <th>LOB</th>
-                  <th>Coverage Month</th>
+                  <th>Coverage Month / Source Period</th>
                   <th className="num">Agency Comm</th>
                   <th className="num">{shareHeader}</th>
                   <th className="num">{recipientHeader}</th>
