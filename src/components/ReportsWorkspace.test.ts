@@ -52,6 +52,70 @@ describe("rendered Reports workspace", () => {
     expect(html).not.toContain("Recipient split %");
   });
 
+  it("keys Top Client rows by stable Group ID, including duplicate display names", () => {
+    const html = renderToStaticMarkup(createElement(ReportsWorkspace, {
+      groups: [],
+      carriers: [],
+      linesOfBusiness: [],
+      agents: [],
+      accountManagers: [],
+      teams: [],
+      initialReport: {
+        filters: { kind: "agency" },
+        names: {},
+        rows: [
+          {
+            paidMonth: "2026-09",
+            groupId: 8,
+            groupName: "Acme",
+            carrierId: 1,
+            carrierName: "Choice Builder",
+            lineOfBusinessId: 1,
+            lineOfBusinessName: "Medical",
+            premiumCents: 0,
+            grossCommissionCents: 5000,
+            compensationDistributedCents: 0,
+            agencyNetCents: 5000,
+          },
+          {
+            paidMonth: "2026-09",
+            groupId: 2,
+            groupName: "Acme",
+            carrierId: 1,
+            carrierName: "Choice Builder",
+            lineOfBusinessId: 1,
+            lineOfBusinessName: "Medical",
+            premiumCents: 0,
+            grossCommissionCents: 5000,
+            compensationDistributedCents: 0,
+            agencyNetCents: 5000,
+          },
+        ],
+        totals: { grossCommissionCents: 10000 },
+        document: {
+          title: "Agency Commission Report",
+          period: "2026-09",
+          totals: [{ label: "Total Commission Received", value: "$100.00" }],
+        },
+        executive: {
+          carrierBreakdown: { rows: [{ id: 1, name: "Choice Builder", cents: 10000, percent: "100.0%" }], totalCents: 10000 },
+          topClients: {
+            rows: [
+              { id: 2, name: "Acme", cents: 5000, percent: "50.0%" },
+              { id: 8, name: "Acme", cents: 5000, percent: "50.0%" },
+            ],
+            combinedCents: 10000,
+            combinedPercent: "100.0%",
+          },
+        },
+      },
+    }));
+    expect(html).toContain('data-group-id="2"');
+    expect(html).toContain('data-group-id="8"');
+    expect(html.match(/data-group-id="/g)?.length).toBe(2);
+    expect(html).toContain("Acme");
+  });
+
   it("prompts for recipient and paid month instead of showing a $0 individual report", () => {
     const html = renderToStaticMarkup(createElement(ReportsWorkspace, {
       groups: [],

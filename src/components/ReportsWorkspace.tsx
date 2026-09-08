@@ -7,9 +7,11 @@ import { formatCents } from "@/domain/money";
 import { formatStatementMonth } from "@/domain/dates";
 import type { AgencyReportRow, IndividualReportRow, ReportKind, TeamReportRow } from "@/domain/reports";
 import {
+  formatShareOfTotal,
   groupIndividualReportRows,
   individualTransactionCells,
   informalRecipientName,
+  topClientRowKey,
 } from "@/domain/reportPresentation";
 import {
   individualReportNeedsRecipientAndMonth,
@@ -34,8 +36,8 @@ type ReportResponse = {
     notes?: string[];
   };
   executive?: {
-    carrierBreakdown: { rows: Array<{ name: string; cents: number; percent: string }>; totalCents: number };
-    topClients: { rows: Array<{ name: string; cents: number; percent: string }>; combinedCents: number; combinedPercent: string };
+    carrierBreakdown: { rows: Array<{ id: number; name: string; cents: number; percent: string }>; totalCents: number };
+    topClients: { rows: Array<{ id: number; name: string; cents: number; percent: string }>; combinedCents: number; combinedPercent: string };
   };
   emptyMessage?: string | null;
   availability?: { postedCommissionCount: number; availablePaidMonths: string[] };
@@ -296,8 +298,8 @@ function AgencyReportView({
 }: {
   rows: AgencyReportRow[];
   executive?: {
-    carrierBreakdown: { rows: Array<{ name: string; cents: number; percent: string }>; totalCents: number };
-    topClients: { rows: Array<{ name: string; cents: number; percent: string }>; combinedCents: number; combinedPercent: string };
+    carrierBreakdown: { rows: Array<{ id: number; name: string; cents: number; percent: string }>; totalCents: number };
+    topClients: { rows: Array<{ id: number; name: string; cents: number; percent: string }>; combinedCents: number; combinedPercent: string };
   };
 }) {
   if (rows.length === 0) return <p className="empty">No posted commissions match the current filters.</p>;
@@ -317,7 +319,7 @@ function AgencyReportView({
               </thead>
               <tbody>
                 {executive.carrierBreakdown.rows.map((row) => (
-                  <tr key={row.name}>
+                  <tr key={row.id}>
                     <td>{row.name}</td>
                     {moneyCell(row.cents)}
                     <td className="num">{row.percent}</td>
@@ -326,7 +328,7 @@ function AgencyReportView({
                 <tr className="report-total-row">
                   <td>TOTAL</td>
                   {moneyCell(executive.carrierBreakdown.totalCents)}
-                  <td className="num">100.0%</td>
+                  <td className="num">{formatShareOfTotal(executive.carrierBreakdown.totalCents, executive.carrierBreakdown.totalCents)}</td>
                 </tr>
               </tbody>
             </table>
@@ -343,7 +345,7 @@ function AgencyReportView({
               </thead>
               <tbody>
                 {executive.topClients.rows.map((row) => (
-                  <tr key={row.name}>
+                  <tr key={topClientRowKey(row.id)} data-group-id={row.id}>
                     <td>{row.name}</td>
                     {moneyCell(row.cents)}
                     <td className="num">{row.percent}</td>

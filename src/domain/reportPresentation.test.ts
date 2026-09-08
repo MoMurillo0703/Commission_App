@@ -2,14 +2,18 @@ import { describe, expect, it } from "vitest";
 import { individualReportDocument, printableReportHtml } from "./reportDocuments";
 import { exportReportDocument } from "@/data/reportExport";
 import {
+  SHARE_PERCENT_UNAVAILABLE,
   agencyCarrierBreakdown,
   agencyExecutiveSummary,
   agencyTopClients,
+  formatShareOfTotal,
   groupIndividualReportRows,
   informalRecipientName,
   isRecipientCompensationPayout,
   recipientCompensationMethod,
   recipientShareLabel,
+  sharePercentIsAvailable,
+  topClientRowKey,
 } from "./reportPresentation";
 import { normalizeReportFilters, sumIndividualReport, type AgencyReportRow, type IndividualReportRow } from "./reports";
 
@@ -200,6 +204,99 @@ describe("agency executive summaries", () => {
     expect(executive.topClients.combinedCents).toBe(15000);
     expect(executive.topClients.combinedPercent).toBe("100.0%");
     expect(executive.cards[0]?.value).toBe("$150.00");
+  });
+
+  it("A. ranks equal gross totals by stable Group ID ascending", () => {
+    const tied = [
+      agencyRow({ groupId: 20, groupName: "Zebra", grossCommissionCents: 10000 }),
+      agencyRow({ groupId: 3, groupName: "Alpha", grossCommissionCents: 10000 }),
+      agencyRow({ groupId: 9, groupName: "Middle", grossCommissionCents: 10000 }),
+    ];
+    const top = agencyTopClients(tied, 5);
+    expect(top.rows.map((row) => row.id)).toEqual([3, 9, 20]);
+    expect(top.rows.every((row) => row.cents === 10000)).toBe(true);
+  });
+
+  it("B. keeps Groups with identical display names distinct and stable", () => {
+    const duplicates = [
+      agencyRow({ groupId: 8, groupName: "Acme", grossCommissionCents: 5000 }),
+      agencyRow({ groupId: 2, groupName: "Acme", grossCommissionCents: 5000 }),
+    ];
+    const top = agencyTopClients(duplicates, 5);
+    expect(top.rows).toHaveLength(2);
+    expect(top.rows.map((row) => row.id)).toEqual([2, 8]);
+    expect(top.rows.every((row) => row.name === "Acme")).toBe(true);
+  });
+
+  it("C. uses stable Group ID as the Top Client row key", () => {
+    expect(topClientRowKey(2)).toBe("group:2");
+    expect(topClientRowKey(8)).toBe("group:8");
+    expect(topClientRowKey(2)).not.toBe(topClientRowKey(8));
+  });
+
+  it("D. calculates carrier and Top Client percentages when selected gross is positive", () => {
+    const breakdown = agencyCarrierBreakdown(rows);
+    const top = agencyTopClients(rows, 5);
+    expect(sharePercentIsAvailable(40000, 68000)).toBe(true);
+    expect(breakdown.rows[0]?.name).toBe("CaliforniaChoice");
+    expect(breakdown.rows[0]?.percent).toBe("77.9%");
+    expect(top.rows[0]?.percent).toBe("58.8%");
+    expect(top.combinedPercent).toBe("97.1%");
+  });
+
+  it("E. marks percentage unavailable when selected gross is zero", () => {
+    const zero = [
+      agencyRow({ groupId: 1, grossCommissionCents: 0 }),
+      agencyRow({ groupId: 2, groupName: "Client B", grossCommissionCents: 0 }),
+    ];
+    const top = agencyTopClients(zero, 5);
+    const breakdown = agencyCarrierBreakdown(zero);
+    expect(top.selectedGrossCents).toBe(0);
+    expect(top.rows.every((row) => row.percent === SHARE_PERCENT_UNAVAILABLE)).toBe(true);
+    expect(top.combinedPercent).toBe(SHARE_PERCENT_UNAVAILABLE);
+    expect(breakdown.rows.every((row) => row.percent === SHARE_PERCENT_UNAVAILABLE)).toBe(true);
+    expect(formatShareOfTotal(0, 0)).toBe(SHARE_PERCENT_UNAVAILABLE);
+  });
+
+  it("F. marks percentage unavailable when selected gross is negative", () => {
+    const negative = [
+      agencyRow({ groupId: 1, grossCommissionCents: -4000 }),
+      agencyRow({ groupId: 2, groupName: "Client B", grossCommissionCents: -1000 }),
+    ];
+    const top = agencyTopClients(negative, 5);
+    const breakdown = agencyCarrierBreakdown(negative);
+    expect(top.selectedGrossCents).toBe(-5000);
+    expect(top.combinedCents).toBe(-5000);
+    expect(top.rows.every((row) => row.percent === SHARE_PERCENT_UNAVAILABLE)).toBe(true);
+    expect(top.combinedPercent).toBe(SHARE_PERCENT_UNAVAILABLE);
+    expect(breakdown.totalCents).toBe(-5000);
+    expect(breakdown.rows.every((row) => row.percent === SHARE_PERCENT_UNAVAILABLE)).toBe(true);
+    expect(formatShareOfTotal(-4000, -5000)).toBe(SHARE_PERCENT_UNAVAILABLE);
+  });
+
+  it("G. hides share when signed offsets would make the percentage misleading", () => {
+    const offsetting = [
+      agencyRow({ groupId: 1, groupName: "Client A", grossCommissionCents: 10000 }),
+      agencyRow({ groupId: 2, groupName: "Client B", grossCommissionCents: -6000 }),
+    ];
+    const top = agencyTopClients(offsetting, 5);
+    expect(top.selectedGrossCents).toBe(4000);
+    expect(top.rows[0]?.cents).toBe(10000);
+    expect(top.rows[0]?.percent).toBe(SHARE_PERCENT_UNAVAILABLE);
+    expect(top.rows[1]?.cents).toBe(-6000);
+    expect(top.rows[1]?.percent).toBe(SHARE_PERCENT_UNAVAILABLE);
+    expect(top.combinedCents).toBe(4000);
+    expect(top.combinedPercent).toBe("100.0%");
+    expect(formatShareOfTotal(10000, 4000)).toBe(SHARE_PERCENT_UNAVAILABLE);
+  });
+
+  it("H. keeps existing September positive-gross ranking and percentages unchanged", () => {
+    const top = agencyTopClients(rows, 5);
+    expect(top.rows.map((row) => row.name)).toEqual(["Client A", "Client B", "Client C", "Client D", "Client E"]);
+    expect(top.combinedCents).toBe(66000);
+    expect(top.combinedPercent).toBe("97.1%");
+    expect(top.selectedGrossCents).toBe(68000);
+    expect(agencyCarrierBreakdown(rows).totalCents).toBe(68000);
   });
 });
 

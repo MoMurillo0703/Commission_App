@@ -33,9 +33,30 @@ export function recipientShareLabel(row: Pick<IndividualReportRow, "allocationBp
   return row.recipientMethod === "team" ? `${percent} Team` : percent;
 }
 
+export const SHARE_PERCENT_UNAVAILABLE = "—";
+
+export function sharePercentIsAvailable(partCents: number, wholeCents: number) {
+  if (!Number.isInteger(partCents) || !Number.isInteger(wholeCents)) return false;
+  if (wholeCents <= 0) return false;
+  if (partCents < 0) return false;
+  if (partCents > wholeCents) return false;
+  return true;
+}
+
 export function formatShareOfTotal(partCents: number, wholeCents: number) {
-  if (wholeCents === 0) return "0.0%";
+  if (!sharePercentIsAvailable(partCents, wholeCents)) return SHARE_PERCENT_UNAVAILABLE;
   return `${(Math.round((partCents * 1000) / wholeCents) / 10).toFixed(1)}%`;
+}
+
+export function compareSignedAmountThenId(
+  left: { id: number; cents: number },
+  right: { id: number; cents: number },
+) {
+  return right.cents - left.cents || left.id - right.id;
+}
+
+export function topClientRowKey(groupId: number) {
+  return `group:${groupId}`;
 }
 
 export type IndividualGroupSection = {
@@ -168,7 +189,7 @@ export function agencyCarrierBreakdown(rows: AgencyReportRow[]): {
   const totalCents = [...totals.values()].reduce((sum, row) => sum + row.cents, 0);
   const ranked = [...totals.entries()]
     .map(([id, row]) => ({ id, name: row.name, cents: row.cents, percent: formatShareOfTotal(row.cents, totalCents) }))
-    .sort((left, right) => right.cents - left.cents || left.name.localeCompare(right.name));
+    .sort(compareSignedAmountThenId);
   return { rows: ranked, totalCents };
 }
 
@@ -187,7 +208,7 @@ export function agencyTopClients(rows: AgencyReportRow[], limit = 5): {
   const selectedGrossCents = sumAgencyReport(rows).grossCommissionCents;
   const ranked = [...totals.entries()]
     .map(([id, row]) => ({ id, name: row.name, cents: row.cents }))
-    .sort((left, right) => right.cents - left.cents || left.name.localeCompare(right.name))
+    .sort(compareSignedAmountThenId)
     .slice(0, limit)
     .map((row) => ({ ...row, percent: formatShareOfTotal(row.cents, selectedGrossCents) }));
   const combinedCents = ranked.reduce((sum, row) => sum + row.cents, 0);
