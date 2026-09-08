@@ -50,6 +50,7 @@ async function seed() {
     lineOfBusinessId: medical.id,
     grossCommissionCents: 10000,
     premiumCents: 100000,
+    premiumMonth: "2026-07",
   });
   await createCommission(db, {
     statementMonth: "2026-10",
@@ -74,6 +75,7 @@ describe("posted commission reports", () => {
 
     const september = await buildAgencyReport(db, { kind: "agency", paidMonth: "2026-09" });
     expect(september.rows).toHaveLength(1);
+    expect(september.rows[0]?.coverageMonth).toBe("2026-07");
     expect(september.totals.agencyNetCents).toBe(2000);
     expect(september.totals.premiumCents).toBe(100000);
 
@@ -115,6 +117,7 @@ describe("posted commission reports", () => {
     const document = agencyReportDocument(report.rows, report.totals, report.filters, report.names);
     const csv = await exportReportDocument(document, "csv");
     expect(String(csv.body)).toMatch(/Agency Commission Report/);
+    expect(String(csv.body)).toMatch(/Coverage Month/);
     expect(String(csv.body)).toMatch(/H R LABOR CONTRACTING/);
 
     const xlsx = await exportReportDocument(document, "xlsx");

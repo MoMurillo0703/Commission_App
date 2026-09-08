@@ -26,7 +26,8 @@ describe("rendered Reports workspace", () => {
         filters: { kind: "agency" },
         names: {},
         rows: [{
-          paidMonth: "2026-08",
+            paidMonth: "2026-08",
+            coverageMonth: "2026-07",
           groupId: 1,
           groupName: "ABC COMPANY",
           carrierId: 1,
@@ -49,6 +50,7 @@ describe("rendered Reports workspace", () => {
     expect(html).toContain("Individual Commission Report");
     expect(html).toContain("John Elizondo");
     expect(html).toContain("Agency Commission Report");
+    expect(html).toContain("Coverage Month");
     expect(html).not.toContain("NaN");
     expect(html).not.toContain("Recipient split %");
   });

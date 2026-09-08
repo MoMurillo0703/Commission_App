@@ -33,6 +33,7 @@ describe("compensation correction migration", () => {
     const applied = await db.execute(sql`SELECT filename FROM schema_migrations ORDER BY filename`) as unknown as { rows: Array<{ filename: string }> };
     const filenames = applied.rows.map((row) => row.filename);
     expect(filenames).toContain("0008_compensation_corrections.sql");
+    expect(filenames).toContain("0010_commission_source_identity.sql");
 
     const john = await createAgent(db, { name: "John Elizondo" });
     const group = await createGroup(db, { name: "ABC COMPANY", primaryAgentId: john.id });
@@ -55,6 +56,9 @@ describe("compensation correction migration", () => {
       recipientType: "agency",
       compensationCents: 2500,
     });
+    expect(posted.grossCommissionCents).toBe(2500);
+    expect(posted.sourceCoverageLabel).toBeNull();
+    expect(posted.sourceGroupLabel).toBeNull();
   });
 
   it("rejects UPDATE and DELETE on compensation correction audit rows", async () => {

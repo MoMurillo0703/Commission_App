@@ -4,6 +4,7 @@ import { createAgent, listAgents } from "./agents";
 import { createCarrier } from "./carriers";
 import { createGroup, listGroups } from "./groups";
 import { listCarrierCoverageAliases, rememberCarrierCoverageAlias } from "./carrierCoverage";
+import { rememberDeterministicCoverageAliases } from "./commissionIdentityRepair";
 import { listCommissions } from "./commissions";
 import { confirmImportAgents, confirmImportLines } from "./importNamed";
 import { confirmImportGroups } from "./importGroups";
@@ -142,11 +143,12 @@ describe("statement named-entity review", () => {
       preview: await previewWorkbook(firstBuffer, await listGroups(db)),
     });
     const firstReview = await previewImportPosting(db, first.id, mapping);
-    expect(firstReview.unmatchedLines[0]?.sourceName).toBe("VIS");
-    await confirmImportLines(db, first.id, mapping, [
-      { key: firstReview.unmatchedLines[0]!.key, action: "match", existingId: vision.id },
-    ]);
-    expect((await listCarrierCoverageAliases(db, anthem.id)).map((item) => item.sourceValue)).toEqual(["vis"]);
+    expect(firstReview.unmatchedLines).toHaveLength(0);
+    expect(firstReview.rows[0]?.importedLineName).toBe("VIS");
+    expect(firstReview.rows[0]?.lineOfBusinessId).toBe(vision.id);
+    expect(firstReview.rows[0]?.lineOfBusinessLabel).toBe("Group Vision");
+    await rememberDeterministicCoverageAliases(db, anthem.id);
+    expect((await listCarrierCoverageAliases(db, anthem.id)).map((item) => item.sourceValue)).toEqual(["denppo", "vis"]);
 
     const posted = await postImportStatement(db, first.id, mapping);
     expect(posted.postedCount).toBe(1);

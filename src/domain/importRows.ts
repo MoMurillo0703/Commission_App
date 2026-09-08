@@ -14,6 +14,7 @@ import { applyGroupResolutions, matchImportedGroup, type GroupCandidate, type Gr
 import { parseFlexibleMonth } from "./dates";
 import { parseDollarsToCents } from "./money";
 import { applyCarrierCoverageAlias, type CarrierCoverageAlias } from "./carrierCoverage";
+import { applyDeterministicCoverageMapping } from "./deterministicCoverage";
 import { isImpossibleLobCandidate } from "./lobCandidates";
 import { resolveNamedImport, type NamedImportResolution } from "./namedImport";
 import { matchNamedRecord, type NamedRecord } from "./nameMatch";
@@ -138,14 +139,22 @@ export function validateMappedRows(
       const importedLineName = mappingValue(row.values, mapping.lineOfBusiness);
       const importedAgentName = mappingValue(row.values, mapping.agent);
       const invalidLob = isImpossibleLobCandidate(importedLineName);
+      const carrierName = carrier.name ?? references.statementCarrier?.name ?? null;
       const line = invalidLob
         ? { status: "missing" as const, id: null, name: null, source: importedLineName }
-        : applyCarrierCoverageAlias(
-          resolveNamedImport(references.linesOfBusiness, importedLineName, references.lineResolutions),
-          references.carrierCoverageAliases,
-          carrier.id,
-          importedLineName,
-          references.linesOfBusiness,
+        : applyDeterministicCoverageMapping(
+          applyCarrierCoverageAlias(
+            resolveNamedImport(references.linesOfBusiness, importedLineName, references.lineResolutions),
+            references.carrierCoverageAliases,
+            carrier.id,
+            importedLineName,
+            references.linesOfBusiness,
+          ),
+          {
+            carrierName,
+            sourceValue: importedLineName,
+            lines: references.linesOfBusiness,
+          },
         );
       const matchedGroup = references.groups.find((candidate) => candidate.id === group.groupId);
       const agent = resolveNamedImport(references.agents, importedAgentName, references.agentResolutions);

@@ -363,21 +363,23 @@ function AgencyReportView({
       )}
       <table className="report-table">
         <thead>
-          <tr>
-            <th>Paid Month</th>
-            <th>Group</th>
-            <th>Carrier</th>
-            <th>LOB</th>
-            <th className="num">Premium</th>
-            <th className="num">Gross Commission</th>
-            <th className="num">Compensation Distributed</th>
-            <th className="num">Agency Net</th>
-          </tr>
+            <tr>
+              <th>Paid Month</th>
+              <th>Coverage Month</th>
+              <th>Group</th>
+              <th>Carrier</th>
+              <th>LOB</th>
+              <th className="num">Premium</th>
+              <th className="num">Gross Commission</th>
+              <th className="num">Compensation Distributed</th>
+              <th className="num">Agency Net</th>
+            </tr>
         </thead>
         <tbody>
           {rows.map((row, index) => (
             <tr key={`${row.groupId}-${row.carrierId}-${row.lineOfBusinessId}-${row.paidMonth}-${index}`}>
               <td>{formatStatementMonth(row.paidMonth)}</td>
+              <td>{row.coverageMonth ? formatStatementMonth(row.coverageMonth) : "—"}</td>
               <td>{row.groupName}</td>
               <td>{row.carrierName}</td>
               <td>{row.lineOfBusinessName}</td>

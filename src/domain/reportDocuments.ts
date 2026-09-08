@@ -105,6 +105,18 @@ export function agencyReportDocument(
     formatCents(row.cents),
     row.percent,
   ]);
+  const detailHeaders = ["Paid Month", "Coverage Month", "Group", "Carrier", "LOB", "Premium", "Gross Commission", "Compensation Distributed", "Agency Net"];
+  const detailRows = rows.map((row) => [
+    formatStatementMonth(row.paidMonth),
+    row.coverageMonth ? formatStatementMonth(row.coverageMonth) : "—",
+    row.groupName,
+    row.carrierName,
+    row.lineOfBusinessName,
+    row.premiumCents == null ? "—" : formatCents(row.premiumCents),
+    formatCents(row.grossCommissionCents),
+    formatCents(row.compensationDistributedCents),
+    formatCents(row.agencyNetCents),
+  ]);
   return {
     agencyName: AGENCY_NAME,
     title: reportTitle("agency"),
@@ -139,18 +151,14 @@ export function agencyReportDocument(
           emphasis: true,
         }],
       },
+      {
+        title: "Group Detail",
+        headers: detailHeaders,
+        rows: detailRows,
+      },
     ],
-    headers: ["Paid Month", "Group", "Carrier", "LOB", "Premium", "Gross Commission", "Compensation Distributed", "Agency Net"],
-    rows: rows.map((row) => [
-      formatStatementMonth(row.paidMonth),
-      row.groupName,
-      row.carrierName,
-      row.lineOfBusinessName,
-      row.premiumCents == null ? "—" : formatCents(row.premiumCents),
-      formatCents(row.grossCommissionCents),
-      formatCents(row.compensationDistributedCents),
-      formatCents(row.agencyNetCents),
-    ]),
+    headers: detailHeaders,
+    rows: detailRows,
   };
 }
 
@@ -268,8 +276,8 @@ function escapeHtml(value: string) {
 }
 
 export function isNumericReportHeader(header: string) {
-  return /premium|gross|compensation|agency net|applicable %|team %|earned|payable|amount|id|comm|% of month|groups|transactions/i.test(header)
-    && !/^carrier$|^client$|^group$|^lob$/i.test(header);
+  return /premium|gross|compensation|agency net|applicable %|team %|earned|payable|amount|comm|% of month|groups|transactions/i.test(header)
+    && !/^carrier$|^client$|^group$|^lob$|^paid month$|^coverage month$/i.test(header);
 }
 
 export function isNegativeReportCell(value: string) {

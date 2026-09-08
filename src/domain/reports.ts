@@ -20,6 +20,7 @@ export type ReportFilters = {
 
 export type AgencyReportRow = {
   paidMonth: string;
+  coverageMonth?: string | null;
   groupId: number;
   groupName: string;
   carrierId: number;

@@ -126,6 +126,8 @@ export const commissionRecords = pgTable("commission_records", {
   premiumMonth: text("premium_month"),
   importStatementId: integer("import_statement_id").references(() => importStatements.id),
   sourceRowKey: text("source_row_key"),
+  sourceCoverageLabel: text("source_coverage_label"),
+  sourceGroupLabel: text("source_group_label"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });

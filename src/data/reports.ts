@@ -116,6 +116,7 @@ export async function buildAgencyReport(db: AppDatabase | undefined, input: Repo
   const filters = normalizeReportFilters(input);
   const rows: AgencyReportRow[] = (await postedCommissions(database, filters)).map((row) => ({
     paidMonth: row.paidMonth,
+    coverageMonth: row.premiumMonth,
     groupId: row.groupId,
     groupName: row.groupName,
     carrierId: row.carrierId,

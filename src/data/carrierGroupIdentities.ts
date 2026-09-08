@@ -48,3 +48,31 @@ export async function rememberCarrierGroupIdentity(
   }).returning();
   return created ?? null;
 }
+
+export async function repointCarrierGroupIdentity(
+  db: AppDatabase | undefined,
+  input: { carrierId: number; externalGroupNumber: string; groupId: number },
+) {
+  const externalGroupNumber = normalizeExternalGroupNumber(input.externalGroupNumber);
+  if (!externalGroupNumber) throw new ValidationError("Carrier group number is required.");
+  const database = await resolveDb(db);
+  const now = new Date().toISOString();
+  const [existing] = await database
+    .select()
+    .from(carrierGroupIdentities)
+    .where(and(
+      eq(carrierGroupIdentities.carrierId, input.carrierId),
+      eq(carrierGroupIdentities.externalGroupNumber, externalGroupNumber),
+    ))
+    .limit(1);
+  if (!existing) {
+    return rememberCarrierGroupIdentity(database, input);
+  }
+  if (existing.groupId === input.groupId) return existing;
+  const [updated] = await database
+    .update(carrierGroupIdentities)
+    .set({ groupId: input.groupId, updatedAt: now })
+    .where(eq(carrierGroupIdentities.id, existing.id))
+    .returning();
+  return updated ?? existing;
+}

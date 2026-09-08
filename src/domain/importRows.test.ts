@@ -98,6 +98,26 @@ describe("statement-level carrier row resolution", () => {
     expect(otherCarrier[0]?.status).toBe("blocked");
     expect(otherCarrier[0]?.exceptions.join(" ")).toMatch(/Unmatched line of business/);
   });
+
+  it("maps deterministic Anthem MED/DENPPO/VIS codes to canonical LOBs and keeps the raw source label", () => {
+    const anthemSheets = sheets.map((sheet) => ({
+      ...sheet,
+      rows: [
+        { ...sheet.rows[0]!, values: { ...sheet.rows[0]!.values, LOB: "MED" } },
+      ],
+    }));
+    const rows = validateMappedRows(anthemSheets, mapping, "2026-09", {
+      ...references,
+      carriers: [{ id: 3, name: "Anthem" }],
+      linesOfBusiness: [{ id: 1, name: "MED" }, { id: 2, name: "Medical" }, { id: 3, name: "Dental" }],
+      statementCarrier: { id: 3, name: "Anthem" },
+    });
+    expect(rows[0]?.paidMonth).toBe("2026-09");
+    expect(rows[0]?.status).toBe("ready");
+    expect(rows[0]?.lineOfBusinessId).toBe(2);
+    expect(rows[0]?.lineOfBusinessLabel).toBe("Medical");
+    expect(rows[0]?.importedLineName).toBe("MED");
+  });
 });
 
 const compensationSheets: PreviewSheet[] = [

@@ -37,6 +37,8 @@ export type CommissionWrite = {
   premiumMonth?: string | null;
   importStatementId?: number | null;
   sourceRowKey?: string | null;
+  sourceCoverageLabel?: string | null;
+  sourceGroupLabel?: string | null;
 };
 
 export type CommissionView = {
@@ -60,6 +62,8 @@ export type CommissionView = {
   premiumMonth: string | null;
   importStatementId: number | null;
   sourceRowKey: string | null;
+  sourceCoverageLabel: string | null;
+  sourceGroupLabel: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -86,6 +90,8 @@ function commissionSelect() {
     premiumMonth: commissionRecords.premiumMonth,
     importStatementId: commissionRecords.importStatementId,
     sourceRowKey: commissionRecords.sourceRowKey,
+    sourceCoverageLabel: commissionRecords.sourceCoverageLabel,
+    sourceGroupLabel: commissionRecords.sourceGroupLabel,
     createdAt: commissionRecords.createdAt,
     updatedAt: commissionRecords.updatedAt,
   };
@@ -264,7 +270,7 @@ async function assertReferences(db: AppDatabase, input: CommissionWrite) {
   if (!await getLineOfBusiness(db, input.lineOfBusinessId)) throw new NotFoundError("Line of business not found.");
 }
 
-function valuesFrom(input: CommissionWrite, settled: CompensationSnapshot, timestamp: string) {
+function valuesFrom(input: CommissionWrite, settled: CompensationSnapshot, timestamp: string, existing?: CommissionView) {
   return {
     statementMonth: input.statementMonth,
     groupId: input.groupId,
@@ -279,8 +285,10 @@ function valuesFrom(input: CommissionWrite, settled: CompensationSnapshot, times
     sourceReference: emptyToNull(input.sourceReference),
     notes: emptyToNull(input.notes),
     premiumMonth: emptyToNull(input.premiumMonth),
-    importStatementId: input.importStatementId ?? null,
-    sourceRowKey: emptyToNull(input.sourceRowKey),
+    importStatementId: input.importStatementId !== undefined ? input.importStatementId ?? null : existing?.importStatementId ?? null,
+    sourceRowKey: input.sourceRowKey !== undefined ? emptyToNull(input.sourceRowKey) : existing?.sourceRowKey ?? null,
+    sourceCoverageLabel: input.sourceCoverageLabel !== undefined ? emptyToNull(input.sourceCoverageLabel) : existing?.sourceCoverageLabel ?? null,
+    sourceGroupLabel: input.sourceGroupLabel !== undefined ? emptyToNull(input.sourceGroupLabel) : existing?.sourceGroupLabel ?? null,
     updatedAt: timestamp,
   };
 }
@@ -327,7 +335,7 @@ export async function updateCommission(db: AppDatabase | undefined, id: number, 
   await assertReferences(database, input);
   const settled = await resolveUpdatedCompensation(database, input, existing);
   await database.update(commissionRecords)
-    .set(valuesFrom(input, settled, new Date().toISOString()))
+    .set(valuesFrom(input, settled, new Date().toISOString(), existing))
     .where(eq(commissionRecords.id, id));
   if (settled.settled) await replaceCommissionPayouts(database, id, settled.settled.payouts, settled.allocationId);
   return (await getCommission(database, id))!;
@@ -346,6 +354,20 @@ export async function listPostedGroupLobMonths(db?: AppDatabase) {
       groupId: commissionRecords.groupId,
       lineOfBusinessId: commissionRecords.lineOfBusinessId,
       paidMonth: commissionRecords.statementMonth,
+    })
+    .from(commissionRecords);
+}
+
+export async function listPostedGroupCarrierCoverageMonths(db?: AppDatabase) {
+  const database = await resolveDb(db);
+  return database
+    .select({
+      groupId: commissionRecords.groupId,
+      carrierId: commissionRecords.carrierId,
+      lineOfBusinessId: commissionRecords.lineOfBusinessId,
+      paidMonth: commissionRecords.statementMonth,
+      coverageMonth: commissionRecords.premiumMonth,
+      grossCommissionCents: commissionRecords.grossCommissionCents,
     })
     .from(commissionRecords);
 }

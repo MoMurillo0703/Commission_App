@@ -10,7 +10,7 @@ Money: integer cents. Rates: integer basis points.
 
 Row-level security is enabled on application tables. Browser clients do not query these tables; the Next.js server uses the database URL.
 
-## Migrations (0001–0009)
+## Migrations (0001–0010)
 
 | File | Role |
 | --- | --- |
@@ -22,7 +22,7 @@ Row-level security is enabled on application tables. Browser clients do not quer
 | `0006_carrier_coverage_aliases.sql` | Carrier-scoped statement coverage label → LOB |
 | `0007_carrier_group_identities.sql` | Carrier + external Group Number → internal Group |
 | `0008_compensation_corrections.sql` | Immutable compensation-correction audit batches/items and one-correction-per-commission protection |
-| `0009_agency_compensation_owners.sql` | Effective-dated Agency compensation owner. Exactly one of `agent_id` / `account_manager_id`. Periods must not overlap. **No owner row is inserted.** |
+| `0010_commission_source_identity.sql` | Optional `source_coverage_label` and `source_group_label` on `commission_records` so carrier raw Group/LOB text stays auditable after canonical mapping |
 
 Do not rewrite an applied migration. Add a new numbered file. Runtime code must not apply these files. See [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
@@ -93,7 +93,9 @@ Changing terms closes the prior period and inserts a new row. Historical allocat
 
 ### `commission_records`
 
-Required: `statement_month` (paid month), group, carrier, LOB, gross cents, agent-compensation cents, agency-net cents. Optional: header `agent_id`, premium cents, applied bps, source reference, notes, premium month, import statement, source-row key.
+Required: `statement_month` (paid month), group, carrier, LOB, gross cents, agent-compensation cents, agency-net cents. Optional: header `agent_id`, premium cents, applied bps, source reference, notes, premium month (coverage/source month), import statement, source-row key, `source_coverage_label`, `source_group_label`.
+
+`source_coverage_label` and `source_group_label` preserve the carrier’s raw statement identities after canonical Group/LOB mapping. They are audit/detail fields. They do not select paid month, allocations, or recipient pay.
 
 Database enforces `agency_net_cents = gross_commission_cents - agent_compensation_cents`.
 
@@ -133,29 +135,7 @@ Carrier-scoped external Group Number → internal `group_id`. Unique per (`carri
 
 Effective-dated Agency compensation owner used for Mo / Agency reporting. Identity is `agent_id` **or** `account_manager_id` (exactly one). Paid month selects the covering row. Changing a person’s display name does not change identity. Changing the owner later does not rewrite historical payouts.
 
-`0009` creates the empty table only. It does **not** insert a production owner row.
-
-Later Product Owner confirmation is required before inserting:
-
-```sql
-INSERT INTO agency_compensation_owners (
-  agent_id,
-  account_manager_id,
-  effective_start_month,
-  effective_end_month,
-  created_at,
-  updated_at
-) VALUES (
-  2,          -- Mo = agents.id 2
-  NULL,
-  '<CONFIRMED_START_PAID_MONTH>',  -- YYYY-MM, Product Owner must confirm
-  NULL,
-  '<ISO timestamp>',
-  '<ISO timestamp>'
-);
-```
-
-Do not infer the start month. Do not insert this row during application deploy.
+`0009` creates the empty table only. It does **not** insert a production owner row. After Product Owner confirmation, production has exactly one covering row: Mo / `agents.id = 2`, effective **2026-09 → Present**. Changing that row later does not rewrite historical commissions or payouts.
 
 ### `schema_migrations`
 
@@ -202,7 +182,7 @@ These are **not** fully covered by conventional database foreign keys or trigger
 | Agent-to-account | Current primary agent field; not effective-dated assignment history |
 | Compensation | 100% allocations + payout snapshots |
 | Gross / Agency Net | Cents; see [`BUSINESS_RULES.md`](BUSINESS_RULES.md) |
-| Missing commission | Not modeled |
+| Missing commission | Feature not implemented. Posted rows retain paid month, coverage/source month (`premium_month`), carrier, Group, LOB, and optional raw source labels so later analysis can ask which coverage months were received and in which paid month. |
 
 ## Alignment notes
 
