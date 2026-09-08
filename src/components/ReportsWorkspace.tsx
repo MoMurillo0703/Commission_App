@@ -7,6 +7,11 @@ import { formatCents } from "@/domain/money";
 import { formatStatementMonth } from "@/domain/dates";
 import type { AgencyReportRow, IndividualReportRow, ReportKind, TeamReportRow } from "@/domain/reports";
 import {
+  groupIndividualReportRows,
+  individualTransactionCells,
+  informalRecipientName,
+} from "@/domain/reportPresentation";
+import {
   individualReportNeedsRecipientAndMonth,
   individualReportPrompt,
   renderedReportKind,
@@ -17,7 +22,21 @@ type ReportResponse = {
   names: Record<string, string | null | undefined>;
   rows: AgencyReportRow[] | IndividualReportRow[] | TeamReportRow[];
   totals: Record<string, number>;
-  document?: { title: string; period: string; totals: Array<{ label: string; value: string }>; filtersUsed?: string[]; generatedAt?: string; notes?: string[] };
+  document?: {
+    title: string;
+    heading?: string;
+    subheading?: string;
+    period: string;
+    totals: Array<{ label: string; value: string }>;
+    footerTotals?: Array<{ label: string; value: string }>;
+    filtersUsed?: string[];
+    generatedAt?: string;
+    notes?: string[];
+  };
+  executive?: {
+    carrierBreakdown: { rows: Array<{ name: string; cents: number; percent: string }>; totalCents: number };
+    topClients: { rows: Array<{ name: string; cents: number; percent: string }>; combinedCents: number; combinedPercent: string };
+  };
   emptyMessage?: string | null;
   availability?: { postedCommissionCount: number; availablePaidMonths: string[] };
   payable?: {
@@ -215,8 +234,8 @@ export function ReportsWorkspace({
         <section className="panel recent report-doc">
           <div className="report-letterhead">
             <p className="eyebrow">Murillo Insurance</p>
-            <h2>{report.document?.title ?? "Report"}</h2>
-            <p className="report-period">{report.document?.period}</p>
+            <h2>{report.document?.heading ?? report.document?.title ?? "Report"}</h2>
+            <p className="report-period">{report.document?.subheading ?? report.document?.period}</p>
             {report.document?.generatedAt && (
               <p className="report-generated">Generated {new Date(report.document.generatedAt).toLocaleString("en-US")}</p>
             )}
@@ -249,9 +268,15 @@ export function ReportsWorkspace({
             ))}
           </div>
           {report.emptyMessage && <p className="empty">{report.emptyMessage}</p>}
-          {!report.emptyMessage && displayedKind === "agency" && <AgencyTable rows={report.rows as AgencyReportRow[]} />}
+          {!report.emptyMessage && displayedKind === "agency" && (
+            <AgencyReportView rows={report.rows as AgencyReportRow[]} executive={report.executive} />
+          )}
           {!report.emptyMessage && (displayedKind === "individual" || displayedKind === "recipient") && (
-            <IndividualTable rows={report.rows as IndividualReportRow[]} />
+            <IndividualStatement
+              rows={report.rows as IndividualReportRow[]}
+              recipientName={report.names.personName ?? (report.rows as IndividualReportRow[])[0]?.recipientName ?? "Recipient"}
+              footerTotals={report.document?.footerTotals}
+            />
           )}
           {!report.emptyMessage && displayedKind === "team" && <TeamTable rows={report.rows as TeamReportRow[]} />}
         </section>
@@ -265,75 +290,178 @@ function moneyCell(cents: number | null) {
   return <td className={`num${cents < 0 ? " neg" : ""}`}>{formatCents(cents)}</td>;
 }
 
-function AgencyTable({ rows }: { rows: AgencyReportRow[] }) {
+function AgencyReportView({
+  rows,
+  executive,
+}: {
+  rows: AgencyReportRow[];
+  executive?: {
+    carrierBreakdown: { rows: Array<{ name: string; cents: number; percent: string }>; totalCents: number };
+    topClients: { rows: Array<{ name: string; cents: number; percent: string }>; combinedCents: number; combinedPercent: string };
+  };
+}) {
   if (rows.length === 0) return <p className="empty">No posted commissions match the current filters.</p>;
   return (
-    <table className="report-table">
-      <thead>
-        <tr>
-          <th>Paid Month</th>
-          <th>Group</th>
-          <th>Carrier</th>
-          <th>LOB</th>
-          <th className="num">Premium</th>
-          <th className="num">Gross Commission</th>
-          <th className="num">Compensation Distributed</th>
-          <th className="num">Agency Net</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row, index) => (
-          <tr key={`${row.groupId}-${row.carrierId}-${row.lineOfBusinessId}-${row.paidMonth}-${index}`}>
-            <td>{formatStatementMonth(row.paidMonth)}</td>
-            <td>{row.groupName}</td>
-            <td>{row.carrierName}</td>
-            <td>{row.lineOfBusinessName}</td>
-            {moneyCell(row.premiumCents)}
-            {moneyCell(row.grossCommissionCents)}
-            {moneyCell(row.compensationDistributedCents)}
-            {moneyCell(row.agencyNetCents)}
+    <>
+      {executive && (
+        <div className="report-executive">
+          <section className="report-block">
+            <h3>Carrier Breakdown</h3>
+            <table className="report-table report-table-compact">
+              <thead>
+                <tr>
+                  <th>Carrier</th>
+                  <th className="num">Commission</th>
+                  <th className="num">% of Month</th>
+                </tr>
+              </thead>
+              <tbody>
+                {executive.carrierBreakdown.rows.map((row) => (
+                  <tr key={row.name}>
+                    <td>{row.name}</td>
+                    {moneyCell(row.cents)}
+                    <td className="num">{row.percent}</td>
+                  </tr>
+                ))}
+                <tr className="report-total-row">
+                  <td>TOTAL</td>
+                  {moneyCell(executive.carrierBreakdown.totalCents)}
+                  <td className="num">100.0%</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+          <section className="report-block">
+            <h3>Top 5 Clients This Month</h3>
+            <table className="report-table report-table-compact">
+              <thead>
+                <tr>
+                  <th>Client</th>
+                  <th className="num">Commission</th>
+                  <th className="num">% of Month</th>
+                </tr>
+              </thead>
+              <tbody>
+                {executive.topClients.rows.map((row) => (
+                  <tr key={row.name}>
+                    <td>{row.name}</td>
+                    {moneyCell(row.cents)}
+                    <td className="num">{row.percent}</td>
+                  </tr>
+                ))}
+                <tr className="report-total-row">
+                  <td>TOP 5 TOTAL</td>
+                  {moneyCell(executive.topClients.combinedCents)}
+                  <td className="num">{executive.topClients.combinedPercent}</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        </div>
+      )}
+      <table className="report-table">
+        <thead>
+          <tr>
+            <th>Paid Month</th>
+            <th>Group</th>
+            <th>Carrier</th>
+            <th>LOB</th>
+            <th className="num">Premium</th>
+            <th className="num">Gross Commission</th>
+            <th className="num">Compensation Distributed</th>
+            <th className="num">Agency Net</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={`${row.groupId}-${row.carrierId}-${row.lineOfBusinessId}-${row.paidMonth}-${index}`}>
+              <td>{formatStatementMonth(row.paidMonth)}</td>
+              <td>{row.groupName}</td>
+              <td>{row.carrierName}</td>
+              <td>{row.lineOfBusinessName}</td>
+              {moneyCell(row.premiumCents)}
+              {moneyCell(row.grossCommissionCents)}
+              {moneyCell(row.compensationDistributedCents)}
+              {moneyCell(row.agencyNetCents)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
   );
 }
 
-function IndividualTable({ rows }: { rows: IndividualReportRow[] }) {
+function IndividualStatement({
+  rows,
+  recipientName,
+  footerTotals,
+}: {
+  rows: IndividualReportRow[];
+  recipientName: string;
+  footerTotals?: Array<{ label: string; value: string }>;
+}) {
   if (rows.length === 0) return <p className="empty">No posted payout records match this recipient and paid month.</p>;
+  const informal = informalRecipientName(recipientName);
+  const groups = groupIndividualReportRows(rows);
   return (
-    <table className="report-table">
-      <thead>
-        <tr>
-          <th>Paid Month</th>
-          <th>Recipient</th>
-          <th>Recipient Type</th>
-          <th>Group</th>
-          <th>Carrier</th>
-          <th>Line of Coverage</th>
-          <th className="num">Premium</th>
-          <th className="num">Agency Gross</th>
-          <th className="num">Recipient split %</th>
-          <th className="num">Recipient commission</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row, index) => (
-          <tr key={`${row.personKind}-${row.personId}-${row.groupId}-${row.commissionId ?? index}`}>
-            <td>{formatStatementMonth(row.paidMonth)}</td>
-            <td>{row.recipientName}{row.teamName ? ` · ${row.teamName}` : ""}</td>
-            <td>{row.recipientType || (row.teamName ? "Team member" : row.personKind === "account_manager" ? "Account manager" : "Agent")}</td>
-            <td>{row.groupName}</td>
-            <td>{row.carrierName}</td>
-            <td>{row.lineOfBusinessName}</td>
-            {moneyCell(row.premiumCents ?? null)}
-            {moneyCell(row.grossCommissionCents)}
-            <td className="num">{`${(row.allocationBps / 100).toFixed(row.allocationBps % 100 === 0 ? 0 : 2)}%`}</td>
-            {moneyCell(row.compensationCents)}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <>
+      {groups.map((group) => {
+        const shareHeader = `${informal}'s %`;
+        const recipientHeader = `${informal}'s Comm`;
+        return (
+          <section key={group.groupId} className="report-block">
+            <h3>{group.groupName}</h3>
+            {group.subtitle && <p className="report-group-sub">{group.subtitle}</p>}
+            <table className="report-table report-table-compact">
+              <thead>
+                <tr>
+                  <th>Carrier</th>
+                  <th>LOB</th>
+                  <th>Coverage Month</th>
+                  <th className="num">Agency Comm</th>
+                  <th className="num">{shareHeader}</th>
+                  <th className="num">{recipientHeader}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {group.rows.map((row, index) => {
+                  const cells = individualTransactionCells(row, informal);
+                  return (
+                    <tr key={row.payoutId ?? `${row.commissionId}-${row.recipientMethod}-${index}`}>
+                      <td>{cells.carrier}</td>
+                      <td>{cells.lob}</td>
+                      <td>{cells.coverageMonth}</td>
+                      {moneyCell(row.grossCommissionCents)}
+                      <td className="num">{cells.share}</td>
+                      {moneyCell(row.compensationCents)}
+                    </tr>
+                  );
+                })}
+                <tr className="report-total-row">
+                  <td colSpan={3}>GROUP TOTAL</td>
+                  {moneyCell(group.agencyCommissionCents)}
+                  <td />
+                  {moneyCell(group.recipientCompensationCents)}
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        );
+      })}
+      {footerTotals && footerTotals.length > 0 && (
+        <section className="report-grand-total">
+          <h3>Grand Total</h3>
+          <div className="stats report-summary">
+            {footerTotals.map((total) => (
+              <article key={total.label} className="card">
+                <p>{total.label}</p>
+                <strong className={total.value.startsWith("-") ? "neg" : undefined}>{total.value}</strong>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+    </>
   );
 }
 

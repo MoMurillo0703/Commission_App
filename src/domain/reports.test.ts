@@ -87,17 +87,18 @@ describe("report documents", () => {
     const csv = reportDocumentCsv(document);
     expect(csv).toMatch(/Murillo Insurance/);
     expect(csv).toMatch(/Agency Commission Report/);
-    expect(csv).toMatch(/Total Agency Net/);
+    expect(csv).toMatch(/Total Commission Received/);
     expect(csv).toMatch(/H R LABOR CONTRACTING/);
     const html = printableReportHtml(document);
     expect(html).toMatch(/Murillo Insurance/);
     expect(html).toMatch(/@page/);
     expect(html).toMatch(/Generated/);
-    expect(html).toMatch(/Total Gross Commission/);
+    expect(html).toMatch(/Total Commission Received/);
+    expect(html).toMatch(/Carrier Breakdown/);
+    expect(html).toMatch(/Top 5 Clients This Month/);
     expect(html).toMatch(/table-header-group/);
     expect(html).toMatch(/\$100\.00/);
-    expect(html).toMatch(/\$20\.00/);
-    expect(document.totals[3]?.value).toBe("$20.00");
+    expect(document.totals[0]?.value).toBe("$100.00");
     expect(toCsv(["A"], [["B,C"]])).toBe("A\n\"B,C\"");
     expect(toCsv(["Amount"], [["=1+1"]])).toMatch(/'=1\+1/);
   });
@@ -120,8 +121,10 @@ describe("report documents", () => {
       compensationCents: 7000,
     }], { compensationCents: 7000 }, { ...filters, kind: "individual" }, names, "John Elizando");
     expect(individual.title).toBe("Individual Commission Report");
-    expect(individual.rows[0]?.[7]).toBe("70%");
-    expect(individual.totals[1]).toEqual({ label: "TOTAL PAYABLE", value: "$70.00" });
+    expect(individual.heading).toBe("JOHN ELIZANDO");
+    expect(individual.rows[0]?.[5]).toBe("70%");
+    expect(individual.totals[1]).toEqual({ label: "John's Compensation", value: "$70.00" });
+    expect(individual.footerTotals?.at(-1)).toEqual({ label: "TOTAL PAYABLE TO JOHN ELIZANDO", value: "$70.00" });
     const payable = individualReportDocument([{
       paidMonth: "2026-09",
       groupId: 1,
@@ -141,10 +144,9 @@ describe("report documents", () => {
       premiumCents: 100000,
     }], { compensationCents: 7000, grossCommissionCents: 10000 }, { ...filters, kind: "recipient", personId: 1, personKind: "agent" }, names, "John Elizando");
     expect(payable.title).toBe("Individual Commission Report");
-    expect(payable.totals[1]).toEqual({ label: "TOTAL PAYABLE", value: "$70.00" });
-    expect(payable.rows[0]?.[2]).toBe("Agent");
-    expect(payable.rows[0]?.[8]).toBe("70%");
-    expect(payable.rows[0]?.[10]).toBe("44");
+    expect(payable.totals[1]).toEqual({ label: "John's Compensation", value: "$70.00" });
+    expect(payable.rows[0]?.[0]).toBe("H R LABOR CONTRACTING");
+    expect(payable.rows[0]?.[5]).toBe("70%");
     expect(payable.notes?.join(" ")).toMatch(/does not mean the recipient has been paid/);
     const team = teamReportDocument([{
       paidMonth: "2026-09",

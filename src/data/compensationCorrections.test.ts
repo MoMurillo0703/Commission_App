@@ -235,15 +235,14 @@ describe("authorized historical compensation correction", () => {
       afterReport.names,
       "John Elizondo",
     );
-    expect(document.totals.find((total) => total.label === "TOTAL PAYABLE")?.value).toBe(formatCents(afterReport.totals.compensationCents));
+    expect(document.footerTotals?.find((total) => total.label === "TOTAL PAYABLE TO JOHN ELIZONDO")?.value).toBe(formatCents(afterReport.totals.compensationCents));
     const pdf = await exportReportDocument(document, "pdf");
     const { extractText, getDocumentProxy } = await import("unpdf");
     const parsed = await getDocumentProxy(new Uint8Array(pdf.body as Uint8Array));
     const extracted = await extractText(parsed, { mergePages: true });
     const text = Array.isArray(extracted.text) ? extracted.text.join(" ") : extracted.text;
-    expect(text).toMatch(/Individual Commission Report/);
-    expect(text).toMatch(/TOTAL PAYABLE/i);
-    expect(text).toMatch(/John Elizondo/);
+    expect(text).toMatch(/JOHN ELIZONDO/);
+    expect(text).toMatch(/TOTAL PAYABLE TO JOHN ELIZONDO/i);
 
     const otherCommission = await createCommission(db, {
       statementMonth: "2026-09",

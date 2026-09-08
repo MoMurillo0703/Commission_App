@@ -50,8 +50,7 @@ describe("Murillo Insurance suite theme", () => {
     expect(html).toContain(murilloTheme.accentText);
     expect(html).not.toMatch(/#1e6657/i);
     expect(html).toMatch(/\$100\.00/);
-    expect(html).toMatch(/\$20\.00/);
-    expect(document.totals[3]?.value).toBe("$20.00");
+    expect(document.totals[0]?.value).toBe("$100.00");
     expect(printableSuiteStyles()).toContain(murilloTheme.navy);
   });
 });

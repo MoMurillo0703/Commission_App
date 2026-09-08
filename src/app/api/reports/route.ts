@@ -117,7 +117,10 @@ async function reportPayload(url: URL) {
     return { ...report, document, emptyMessage: reportEmptyMessage(report.filters, report.availability) };
   }
   const report = await buildAgencyReport(db, filters);
-  const document = agencyReportDocument(report.rows, report.totals, report.filters, report.names);
+  const document = agencyReportDocument(report.rows, report.totals, report.filters, report.names, new Date(), {
+    payableReady: report.payable.payableReady,
+    message: report.payable.message,
+  });
   return { ...report, document, emptyMessage: reportEmptyMessage(report.filters, report.availability) };
 }
 

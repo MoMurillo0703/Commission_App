@@ -42,15 +42,19 @@ export type IndividualReportRow = {
   lineOfBusinessName: string;
   recipientName: string;
   recipientType?: string;
+  recipientMethod?: "direct" | "team";
   personKind: "agent" | "account_manager" | null;
   personId: number | null;
   teamName: string | null;
   grossCommissionCents: number;
   allocationBps: number;
+  teamInternalBps?: number | null;
   compensationCents: number;
   commissionId?: number;
+  payoutId?: number;
   allocationId?: number | null;
   premiumCents?: number | null;
+  premiumMonth?: string | null;
   importStatementId?: number | null;
 };
 

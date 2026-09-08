@@ -18,8 +18,14 @@ import { historicalAllocationForPaidMonth, historicalAllocationIncludesRecipient
 import { compensationReviewHref } from "@/domain/compensationExceptions";
 import { isEligibleAgencyFallback } from "@/domain/compensationFallback";
 import { recipientPayableReadiness } from "@/domain/recipientStatement";
+import {
+  agencyExecutiveSummary,
+  isRecipientCompensationPayout,
+  recipientCompensationMethod,
+} from "@/domain/reportPresentation";
 import { individualRecipientTypeLabel } from "@/domain/reportWorkspace";
 import { allocationCandidates, listAllocations } from "./allocations";
+import { buildMonthlyCompensationReconciliation } from "./businessCompensation";
 import { listCorrectedCommissionIds } from "./compensationCorrections";
 import { listAllPayouts } from "./payouts";
 import { listTeams } from "./teams";
@@ -62,6 +68,7 @@ async function postedCommissions(db: AppDatabase, filters: ReportFilters) {
       agentId: commissionRecords.agentId,
       agentName: agents.name,
       premiumCents: commissionRecords.premiumCents,
+      premiumMonth: commissionRecords.premiumMonth,
       importStatementId: commissionRecords.importStatementId,
       grossCommissionCents: commissionRecords.grossCommissionCents,
       compensationDistributedCents: commissionRecords.agentCompensationCents,
@@ -120,12 +127,23 @@ export async function buildAgencyReport(db: AppDatabase | undefined, input: Repo
     compensationDistributedCents: row.compensationDistributedCents,
     agencyNetCents: row.agencyNetCents,
   }));
+  const reconciliation = await buildMonthlyCompensationReconciliation(database, filters);
+  const executive = agencyExecutiveSummary(
+    rows,
+    reconciliation.reconciliation.payableReady,
+    reconciliation.reconciliation.payableReadyMessage,
+  );
   return {
     filters,
     names: await reportNameLookup(database, filters),
     rows,
     totals: sumAgencyReport(rows),
     availability: await reportAvailability(database, rows.length),
+    executive,
+    payable: {
+      payableReady: executive.payableReady,
+      message: executive.payableReady ? null : executive.payableStatus,
+    },
   };
 }
 
@@ -137,7 +155,9 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
   const byCommission = new Map(commissions.map((row) => [row.id, row]));
   const rows: IndividualReportRow[] = [];
   for (const payout of payouts) {
-    if (payout.recipientType !== "person" && payout.recipientType !== "team_member") continue;
+    if (!isRecipientCompensationPayout(payout)) continue;
+    const method = recipientCompensationMethod(payout.recipientType);
+    if (!method) continue;
     const commission = byCommission.get(payout.commissionId);
     if (!commission) continue;
     if (filters.personKind && payout.personKind !== filters.personKind) continue;
@@ -153,15 +173,19 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
       lineOfBusinessName: commission.lineOfBusinessName,
       recipientName: payout.personName ?? "Person",
       recipientType: individualRecipientTypeLabel({ personKind: payout.personKind, teamName: payout.teamName }),
+      recipientMethod: method,
       personKind: payout.personKind,
       personId: payout.personId,
       teamName: payout.teamName,
       grossCommissionCents: commission.grossCommissionCents,
       allocationBps: payout.allocationBps,
+      teamInternalBps: payout.teamInternalBps,
       compensationCents: payout.compensationCents,
       commissionId: commission.id,
+      payoutId: payout.id,
       allocationId: payout.allocationId,
       premiumCents: commission.premiumCents,
+      premiumMonth: commission.premiumMonth,
       importStatementId: commission.importStatementId,
     });
   }

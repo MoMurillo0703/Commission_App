@@ -2,7 +2,6 @@ import { printableSuiteStyles } from "@/theme/tokens";
 import { formatCents } from "./money";
 import { formatStatementMonth } from "./dates";
 import {
-  formatAllocationPercent,
   recipientStatementDisclaimer,
   sourceCommissionIds,
 } from "./recipientStatement";
@@ -17,13 +16,30 @@ import {
   type TeamReportRow,
   toCsv,
 } from "./reports";
-import { individualRecipientTypeLabel } from "./reportWorkspace";
+import {
+  agencyExecutiveSummary,
+  commissionStatementPeriod,
+  formatShareOfTotal,
+  individualStatementSummary,
+  individualTransactionCells,
+  type IndividualGroupSection,
+} from "./reportPresentation";
 
 export const AGENCY_NAME = "Murillo Insurance";
+
+export type ReportDocumentSection = {
+  title: string;
+  subtitle?: string | null;
+  headers: string[];
+  rows: string[][];
+  totals?: Array<{ cells: string[]; emphasis?: boolean }>;
+};
 
 export type ReportDocument = {
   agencyName: string;
   title: string;
+  heading?: string;
+  subheading?: string;
   period: string;
   filtersUsed: string[];
   generatedAt: string;
@@ -32,6 +48,10 @@ export type ReportDocument = {
   rows: string[][];
   notes?: string[];
   sourceCommissionIds?: number[];
+  layout?: "table" | "statement";
+  summaryTables?: ReportDocumentSection[];
+  groupSections?: ReportDocumentSection[];
+  footerTotals?: Array<{ label: string; value: string }>;
 };
 
 function filterLines(filters: ReportFilters, names: {
@@ -73,18 +93,53 @@ export function agencyReportDocument(
   filters: ReportFilters,
   names: Parameters<typeof filterLines>[1],
   generatedAt = new Date(),
+  payable?: { payableReady: boolean; message?: string | null },
 ): ReportDocument {
+  const executive = agencyExecutiveSummary(rows, payable?.payableReady ?? true, payable?.message ?? null);
+  const carrierRows = executive.carrierBreakdown.rows.map((row) => [
+    row.name,
+    formatCents(row.cents),
+    row.percent,
+  ]);
+  const topRows = executive.topClients.rows.map((row) => [
+    row.name,
+    formatCents(row.cents),
+    row.percent,
+  ]);
   return {
     agencyName: AGENCY_NAME,
     title: reportTitle("agency"),
+    heading: "Agency Commission Report",
+    subheading: commissionStatementPeriod(reportPeriodLabel(filters)),
     period: reportPeriodLabel(filters),
     filtersUsed: filterLines(filters, names),
     generatedAt: generatedAt.toISOString(),
+    layout: "statement",
     totals: [
-      { label: "Total Premium", value: formatCents(totals.premiumCents) },
-      { label: "Total Gross Commission", value: formatCents(totals.grossCommissionCents) },
-      { label: "Total Compensation", value: formatCents(totals.compensationDistributedCents) },
-      { label: "Total Agency Net", value: formatCents(totals.agencyNetCents) },
+      { label: "Total Commission Received", value: formatCents(totals.grossCommissionCents) },
+      { label: "Groups Paid", value: String(executive.groupCount) },
+      { label: "Carriers Paid", value: String(executive.carrierCount) },
+      { label: "Payable Status", value: executive.payableStatus },
+    ],
+    summaryTables: [
+      {
+        title: "Carrier Breakdown",
+        headers: ["Carrier", "Commission", "% of Month"],
+        rows: carrierRows,
+        totals: [{
+          cells: ["TOTAL", formatCents(executive.carrierBreakdown.totalCents), formatShareOfTotal(executive.carrierBreakdown.totalCents, executive.carrierBreakdown.totalCents)],
+          emphasis: true,
+        }],
+      },
+      {
+        title: "Top 5 Clients This Month",
+        headers: ["Client", "Commission", "% of Month"],
+        rows: topRows,
+        totals: [{
+          cells: ["TOP 5 TOTAL", formatCents(executive.topClients.combinedCents), executive.topClients.combinedPercent],
+          emphasis: true,
+        }],
+      },
     ],
     headers: ["Paid Month", "Group", "Carrier", "LOB", "Premium", "Gross Commission", "Compensation Distributed", "Agency Net"],
     rows: rows.map((row) => [
@@ -100,6 +155,24 @@ export function agencyReportDocument(
   };
 }
 
+function individualGroupSection(section: IndividualGroupSection, informalName: string): ReportDocumentSection {
+  const shareHeader = `${informalName}'s %`;
+  const recipientHeader = `${informalName}'s Comm`;
+  return {
+    title: section.groupName,
+    subtitle: section.subtitle,
+    headers: ["Carrier", "LOB", "Coverage Month", "Agency Comm", shareHeader, recipientHeader],
+    rows: section.rows.map((row) => {
+      const cells = individualTransactionCells(row, informalName);
+      return [cells.carrier, cells.lob, cells.coverageMonth, cells.agencyCommission, cells.share, cells.recipientCommission];
+    }),
+    totals: [{
+      cells: ["GROUP TOTAL", "", "", formatCents(section.agencyCommissionCents), "", formatCents(section.recipientCompensationCents)],
+      emphasis: true,
+    }],
+  };
+}
+
 export function individualReportDocument(
   rows: IndividualReportRow[],
   totals: { compensationCents: number; grossCommissionCents?: number },
@@ -111,47 +184,30 @@ export function individualReportDocument(
   const recipient = isRecipientStatement({ ...filters, kind: filters.kind === "recipient" ? "recipient" : "individual" });
   const commissionIds = sourceCommissionIds(rows);
   const agencyGross = totals.grossCommissionCents ?? sumIndividualReport(rows).grossCommissionCents;
+  const period = reportPeriodLabel(filters);
+  const statement = individualStatementSummary(rows, { ...totals, grossCommissionCents: agencyGross }, recipientName, commissionStatementPeriod(period));
+  const informal = statement.informalName;
   return {
     agencyName: AGENCY_NAME,
     title: reportTitle(recipient ? "recipient" : "individual", filters),
-    period: reportPeriodLabel(filters),
+    heading: statement.heading,
+    subheading: statement.subheading,
+    period,
     filtersUsed: filterLines({ ...filters, kind: recipient ? "recipient" : "individual" }, { ...names, personName: recipientName }),
     generatedAt: generatedAt.toISOString(),
+    layout: "statement",
     notes: recipient ? [
       recipientStatementDisclaimer(),
-      commissionIds.length ? `Source commission IDs: ${commissionIds.join(", ")}` : "No posted payout rows matched this recipient and period.",
     ] : undefined,
     sourceCommissionIds: commissionIds,
-    totals: [
-      { label: "Total agency commission represented", value: formatCents(agencyGross) },
-      { label: "TOTAL PAYABLE", value: formatCents(totals.compensationCents) },
-    ],
-    headers: recipient
-      ? ["Paid Month", "Recipient", "Recipient Type", "Group", "Carrier", "Line of Coverage", "Premium", "Agency Gross", "Recipient split %", "Recipient commission", "Commission ID"]
-      : ["Paid Month", "Recipient", "Recipient Type", "Group", "Carrier", "Line of Coverage", "Agency Gross", "Recipient split %", "Recipient commission"],
-    rows: rows.map((row) => recipient ? [
-      formatStatementMonth(row.paidMonth),
-      row.recipientName,
-      row.recipientType || individualRecipientTypeLabel(row),
-      row.groupName,
-      row.carrierName,
-      row.lineOfBusinessName,
-      row.premiumCents == null ? "—" : formatCents(row.premiumCents),
-      formatCents(row.grossCommissionCents),
-      formatAllocationPercent(row.allocationBps),
-      formatCents(row.compensationCents),
-      row.commissionId == null ? "—" : String(row.commissionId),
-    ] : [
-      formatStatementMonth(row.paidMonth),
-      row.recipientName,
-      row.recipientType || individualRecipientTypeLabel(row),
-      row.groupName,
-      row.carrierName,
-      row.lineOfBusinessName,
-      formatCents(row.grossCommissionCents),
-      formatAllocationPercent(row.allocationBps),
-      formatCents(row.compensationCents),
-    ]),
+    totals: statement.cards,
+    footerTotals: statement.grandTotals,
+    groupSections: statement.groups.map((group) => individualGroupSection(group, informal)),
+    headers: ["Group", "Carrier", "LOB", "Coverage Month", "Agency Comm", `${informal}'s %`, `${informal}'s Comm`],
+    rows: statement.groups.flatMap((group) => group.rows.map((row) => {
+      const cells = individualTransactionCells(row, informal);
+      return [group.groupName, cells.carrier, cells.lob, cells.coverageMonth, cells.agencyCommission, cells.share, cells.recipientCommission];
+    })),
   };
 }
 
@@ -213,7 +269,8 @@ function escapeHtml(value: string) {
 }
 
 export function isNumericReportHeader(header: string) {
-  return /premium|gross|compensation|agency net|applicable %|team %|earned|payable|amount|id/i.test(header);
+  return /premium|gross|compensation|agency net|applicable %|team %|earned|payable|amount|id|comm|% of month|groups|transactions/i.test(header)
+    && !/^carrier$|^client$|^group$|^lob$/i.test(header);
 }
 
 export function isNegativeReportCell(value: string) {
@@ -231,11 +288,34 @@ export function groupedReportRows(document: ReportDocument) {
   return groups;
 }
 
+function renderHtmlTable(section: { headers: string[]; rows: string[][]; totals?: Array<{ cells: string[]; emphasis?: boolean }> }) {
+  const numeric = section.headers.map((header) => isNumericReportHeader(header));
+  const body = section.rows.map((row) => `<tr>${row.map((cell, index) => {
+    const classes = [
+      numeric[index] ? "num" : "",
+      numeric[index] && isNegativeReportCell(cell) ? "neg" : "",
+    ].filter(Boolean).join(" ");
+    return `<td${classes ? ` class="${classes}"` : ""}>${escapeHtml(cell)}</td>`;
+  }).join("")}</tr>`);
+  const footer = (section.totals ?? []).map((total) => `<tr class="group-total">${total.cells.map((cell, index) => {
+    const classes = [
+      numeric[index] ? "num" : "",
+      numeric[index] && isNegativeReportCell(cell) ? "neg" : "",
+    ].filter(Boolean).join(" ");
+    return `<td${classes ? ` class="${classes}"` : ""}>${escapeHtml(cell)}</td>`;
+  }).join("")}</tr>`);
+  return `<table>
+    <thead><tr>${section.headers.map((header, index) => `<th${numeric[index] ? ' class="num"' : ""}>${escapeHtml(header)}</th>`).join("")}</tr></thead>
+    <tbody>${[...body, ...footer].join("")}</tbody>
+  </table>`;
+}
+
 export function printableReportHtml(document: ReportDocument) {
   const generated = new Date(document.generatedAt).toLocaleString("en-US");
+  const statement = document.layout === "statement";
   const numeric = document.headers.map((header) => isNumericReportHeader(header));
   const groups = groupedReportRows(document);
-  const bodyRows = groups.flatMap((group) => {
+  const fallbackRows = groups.flatMap((group) => {
     const dataRows = group.rows.map((row) => `<tr>${row.map((cell, index) => {
       const classes = [
         numeric[index] ? "num" : "",
@@ -246,34 +326,56 @@ export function printableReportHtml(document: ReportDocument) {
     if (groups.length < 2) return dataRows;
     return [`<tr class="group-label"><td colspan="${document.headers.length}">${escapeHtml(group.label)}</td></tr>`, ...dataRows];
   });
+  const summaryHtml = (document.summaryTables ?? []).map((section) => `
+    <section class="report-block">
+      <h2>${escapeHtml(section.title)}</h2>
+      ${renderHtmlTable(section)}
+    </section>`).join("");
+  const groupHtml = (document.groupSections ?? []).map((section) => `
+    <section class="report-block">
+      <h2>${escapeHtml(section.title)}</h2>
+      ${section.subtitle ? `<p class="meta">${escapeHtml(section.subtitle)}</p>` : ""}
+      ${renderHtmlTable(section)}
+    </section>`).join("");
+  const footerHtml = document.footerTotals?.length
+    ? `<section class="grand-total"><h2>Grand Total</h2><div class="summary">${document.footerTotals.map((total) => `<div><span>${escapeHtml(total.label)}</span><strong>${escapeHtml(total.value)}</strong></div>`).join("")}</div></section>`
+    : "";
+  const detailHtml = statement && (document.groupSections?.length || document.summaryTables?.length)
+    ? `${summaryHtml}${groupHtml}`
+    : `<table>
+    <thead><tr>${document.headers.map((header, index) => `<th${numeric[index] ? ' class="num"' : ""}>${escapeHtml(header)}</th>`).join("")}</tr></thead>
+    <tbody>${fallbackRows.join("")}</tbody>
+  </table>`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>${escapeHtml(document.agencyName)} · ${escapeHtml(document.title)}</title>
+  <title>${escapeHtml(document.agencyName)} · ${escapeHtml(document.heading ?? document.title)}</title>
   <style>
-    @page { margin: 0.6in 0.65in; }
+    @page { margin: 0.55in 0.6in; }
     ${printableSuiteStyles()}
+    .report-block { margin: 0 0 18px; break-inside: avoid; }
+    .report-block h2 { font-size: 14px; margin: 0 0 4px; }
+    .group-total td { font-weight: 700; border-top: 1px solid ${"#15233B"}; border-bottom: none; background: transparent; }
+    .grand-total { margin-top: 8px; border-top: 2px solid ${"#15233B"}; padding-top: 12px; }
     @media print {
       thead { display: table-header-group; }
       tr { break-inside: avoid; }
-      .summary { break-inside: avoid; }
+      .summary, .report-block, .grand-total { break-inside: avoid; }
     }
   </style>
 </head>
 <body>
   <header class="letterhead">
     <div class="agency"><span class="brand-mark">M</span>${escapeHtml(document.agencyName)}</div>
-    <h1>${escapeHtml(document.title)}</h1>
-    <p class="meta">${escapeHtml(document.period)} · Generated ${escapeHtml(generated)}</p>
+    <h1>${escapeHtml(document.heading ?? document.title)}</h1>
+    <p class="meta">${escapeHtml(document.subheading ?? document.period)} · Generated ${escapeHtml(generated)}</p>
   </header>
   <div class="filters">${document.filtersUsed.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}</div>
   ${document.notes?.length ? `<div class="filters">${document.notes.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}</div>` : ""}
   <div class="summary">${document.totals.map((total) => `<div><span>${escapeHtml(total.label)}</span><strong>${escapeHtml(total.value)}</strong></div>`).join("")}</div>
-  <table>
-    <thead><tr>${document.headers.map((header, index) => `<th${numeric[index] ? ' class="num"' : ""}>${escapeHtml(header)}</th>`).join("")}</tr></thead>
-    <tbody>${bodyRows.join("")}</tbody>
-  </table>
+  ${detailHtml}
+  ${footerHtml}
   <footer>Confidential · ${escapeHtml(document.agencyName)} commission report · Totals use posted snapshots</footer>
 </body>
 </html>`;
