@@ -1,5 +1,5 @@
 import { FULL_ALLOCATION_BPS } from "./allocations";
-import { AGENCY_OWNER_LABEL, personKey, samePerson, type PersonIdentity } from "./agencyOwner";
+import { AGENCY_OWNER_LABEL, payableOwnerGapMessage, personKey, samePerson, type PersonIdentity } from "./agencyOwner";
 import { paidMonthInRange } from "./dates";
 import {
   isEligibleAgencyFallback,
@@ -134,6 +134,7 @@ export type MonthlyReconciliation = {
   differenceCents: number;
   payableReady: boolean;
   payableReadyMessage: string | null;
+  missingOwnerMonths: string[];
 };
 
 function emptyReconciliation(paidMonth: string, namedPeople: NamedBusinessPerson[]): MonthlyReconciliation {
@@ -165,6 +166,7 @@ function emptyReconciliation(paidMonth: string, namedPeople: NamedBusinessPerson
     differenceCents: 0,
     payableReady: true,
     payableReadyMessage: null,
+    missingOwnerMonths: [],
   };
 }
 
@@ -179,11 +181,13 @@ export function reconcilePostedCommissions(input: {
   const filters = input.filters ?? { paidMonth: input.paidMonth };
   const totals = emptyReconciliation(input.paidMonth, input.namedPeople);
   const ownerAt = input.ownerForPaidMonth ?? (() => input.owner);
+  const monthsWithCommissions = new Set<string>();
 
   for (const commission of input.commissions) {
     if (!commissionMatchesBusinessFilters(commission, filters)) continue;
     totals.postedCommissionCount += 1;
     totals.grossCents += commission.grossCommissionCents;
+    monthsWithCommissions.add(commission.paidMonth);
     const owner = ownerAt(commission.paidMonth);
 
     const leaf = commission.payouts.filter((payout) => payout.recipientType !== "team");
@@ -212,7 +216,13 @@ export function reconcilePostedCommissions(input: {
       if (bucket === "team_parent") continue;
       if (bucket === "mo_direct") totals.moDirectCents += payout.compensationCents;
       else if (bucket === "mo_team") totals.moTeamCents += payout.compensationCents;
-      else if (bucket === "agency_retained") totals.agencyRetainedCents += payout.compensationCents;
+      else if (bucket === "agency_retained") {
+        if (owner) totals.agencyRetainedCents += payout.compensationCents;
+        else {
+          totals.inconsistentCents += payout.compensationCents;
+          commissionInconsistent = true;
+        }
+      }
       else if (bucket === "inconsistent_agency") {
         totals.inconsistentCents += payout.compensationCents;
         commissionInconsistent = true;
@@ -246,12 +256,15 @@ export function reconcilePostedCommissions(input: {
     + totals.legacyNoPayoutCents
     + totals.inconsistentCents
     + totals.unclassifiedCents;
+  const missingOwnerMonths = [...monthsWithCommissions].filter((month) => !ownerAt(month)).sort();
+  const ownerGap = payableOwnerGapMessage(missingOwnerMonths);
   const payableReady = totals.fallbackCommissionCount === 0
     && totals.legacyNoPayoutCount === 0
     && totals.inconsistentCount === 0
     && totals.underDistributedCents === 0
     && totals.overDistributedCents === 0
-    && totals.unclassifiedCents === 0;
+    && totals.unclassifiedCents === 0
+    && missingOwnerMonths.length === 0;
 
   return {
     ...totals,
@@ -262,7 +275,8 @@ export function reconcilePostedCommissions(input: {
     accountedCents: accountedClassifiedTotalCents,
     differenceCents: totals.grossCents - accountedClassifiedTotalCents,
     payableReady,
-    payableReadyMessage: payableReady ? null : NOT_PAYABLE_READY_MESSAGE,
+    payableReadyMessage: payableReady ? null : (ownerGap ?? NOT_PAYABLE_READY_MESSAGE),
+    missingOwnerMonths,
   };
 }
 
@@ -518,8 +532,10 @@ export function agencyOwnerDrilldown(input: {
       if (bucket === "team_parent") continue;
       if (bucket === "mo_direct") moDirectCents += payout.compensationCents;
       else if (bucket === "mo_team") moTeamCents += payout.compensationCents;
-      else if (bucket === "agency_retained") agencyRetainedCents += payout.compensationCents;
-      else if (bucket === "inconsistent_agency") inconsistentCents += payout.compensationCents;
+      else if (bucket === "agency_retained") {
+        if (owner) agencyRetainedCents += payout.compensationCents;
+        else inconsistentCents += payout.compensationCents;
+      } else if (bucket === "inconsistent_agency") inconsistentCents += payout.compensationCents;
       else otherCents += payout.compensationCents;
     }
     const leaf = commission.payouts.filter((payout) => payout.recipientType !== "team");

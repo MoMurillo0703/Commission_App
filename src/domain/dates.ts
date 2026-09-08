@@ -8,11 +8,14 @@ export function currentPaidMonth(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
-export function formatPaidMonthTitle(value: string) {
+export function formatPaidMonthLong(value: string) {
   const [year, month] = value.split("-").map(Number);
   if (!year || !month) return value;
-  const label = new Date(year, month - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" });
-  return `${label} paid commissions`;
+  return new Date(year, month - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" });
+}
+
+export function formatPaidMonthTitle(value: string) {
+  return `${formatPaidMonthLong(value)} paid commissions`;
 }
 
 export const paidMonthPattern = /^\d{4}-(0[1-9]|1[0-2])$/;

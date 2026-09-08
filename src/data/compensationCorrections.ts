@@ -5,6 +5,7 @@ import {
   type PersonKind,
 } from "@/domain/allocations";
 import {
+  bindOriginalCorrectionState,
   correctionPreviewItem,
   correctionPreviewTotals,
   correctablePreviewIds,
@@ -12,6 +13,7 @@ import {
   historicalAllocationState,
   missingAllocationBlockedMessage,
   newerAllocationBlockedMessage,
+  originalStatesMatch,
   proposedCorrectionSettlement,
   payoutAuditSnapshot,
   stalePreviewMessage,
@@ -249,6 +251,14 @@ async function assembleCorrectionPlan(
     const originalLabel = source.class === "legacy_no_payout_snapshot"
       ? LEGACY_NO_PAYOUT_LABEL
       : "Agency 100%";
+    const originalPreview = {
+      originalAgencyCents,
+      originalAgencyNetCents: commission.agencyNetCents,
+      originalAgentCompensationCents: commission.agentCompensationCents,
+      originalPayoutCount: commissionPayouts.length,
+      originalLabel,
+      sourceClass: source.class,
+    };
     if (!isCorrectableSourceClass(source.class)) {
       items.push(correctionPreviewItem({
         commissionId: commission.id,
@@ -257,9 +267,7 @@ async function assembleCorrectionPlan(
         carrierName: commission.carrierName,
         lineOfBusinessName: commission.lineOfBusinessName,
         grossCommissionCents: commission.grossCommissionCents,
-        originalAgencyCents,
-        originalAgencyNetCents: commission.agencyNetCents,
-        originalLabel,
+        ...originalPreview,
         proposed: null,
         blockedReason: source.reason,
       }));
@@ -283,9 +291,7 @@ async function assembleCorrectionPlan(
         carrierName: commission.carrierName,
         lineOfBusinessName: commission.lineOfBusinessName,
         grossCommissionCents: commission.grossCommissionCents,
-        originalAgencyCents,
-        originalAgencyNetCents: commission.agencyNetCents,
-        originalLabel,
+        ...originalPreview,
         proposed: null,
         blockedReason: state === "newer_only" ? newerAllocationBlockedMessage() : missingAllocationBlockedMessage(),
       }));
@@ -304,9 +310,7 @@ async function assembleCorrectionPlan(
       carrierName: commission.carrierName,
       lineOfBusinessName: commission.lineOfBusinessName,
       grossCommissionCents: commission.grossCommissionCents,
-      originalAgencyCents,
-      originalAgencyNetCents: commission.agencyNetCents,
-      originalLabel,
+      ...originalPreview,
       proposed: proposedCorrectionSettlement(settled, allocation),
       blockedReason: null,
     }));
@@ -314,6 +318,15 @@ async function assembleCorrectionPlan(
     authorized.commissions.push({
       commissionId: commission.id,
       paidMonth: commission.statementMonth,
+      original: bindOriginalCorrectionState({
+        sourceClass: source.class,
+        commissionId: commission.id,
+        paidMonth: commission.statementMonth,
+        grossCommissionCents: commission.grossCommissionCents,
+        agentCompensationCents: commission.agentCompensationCents,
+        agencyNetCents: commission.agencyNetCents,
+        payouts: commissionPayouts,
+      }),
       allocation: {
         id: fullAllocation.id,
         groupId: fullAllocation.groupId,
@@ -426,12 +439,13 @@ export async function confirmCompensationCorrection(
       await lockCorrectionSources(transaction, uniqueIds, sources.allocationIds, sources.teamIds);
 
       const plan = await assembleCorrectionPlan(transaction, uniqueIds);
+      const incomingLooksBound = /^[a-f0-9]{64}$/i.test(previewToken);
+      if (plan.previewToken !== previewToken && (plan.previewToken != null || incomingLooksBound)) {
+        throw new ValidationError(stalePreviewMessage());
+      }
       const failed = plan.items.filter((item) => item.blockedReason || !item.proposed);
       if (failed.length > 0 || plan.correctableIds.length !== uniqueIds.length || !plan.previewToken) {
         throw new ValidationError(failed[0]?.blockedReason ?? "One or more commissions cannot be corrected. The batch was not applied.");
-      }
-      if (plan.previewToken !== previewToken) {
-        throw new ValidationError(stalePreviewMessage());
       }
 
       const now = new Date().toISOString();
@@ -459,6 +473,18 @@ export async function confirmCompensationCorrection(
           throw new ValidationError(source.reason ?? "Commission is not an eligible correction source.");
         }
         const authorized = plan.terms.commissions.find((row) => row.commissionId === commission.id);
+        const currentOriginal = bindOriginalCorrectionState({
+          sourceClass: source.class,
+          commissionId: commission.id,
+          paidMonth: commission.statementMonth,
+          grossCommissionCents: commission.grossCommissionCents,
+          agentCompensationCents: commission.agentCompensationCents,
+          agencyNetCents: commission.agencyNetCents,
+          payouts,
+        });
+        if (!authorized || !originalStatesMatch(authorized.original, currentOriginal)) {
+          throw new ValidationError(stalePreviewMessage());
+        }
         const allocation = historicalAllocationForPaidMonth(lockedAllocations, {
           groupId: commission.groupId,
           lineOfBusinessId: commission.lineOfBusinessId,

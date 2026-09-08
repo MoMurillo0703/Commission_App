@@ -12,7 +12,17 @@ type PreviewItem = {
   carrierName: string;
   lineOfBusinessName: string;
   grossCommissionCents: number;
-  original: { label: string; agencyCents: number; agencyNetCents: number };
+  original: {
+    label: string;
+    sourceClass?: string | null;
+    sourceLabel?: string;
+    grossCommissionCents?: number;
+    agentCompensationCents?: number;
+    agencyCents: number;
+    agencyNetCents: number;
+    payoutCount?: number;
+    payoutSnapshotLabel?: string;
+  };
   proposed: {
     allocationId: number;
     allocationLabel: string;
@@ -111,10 +121,24 @@ export function CompensationCorrectionDialog({
             {preview.items.map((item) => (
               <article key={item.commissionId} className="allocation-card">
                 <p><strong>Commission {item.commissionId}</strong> · {formatStatementMonth(item.paidMonth)} · {item.groupName} · {item.carrierName} · {item.lineOfBusinessName}</p>
-                <p>Gross commission {formatCents(item.grossCommissionCents)}</p>
-                <p>Original settlement: {item.original.label} · Agency {formatCents(item.original.agencyCents)} · Agency Net {formatCents(item.original.agencyNetCents)}</p>
+                {item.original.sourceClass === "legacy_no_payout_snapshot" ? (
+                  <div>
+                    <p><strong>ORIGINAL STATE</strong></p>
+                    <p>Gross commission: {formatCents(item.original.grossCommissionCents ?? item.grossCommissionCents)}</p>
+                    <p>Existing header compensation: {formatCents(item.original.agentCompensationCents ?? 0)}</p>
+                    <p>Existing Agency Net: {formatCents(item.original.agencyNetCents)}</p>
+                    <p>Payout snapshot: {item.original.payoutSnapshotLabel ?? "None"}</p>
+                    <p>Source state: {item.original.sourceLabel ?? item.original.label}</p>
+                  </div>
+                ) : (
+                  <>
+                    <p>Gross commission {formatCents(item.grossCommissionCents)}</p>
+                    <p>Original settlement: {item.original.label} · Agency {formatCents(item.original.agencyCents)} · Agency Net {formatCents(item.original.agencyNetCents)}</p>
+                  </>
+                )}
                 {item.proposed ? (
                   <div>
+                    <p><strong>PROPOSED CORRECTED PAYOUTS</strong></p>
                     <p>Proposed settlement uses allocation {item.proposed.allocationId} ({item.proposed.allocationLabel})</p>
                     <table>
                       <thead>

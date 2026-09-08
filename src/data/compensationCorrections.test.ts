@@ -188,7 +188,7 @@ describe("authorized historical compensation correction", () => {
       confirmationKey: "correct-six-002",
       previewToken: preview.previewToken!,
       initiator,
-    })).rejects.toThrow(/already exists for this commission|already corrected|not an eligible|cannot be corrected/);
+    })).rejects.toThrow(/already exists for this commission|already corrected|not an eligible|cannot be corrected|no longer matches/);
 
     for (const commission of posted) {
       const payouts = await listPayoutsForCommission(db, commission.id);

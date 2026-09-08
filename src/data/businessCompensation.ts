@@ -81,8 +81,8 @@ export async function buildMonthlyCompensationReconciliation(
     effectiveStartMonth: row.effectiveStartMonth,
     effectiveEndMonth: row.effectiveEndMonth,
   })), month);
-  const owner = paidMonth ? ownerForPaidMonth(paidMonth) : (owners[0]?.identity ?? null);
-  const namedPeople = namedBusinessPeople(agents, accountManagers, owner);
+  const owner = paidMonth ? ownerForPaidMonth(paidMonth) : null;
+  const namedPeople = namedBusinessPeople(agents, accountManagers, null);
   const payoutsByCommission = new Map<number, typeof payouts>();
   for (const payout of payouts) {
     const current = payoutsByCommission.get(payout.commissionId) ?? [];
@@ -106,9 +106,9 @@ export async function buildMonthlyCompensationReconciliation(
   });
   return {
     owner,
-    ownerConfigured: Boolean(owner),
+    ownerConfigured: reconciliation.missingOwnerMonths.length === 0 && (paidMonth ? Boolean(owner) || reconciliation.postedCommissionCount === 0 : true),
     ownerLabel: AGENCY_OWNER_LABEL,
-    namedPeople,
+    namedPeople: namedBusinessPeople(agents, accountManagers, owner),
     reconciliation,
     drilldown,
     postedCommissionCount: reconciliation.postedCommissionCount,

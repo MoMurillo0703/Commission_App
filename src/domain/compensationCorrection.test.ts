@@ -68,7 +68,17 @@ describe("historical paid-month allocation for correction", () => {
       carrierName: "Principal",
       lineOfBusinessName: "Medical",
       grossCommissionCents: 10000,
-      original: { label: "Agency 100%", agencyCents: 10000, agencyNetCents: 10000 },
+      original: {
+        label: "Agency 100%",
+        sourceClass: "historical_agency_fallback",
+        sourceLabel: "Agency 100%",
+        grossCommissionCents: 10000,
+        agentCompensationCents: 0,
+        agencyCents: 10000,
+        agencyNetCents: 10000,
+        payoutCount: 1,
+        payoutSnapshotLabel: "1 payout row",
+      },
       proposed,
       blockedReason: null,
     }]);
@@ -84,6 +94,16 @@ describe("historical paid-month allocation for correction", () => {
       commissions: [{
         commissionId: 1,
         paidMonth: "2026-09",
+        original: {
+          sourceClass: "historical_agency_fallback",
+          commissionId: 1,
+          paidMonth: "2026-09",
+          grossCommissionCents: 10000,
+          agentCompensationCents: 0,
+          agencyNetCents: 10000,
+          payoutCount: 1,
+          payouts: { count: 1, rows: [{ id: 1, recipientType: "agency", personKind: null, personId: null, allocationId: null, allocationBps: 10000, compensationCents: 10000 }] },
+        },
         allocation: {
           id: 9,
           groupId: 1,
@@ -117,6 +137,65 @@ describe("historical paid-month allocation for correction", () => {
       previewToken: token,
       reason: "Different reason",
       termsHash: token,
+    }));
+    expect(correctionPreviewToken({
+      commissions: [{
+        ...{
+          commissionId: 1,
+          paidMonth: "2026-09",
+          original: {
+            sourceClass: "legacy_no_payout_snapshot" as const,
+            commissionId: 1,
+            paidMonth: "2026-09",
+            grossCommissionCents: 3333,
+            agentCompensationCents: 3333,
+            agencyNetCents: 0,
+            payoutCount: 0,
+            payouts: { count: 0, rows: [] },
+          },
+          allocation: {
+            id: 9,
+            groupId: 1,
+            lineOfBusinessId: 2,
+            effectiveStart: "2026-09",
+            effectiveEnd: null,
+            status: "active",
+            entries: [{ recipientType: "person", personKind: "agent", personId: 7, teamId: null, compensationBps: 10000 }],
+          },
+          teams: [],
+          proposedPayouts: [],
+          proposedAgentCompensationCents: 3333,
+          proposedAgencyNetCents: 0,
+        },
+      }],
+    })).not.toBe(correctionPreviewToken({
+      commissions: [{
+        commissionId: 1,
+        paidMonth: "2026-09",
+        original: {
+          sourceClass: "legacy_no_payout_snapshot",
+          commissionId: 1,
+          paidMonth: "2026-09",
+          grossCommissionCents: 3333,
+          agentCompensationCents: 0,
+          agencyNetCents: 3333,
+          payoutCount: 0,
+          payouts: { count: 0, rows: [] },
+        },
+        allocation: {
+          id: 9,
+          groupId: 1,
+          lineOfBusinessId: 2,
+          effectiveStart: "2026-09",
+          effectiveEnd: null,
+          status: "active",
+          entries: [{ recipientType: "person", personKind: "agent", personId: 7, teamId: null, compensationBps: 10000 }],
+        },
+        teams: [],
+        proposedPayouts: [],
+        proposedAgentCompensationCents: 3333,
+        proposedAgencyNetCents: 0,
+      }],
     }));
   });
 });

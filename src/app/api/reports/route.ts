@@ -75,16 +75,16 @@ async function reportPayload(url: URL) {
         headers: ["Group", "Carrier", "Coverage", "Recipient", "Amount"],
         rows: report.rows.map((row) => [row.groupName, row.carrierName, row.lineOfBusinessName, row.recipientName, formatCents(row.compensationCents)]),
         notes: [
-          payableReady ? "PAYABLE-READY" : "NOT PAYABLE-READY — unresolved compensation remains",
+          payableReady ? "PAYABLE-READY" : (report.reconciliation.payableReadyMessage ?? "NOT PAYABLE-READY — unresolved compensation remains"),
           report.ownerConfigured
             ? "Historical Agency Fallback and Legacy No-Payout Snapshot are unresolved and are not included in Mo / Agency payable totals."
-            : "Agency owner identity is not configured for this paid month. Combined Mo / Agency totals need a confirmed owner row.",
+            : (report.reconciliation.payableReadyMessage ?? "Agency owner is not configured for the selected period."),
         ],
       },
       emptyMessage: null,
       payable: {
         payableReady,
-        message: payableReady ? null : "NOT PAYABLE-READY — unresolved compensation remains",
+        message: payableReady ? null : (report.reconciliation.payableReadyMessage ?? "NOT PAYABLE-READY — unresolved compensation remains"),
       },
       reconciliation: report.reconciliation,
       drilldown: report.drilldown,

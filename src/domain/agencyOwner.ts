@@ -1,5 +1,5 @@
 import type { PersonKind } from "./allocations";
-import { paidMonthInRange } from "./dates";
+import { formatPaidMonthLong, paidMonthInRange } from "./dates";
 
 export type PersonIdentity = {
   personKind: PersonKind;
@@ -56,4 +56,17 @@ export function agencyOwnerForPaidMonth(
     paidMonthInRange(paidMonth, owner.effectiveStartMonth, owner.effectiveEndMonth)
   ));
   return match?.identity ?? null;
+}
+
+export function ownerGapWarning(months: string[]) {
+  const unique = [...new Set(months)].sort();
+  if (unique.length === 0) return null;
+  const labels = unique.map((month) => formatPaidMonthLong(month));
+  if (labels.length === 1) return `Agency owner is not configured for ${labels[0]}.`;
+  return `Agency owner is not configured for ${labels.join(", ")}.`;
+}
+
+export function payableOwnerGapMessage(months: string[]) {
+  const warning = ownerGapWarning(months);
+  return warning ? `NOT PAYABLE-READY — ${warning}` : null;
 }

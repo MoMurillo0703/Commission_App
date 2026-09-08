@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { AGENCY_OWNER_LABEL } from "@/domain/agencyOwner";
 import { formatCents } from "@/domain/money";
-import { formatStatementMonth } from "@/domain/dates";
+import { formatPaidMonthLong, formatStatementMonth } from "@/domain/dates";
 import type { AgencyOwnerDrilldownLine, MonthlyReconciliation, NamedBusinessPerson } from "@/domain/businessCompensation";
 import { personKey } from "@/domain/agencyOwner";
 import { fetchWithDeadline, httpFailureMessage, readApiJson, requestFailureMessage } from "@/lib/apiClient";
@@ -79,6 +79,13 @@ export function CompensationReconciliation({
           <p className={reconciliation.payableReady ? "form-success" : "form-error"}>
             {reconciliation.payableReady ? "PAYABLE-READY" : reconciliation.payableReadyMessage}
           </p>
+          {reconciliation.missingOwnerMonths.length > 0 && (
+            <p className="form-error">
+              {reconciliation.missingOwnerMonths.length === 1
+                ? `Agency owner is not configured for ${formatPaidMonthLong(reconciliation.missingOwnerMonths[0]!)}.`
+                : `Agency owner is not configured for ${reconciliation.missingOwnerMonths.map((month) => formatPaidMonthLong(month)).join(", ")}.`}
+            </p>
+          )}
           <table>
             <tbody>
               <tr><th>Posted commissions</th><td>{reconciliation.postedCommissionCount}</td></tr>

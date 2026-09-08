@@ -563,3 +563,93 @@ describe("September-shaped independent classification", () => {
     expect(report.payableReady).toBe(false);
   });
 });
+
+describe("agency owner coverage for payable readiness", () => {
+  const namedWithMo = [...named, { personKind: "agent" as const, personId: 2, label: "Mo Murillo" }];
+  const settledMo = {
+    id: 50,
+    paidMonth: "2026-09",
+    grossCommissionCents: 2000,
+    agentCompensationCents: 2000,
+    agencyNetCents: 0,
+    payouts: [{
+      recipientType: "person" as const,
+      personKind: "agent" as const,
+      personId: 2,
+      allocationId: 1,
+      allocationBps: 10000,
+      compensationCents: 2000,
+    }],
+  };
+
+  it("resolves a single month with owner coverage and stays payable-ready when settled", () => {
+    const report = reconcilePostedCommissions({
+      paidMonth: "2026-09",
+      owner: mo,
+      namedPeople: namedWithMo,
+      commissions: [settledMo],
+      ownerForPaidMonth: (month) => month === "2026-09" ? mo : null,
+    });
+    expect(report.moAgencyCents).toBe(2000);
+    expect(report.otherCents).toBe(0);
+    expect(report.missingOwnerMonths).toEqual([]);
+    expect(report.payableReady).toBe(true);
+  });
+
+  it("is NOT PAYABLE-READY for a single month without owner coverage and keeps Mo out of Other", () => {
+    const report = reconcilePostedCommissions({
+      paidMonth: "2026-09",
+      owner: null,
+      namedPeople: namedWithMo,
+      commissions: [settledMo],
+      ownerForPaidMonth: () => null,
+    });
+    expect(report.moAgencyCents).toBe(0);
+    expect(report.namedCents["agent:2"]).toBe(2000);
+    expect(report.otherCents).toBe(0);
+    expect(report.payableReady).toBe(false);
+    expect(report.missingOwnerMonths).toEqual(["2026-09"]);
+    expect(report.payableReadyMessage).toMatch(/Agency owner is not configured for September 2026/);
+  });
+
+  it("allows a complete multi-month range and rejects a range or YTD with one uncovered month", () => {
+    const august = { ...settledMo, id: 51, paidMonth: "2026-08" };
+    const covered = reconcilePostedCommissions({
+      paidMonth: "",
+      owner: null,
+      namedPeople: namedWithMo,
+      commissions: [august, settledMo],
+      filters: { startMonth: "2026-08", endMonth: "2026-09" },
+      ownerForPaidMonth: () => mo,
+    });
+    expect(covered.payableReady).toBe(true);
+    expect(covered.moAgencyCents).toBe(4000);
+    expect(covered.missingOwnerMonths).toEqual([]);
+
+    const gap = reconcilePostedCommissions({
+      paidMonth: "",
+      owner: null,
+      namedPeople: namedWithMo,
+      commissions: [august, settledMo],
+      filters: { startMonth: "2026-08", endMonth: "2026-09" },
+      ownerForPaidMonth: (month) => month === "2026-09" ? mo : null,
+    });
+    expect(gap.payableReady).toBe(false);
+    expect(gap.missingOwnerMonths).toEqual(["2026-08"]);
+    expect(gap.namedCents["agent:2"]).toBe(2000);
+    expect(gap.moAgencyCents).toBe(2000);
+    expect(gap.otherCents).toBe(0);
+
+    const ytd = reconcilePostedCommissions({
+      paidMonth: "",
+      owner: null,
+      namedPeople: namedWithMo,
+      commissions: [august, settledMo],
+      filters: { startMonth: "2026-01", endMonth: "2026-09", ytd: true },
+      ownerForPaidMonth: (month) => month === "2026-09" ? mo : null,
+    });
+    expect(ytd.payableReady).toBe(false);
+    expect(ytd.missingOwnerMonths).toEqual(["2026-08"]);
+    expect(ytd.payableReadyMessage).toMatch(/August 2026/);
+  });
+});

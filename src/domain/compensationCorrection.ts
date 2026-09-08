@@ -10,6 +10,8 @@ import {
 } from "./allocations";
 import { paidMonthInRange } from "./dates";
 import { formatAllocationPercent } from "./recipientStatement";
+import type { CorrectionSourceClass } from "./compensationFallback";
+import { LEGACY_NO_PAYOUT_LABEL } from "./compensationFallback";
 
 export type HistoricalAllocationState = "covers" | "newer_only" | "missing";
 
@@ -47,6 +49,30 @@ export type CorrectionPreviewRecipient = {
   compensationCents: number;
 };
 
+export type CorrectionOriginalPayoutState = {
+  count: number;
+  rows: Array<{
+    id: number | null;
+    recipientType: string;
+    personKind: string | null;
+    personId: number | null;
+    allocationId: number | null;
+    allocationBps: number;
+    compensationCents: number;
+  }>;
+};
+
+export type CorrectionOriginalBoundState = {
+  sourceClass: CorrectionSourceClass;
+  commissionId: number;
+  paidMonth: string;
+  grossCommissionCents: number;
+  agentCompensationCents: number;
+  agencyNetCents: number;
+  payoutCount: number;
+  payouts: CorrectionOriginalPayoutState;
+};
+
 export type CorrectionPreviewItem = {
   commissionId: number;
   paidMonth: string;
@@ -56,8 +82,14 @@ export type CorrectionPreviewItem = {
   grossCommissionCents: number;
   original: {
     label: string;
+    sourceClass: CorrectionSourceClass | null;
+    sourceLabel: string;
+    grossCommissionCents: number;
+    agentCompensationCents: number;
     agencyCents: number;
     agencyNetCents: number;
+    payoutCount: number;
+    payoutSnapshotLabel: string;
   };
   proposed: {
     allocationId: number;
@@ -93,6 +125,63 @@ export function proposedCorrectionSettlement(settled: SettledAllocation, allocat
   };
 }
 
+export function originalPayoutState(payouts: Array<{
+  id?: number;
+  recipientType: string;
+  personKind?: string | null;
+  personId?: number | null;
+  allocationId?: number | null;
+  allocationBps: number;
+  compensationCents: number;
+}>): CorrectionOriginalPayoutState {
+  return {
+    count: payouts.length,
+    rows: [...payouts].map((payout) => ({
+      id: payout.id ?? null,
+      recipientType: payout.recipientType,
+      personKind: payout.personKind ?? null,
+      personId: payout.personId ?? null,
+      allocationId: payout.allocationId ?? null,
+      allocationBps: payout.allocationBps,
+      compensationCents: payout.compensationCents,
+    })).sort((left, right) => (
+      (left.id ?? 0) - (right.id ?? 0)
+      || left.recipientType.localeCompare(right.recipientType)
+    )),
+  };
+}
+
+export function bindOriginalCorrectionState(input: {
+  sourceClass: CorrectionSourceClass;
+  commissionId: number;
+  paidMonth: string;
+  grossCommissionCents: number;
+  agentCompensationCents: number;
+  agencyNetCents: number;
+  payouts: Parameters<typeof originalPayoutState>[0];
+}): CorrectionOriginalBoundState {
+  const payouts = originalPayoutState(input.payouts);
+  return {
+    sourceClass: input.sourceClass,
+    commissionId: input.commissionId,
+    paidMonth: input.paidMonth,
+    grossCommissionCents: input.grossCommissionCents,
+    agentCompensationCents: input.agentCompensationCents,
+    agencyNetCents: input.agencyNetCents,
+    payoutCount: payouts.count,
+    payouts,
+  };
+}
+
+export function originalStatesMatch(left: CorrectionOriginalBoundState, right: CorrectionOriginalBoundState) {
+  return stableJson(left) === stableJson(right);
+}
+
+export function payoutSnapshotLabel(payoutCount: number) {
+  if (payoutCount === 0) return "None";
+  return `${payoutCount} payout row${payoutCount === 1 ? "" : "s"}`;
+}
+
 export function correctionPreviewItem(input: {
   commissionId: number;
   paidMonth: string;
@@ -102,10 +191,16 @@ export function correctionPreviewItem(input: {
   grossCommissionCents: number;
   originalAgencyCents: number;
   originalAgencyNetCents: number;
+  originalAgentCompensationCents?: number;
+  originalPayoutCount?: number;
   originalLabel?: string;
+  sourceClass?: CorrectionSourceClass | null;
   proposed: CorrectionPreviewItem["proposed"];
   blockedReason: string | null;
 }): CorrectionPreviewItem {
+  const sourceClass = input.sourceClass ?? null;
+  const sourceLabel = input.originalLabel
+    ?? (sourceClass === "legacy_no_payout_snapshot" ? LEGACY_NO_PAYOUT_LABEL : "Agency 100%");
   return {
     commissionId: input.commissionId,
     paidMonth: input.paidMonth,
@@ -114,9 +209,15 @@ export function correctionPreviewItem(input: {
     lineOfBusinessName: input.lineOfBusinessName,
     grossCommissionCents: input.grossCommissionCents,
     original: {
-      label: input.originalLabel ?? "Agency 100%",
+      label: sourceLabel,
+      sourceClass,
+      sourceLabel,
+      grossCommissionCents: input.grossCommissionCents,
+      agentCompensationCents: input.originalAgentCompensationCents ?? 0,
       agencyCents: input.originalAgencyCents,
       agencyNetCents: input.originalAgencyNetCents,
+      payoutCount: input.originalPayoutCount ?? 0,
+      payoutSnapshotLabel: payoutSnapshotLabel(input.originalPayoutCount ?? 0),
     },
     proposed: input.proposed,
     blockedReason: input.blockedReason,
@@ -147,6 +248,7 @@ export function missingAllocationBlockedMessage() {
 export type CorrectionAuthorizedCommission = {
   commissionId: number;
   paidMonth: string;
+  original: CorrectionOriginalBoundState;
   allocation: {
     id: number;
     groupId: number;
@@ -198,7 +300,7 @@ export function stableJson(value: unknown): string {
 }
 
 export function stalePreviewMessage() {
-  return "The authorized preview no longer matches current allocation or team terms. Preview again.";
+  return "The authorized preview no longer matches the original commission state, allocation, or team terms. Preview again.";
 }
 
 export function historicalAllocationIncludesRecipient(

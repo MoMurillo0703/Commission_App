@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agencyOwnerForPaidMonth, ownerIdentityFromFks } from "./agencyOwner";
+import { agencyOwnerForPaidMonth, ownerGapWarning, ownerIdentityFromFks, payableOwnerGapMessage } from "./agencyOwner";
 
 describe("agency owner identity", () => {
   it("uses FKs not names and selects by paid month", () => {
@@ -15,5 +15,15 @@ describe("agency owner identity", () => {
     expect(agencyOwnerForPaidMonth(owners, "2026-06")?.personId).toBe(2);
     expect(agencyOwnerForPaidMonth(owners, "2026-07")?.personId).toBe(9);
     expect(agencyOwnerForPaidMonth(owners, "2025-12")).toBeNull();
+  });
+});
+
+describe("agency owner gap warnings", () => {
+  it("names the missing paid month and does not guess ownership", () => {
+    expect(ownerGapWarning(["2026-09"])).toBe("Agency owner is not configured for September 2026.");
+    expect(payableOwnerGapMessage(["2026-09", "2026-12"])).toMatch(/NOT PAYABLE-READY/);
+    expect(payableOwnerGapMessage(["2026-09", "2026-12"])).toMatch(/September 2026/);
+    expect(payableOwnerGapMessage(["2026-09", "2026-12"])).toMatch(/December 2026/);
+    expect(ownerGapWarning([])).toBeNull();
   });
 });
