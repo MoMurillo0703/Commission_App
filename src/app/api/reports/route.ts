@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { buildAgencyOwnerReport } from "@/data/businessCompensation";
-import { buildAgencyReport, buildIndividualReport, buildTeamReport } from "@/data/reports";
+import { buildAgencyReport, buildIndividualReport, buildTeamReport, reportNameLookup } from "@/data/reports";
 import { exportReportDocument } from "@/data/reportExport";
 import {
   agencyReportDocument,
@@ -39,35 +39,52 @@ async function reportPayload(url: URL) {
   const db = await getDb();
   const filters = filtersFrom(url);
   if (url.searchParams.get("personKind") === "agency_owner") {
-    const paidMonth = filters.paidMonth ?? "";
-    const report = await buildAgencyOwnerReport(db, paidMonth);
+    const report = await buildAgencyOwnerReport(db, filters);
+    const names = await reportNameLookup(db, filters);
+    const payableReady = report.reconciliation.payableReady;
+    const filtersUsed = [
+      `Period: ${filters.paidMonth || filters.startMonth || "All"}`,
+      `Recipient: ${report.ownerLabel}`,
+      names.groupName ? `Group: ${names.groupName}` : null,
+      names.carrierName ? `Carrier: ${names.carrierName}` : null,
+      names.lineName ? `LOB: ${names.lineName}` : null,
+    ].filter((line): line is string => Boolean(line));
     return {
       filters: { ...filters, kind: "individual" as const },
       names: { personName: report.ownerLabel },
       rows: report.rows,
-      totals: { compensationCents: report.totals.compensationCents, grossCommissionCents: report.totals.grossCents, premiumCents: 0, compensationDistributedCents: 0, agencyNetCents: 0 },
+      totals: {
+        compensationCents: report.totals.compensationCents,
+        grossCommissionCents: report.totals.grossCents,
+        premiumCents: 0,
+        compensationDistributedCents: 0,
+        agencyNetCents: 0,
+      },
       document: {
         agencyName: "Murillo Insurance",
         title: `${report.ownerLabel} Commission Report`,
-        period: paidMonth,
-        filtersUsed: [`Period: ${paidMonth || "All"}`, `Recipient: ${report.ownerLabel}`],
+        period: filters.paidMonth || "",
+        filtersUsed,
         generatedAt: new Date().toISOString(),
         totals: [
           { label: "MO / AGENCY", value: formatCents(report.totals.compensationCents) },
-          { label: "UNRESOLVED / FALLBACK", value: formatCents(report.totals.fallbackAgencyCents + report.totals.unresolvedCents) },
+          { label: "HISTORICAL AGENCY FALLBACK", value: formatCents(report.totals.fallbackAgencyCents) },
+          { label: "LEGACY — NO PAYOUT SNAPSHOT", value: formatCents(report.totals.legacyNoPayoutCents) },
+          { label: "RECONCILIATION DIFFERENCE", value: formatCents(report.totals.differenceCents) },
         ],
         headers: ["Group", "Carrier", "Coverage", "Recipient", "Amount"],
         rows: report.rows.map((row) => [row.groupName, row.carrierName, row.lineOfBusinessName, row.recipientName, formatCents(row.compensationCents)]),
-        notes: report.ownerConfigured
-          ? ["Fallback Agency 100% settlements are listed separately and are not treated as intentional Mo compensation."]
-          : ["Agency owner identity is not configured. Combined Mo / Agency totals need a durable owner person ID."],
+        notes: [
+          payableReady ? "PAYABLE-READY" : "NOT PAYABLE-READY — unresolved compensation remains",
+          report.ownerConfigured
+            ? "Historical Agency Fallback and Legacy No-Payout Snapshot are unresolved and are not included in Mo / Agency payable totals."
+            : "Agency owner identity is not configured for this paid month. Combined Mo / Agency totals need a confirmed owner row.",
+        ],
       },
-      emptyMessage: report.ownerConfigured ? null : "Agency owner identity is not configured.",
+      emptyMessage: null,
       payable: {
-        payableReady: report.totals.unresolvedCents === 0 && report.totals.fallbackAgencyCents === 0,
-        message: report.totals.fallbackAgencyCents || report.totals.unresolvedCents
-          ? "Unresolved or fallback Agency amounts are excluded from Mo / Agency compensation."
-          : null,
+        payableReady,
+        message: payableReady ? null : "NOT PAYABLE-READY — unresolved compensation remains",
       },
       reconciliation: report.reconciliation,
       drilldown: report.drilldown,

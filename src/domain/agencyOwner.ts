@@ -1,4 +1,5 @@
 import type { PersonKind } from "./allocations";
+import { paidMonthInRange } from "./dates";
 
 export type PersonIdentity = {
   personKind: PersonKind;
@@ -28,3 +29,31 @@ export function parsePersonKey(value: string): PersonIdentity | null {
 }
 
 export const AGENCY_OWNER_LABEL = "Mo / Agency";
+
+export type AgencyCompensationOwnerPeriod = {
+  id?: number;
+  identity: PersonIdentity;
+  effectiveStartMonth: string;
+  effectiveEndMonth: string | null;
+};
+
+export function ownerIdentityFromFks(
+  agentId: number | null | undefined,
+  accountManagerId: number | null | undefined,
+): PersonIdentity | null {
+  if (agentId != null && accountManagerId == null) return { personKind: "agent", personId: agentId };
+  if (accountManagerId != null && agentId == null) {
+    return { personKind: "account_manager", personId: accountManagerId };
+  }
+  return null;
+}
+
+export function agencyOwnerForPaidMonth(
+  owners: AgencyCompensationOwnerPeriod[],
+  paidMonth: string,
+): PersonIdentity | null {
+  const match = owners.find((owner) => (
+    paidMonthInRange(paidMonth, owner.effectiveStartMonth, owner.effectiveEndMonth)
+  ));
+  return match?.identity ?? null;
+}

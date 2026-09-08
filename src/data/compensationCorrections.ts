@@ -19,7 +19,11 @@ import {
   type CorrectionPreviewItem,
 } from "@/domain/compensationCorrection";
 import { correctionPreviewToken, correctionRequestFingerprint } from "@/domain/compensationCorrectionAuth";
-import { classifyAgencyFallback } from "@/domain/compensationFallback";
+import {
+  classifyCorrectionSource,
+  isCorrectableSourceClass,
+  LEGACY_NO_PAYOUT_LABEL,
+} from "@/domain/compensationFallback";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import {
@@ -240,8 +244,12 @@ async function assembleCorrectionPlan(
       continue;
     }
     const commissionPayouts = payoutsByCommission.get(commission.id) ?? [];
-    const eligibility = classifyAgencyFallback(fallbackInput(commission, commissionPayouts, corrected));
-    if (!eligibility.eligible) {
+    const source = classifyCorrectionSource(fallbackInput(commission, commissionPayouts, corrected));
+    const originalAgencyCents = commissionPayouts[0]?.compensationCents ?? 0;
+    const originalLabel = source.class === "legacy_no_payout_snapshot"
+      ? LEGACY_NO_PAYOUT_LABEL
+      : "Agency 100%";
+    if (!isCorrectableSourceClass(source.class)) {
       items.push(correctionPreviewItem({
         commissionId: commission.id,
         paidMonth: commission.statementMonth,
@@ -249,10 +257,11 @@ async function assembleCorrectionPlan(
         carrierName: commission.carrierName,
         lineOfBusinessName: commission.lineOfBusinessName,
         grossCommissionCents: commission.grossCommissionCents,
-        originalAgencyCents: commissionPayouts[0]?.compensationCents ?? 0,
+        originalAgencyCents,
         originalAgencyNetCents: commission.agencyNetCents,
+        originalLabel,
         proposed: null,
-        blockedReason: eligibility.reason,
+        blockedReason: source.reason,
       }));
       continue;
     }
@@ -274,8 +283,9 @@ async function assembleCorrectionPlan(
         carrierName: commission.carrierName,
         lineOfBusinessName: commission.lineOfBusinessName,
         grossCommissionCents: commission.grossCommissionCents,
-        originalAgencyCents: commissionPayouts[0]!.compensationCents,
+        originalAgencyCents,
         originalAgencyNetCents: commission.agencyNetCents,
+        originalLabel,
         proposed: null,
         blockedReason: state === "newer_only" ? newerAllocationBlockedMessage() : missingAllocationBlockedMessage(),
       }));
@@ -294,8 +304,9 @@ async function assembleCorrectionPlan(
       carrierName: commission.carrierName,
       lineOfBusinessName: commission.lineOfBusinessName,
       grossCommissionCents: commission.grossCommissionCents,
-      originalAgencyCents: commissionPayouts[0]!.compensationCents,
+      originalAgencyCents,
       originalAgencyNetCents: commission.agencyNetCents,
+      originalLabel,
       proposed: proposedCorrectionSettlement(settled, allocation),
       blockedReason: null,
     }));
@@ -443,9 +454,9 @@ export async function confirmCompensationCorrection(
         if (!commission) throw new ValidationError("Commission not found.");
         const payouts = await listPayoutsForCommission(transaction, item.commissionId);
         const corrected = await listCorrectedCommissionIds(transaction);
-        const eligibility = classifyAgencyFallback(fallbackInput(commission, payouts, corrected));
-        if (!eligibility.eligible) {
-          throw new ValidationError(eligibility.reason ?? "Commission is not an eligible Agency fallback.");
+        const source = classifyCorrectionSource(fallbackInput(commission, payouts, corrected));
+        if (!isCorrectableSourceClass(source.class)) {
+          throw new ValidationError(source.reason ?? "Commission is not an eligible correction source.");
         }
         const authorized = plan.terms.commissions.find((row) => row.commissionId === commission.id);
         const allocation = historicalAllocationForPaidMonth(lockedAllocations, {

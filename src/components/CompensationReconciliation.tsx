@@ -49,8 +49,6 @@ export function CompensationReconciliation({
     }
   }
 
-  const unresolved = (reconciliation?.unresolvedCents ?? 0) + (reconciliation?.fallbackAgencyCents ?? 0);
-
   return (
     <section className="panel">
       <div className="panel-head">
@@ -58,11 +56,11 @@ export function CompensationReconciliation({
           <p className="eyebrow">Monthly control</p>
           <h2>Compensation reconciliation</h2>
           <p>
-            {AGENCY_OWNER_LABEL} is Mo direct + Mo team + legitimate Agency-retained money.
-            Team parents are ignored. Fallback Agency 100% and missing payouts stay unresolved.
+            {AGENCY_OWNER_LABEL} is Mo direct + Mo team + legitimate allocated Agency-retained money.
+            Team parents are ignored. Historical Agency Fallback and Legacy No-Payout Snapshot stay unresolved.
           </p>
           {!ownerConfigured && (
-            <p className="muted-note">Agency owner identity is not configured. Combined {AGENCY_OWNER_LABEL} needs a durable owner person ID.</p>
+            <p className="muted-note">Agency owner identity is not configured for the selected paid month. Combined {AGENCY_OWNER_LABEL} needs a confirmed owner row.</p>
           )}
         </div>
       </div>
@@ -78,25 +76,35 @@ export function CompensationReconciliation({
       {reconciliation && (
         <>
           <h3>{formatStatementMonth(reconciliation.paidMonth)}</h3>
+          <p className={reconciliation.payableReady ? "form-success" : "form-error"}>
+            {reconciliation.payableReady ? "PAYABLE-READY" : reconciliation.payableReadyMessage}
+          </p>
           <table>
             <tbody>
-              <tr><th>Total commission received</th><td>{formatCents(reconciliation.grossCents)}</td></tr>
-              <tr><th>{AGENCY_OWNER_LABEL}</th><td>{formatCents(reconciliation.moAgencyCents)}</td></tr>
+              <tr><th>Posted commissions</th><td>{reconciliation.postedCommissionCount}</td></tr>
+              <tr><th>Posted gross</th><td>{formatCents(reconciliation.grossCents)}</td></tr>
+              <tr><th>{AGENCY_OWNER_LABEL} settled</th><td>{formatCents(reconciliation.moAgencyCents)}</td></tr>
               {namedPeople.map((person) => (
                 <tr key={personKey(person)}>
-                  <th>{person.label}</th>
+                  <th>{person.label} settled</th>
                   <td>{formatCents(reconciliation.namedCents[personKey(person)] ?? 0)}</td>
                 </tr>
               ))}
-              <tr><th>Other recipients</th><td>{formatCents(reconciliation.otherCents)}</td></tr>
-              <tr><th>Unresolved</th><td>{formatCents(unresolved)}</td></tr>
-              <tr><th>Total accounted for</th><td>{formatCents(reconciliation.accountedCents)}</td></tr>
-              <tr><th>Difference</th><td>{formatCents(reconciliation.differenceCents)}</td></tr>
+              <tr><th>Other settled</th><td>{formatCents(reconciliation.otherCents)}</td></tr>
+              <tr><th>Historical Agency Fallback</th><td>{formatCents(reconciliation.fallbackAgencyCents)}</td></tr>
+              <tr><th>LEGACY — NO PAYOUT SNAPSHOT</th><td>{formatCents(reconciliation.legacyNoPayoutCents)}</td></tr>
+              <tr><th>Inconsistent / unresolved Agency</th><td>{formatCents(reconciliation.inconsistentCents)}</td></tr>
+              <tr><th>Under-distributed</th><td>{formatCents(reconciliation.underDistributedCents)}</td></tr>
+              <tr><th>Over-distributed</th><td>{formatCents(reconciliation.overDistributedCents)}</td></tr>
+              <tr><th>Unclassified</th><td>{formatCents(reconciliation.unclassifiedCents)}</td></tr>
+              <tr><th>Accounted classified total</th><td>{formatCents(reconciliation.accountedClassifiedTotalCents)}</td></tr>
+              <tr><th>Reconciliation difference</th><td>{formatCents(reconciliation.differenceCents)}</td></tr>
+              <tr><th>Canonical payout total</th><td>{formatCents(reconciliation.canonicalPayoutTotalCents)}</td></tr>
             </tbody>
           </table>
           <p className="muted-note">
             {AGENCY_OWNER_LABEL} breakdown: direct {formatCents(reconciliation.moDirectCents)} · team {formatCents(reconciliation.moTeamCents)} · Agency retained {formatCents(reconciliation.agencyRetainedCents)}.
-            Fallback Agency {formatCents(reconciliation.fallbackAgencyCents)} is unresolved, not intentional Mo compensation.
+            Difference is posted gross minus independently classified totals. Unresolved classes are not Mo pay.
           </p>
           <button type="button" className="secondary" onClick={() => setOpen((current) => !current)}>
             {open ? "Hide" : "Show"} {AGENCY_OWNER_LABEL} drilldown
@@ -114,6 +122,8 @@ export function CompensationReconciliation({
                   <th>Agency retained</th>
                   <th>{AGENCY_OWNER_LABEL}</th>
                   <th>Other</th>
+                  <th>Fallback</th>
+                  <th>No payout</th>
                   <th>Distributed</th>
                   <th>Difference</th>
                 </tr>
@@ -130,6 +140,8 @@ export function CompensationReconciliation({
                     <td>{formatCents(line.agencyRetainedCents)}</td>
                     <td>{formatCents(line.moAgencyCents)}</td>
                     <td>{formatCents(line.otherCents)}</td>
+                    <td>{formatCents(line.fallbackAgencyCents)}</td>
+                    <td>{formatCents(line.legacyNoPayoutCents)}</td>
                     <td>{formatCents(line.distributedCents)}</td>
                     <td>{formatCents(line.differenceCents)}</td>
                   </tr>

@@ -687,6 +687,7 @@ export function CompensationWorkspace({
             <p>Enter recipients once, select the Lines of Coverage that should use this setup, then apply. Already-configured lines stay unchanged unless you intentionally select them. Posted payout snapshots are not rewritten.</p>
             <h3>Lines of Coverage</h3>
             {coverageLines.length > 0 && (
+              <>
               <table>
                 <thead>
                   <tr>
@@ -705,14 +706,19 @@ export function CompensationWorkspace({
                       namedPeople,
                       paidMonth: draft.effectiveStart || reviewContext?.paidMonth || null,
                     });
-                    const total = shares.totalBps || (line.configured ? 10000 : 0);
+                    const mixed = shares.mixedTeamVersions;
+                    const total = mixed ? 0 : (shares.totalBps || (line.configured ? 10000 : 0));
+                    const cell = (bps: number) => {
+                      if (mixed) return "—";
+                      return line.configured || shares.totalBps ? `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 2)}%` : "—";
+                    };
                     return (
                       <tr key={`biz-${line.lineOfBusinessId}`}>
                         <td>{line.name}</td>
-                        <td>{line.configured || shares.totalBps ? `${(shares.moAgencyBps / 100).toFixed(shares.moAgencyBps % 100 === 0 ? 0 : 2)}%` : "—"}</td>
+                        <td>{cell(shares.moAgencyBps)}</td>
                         {namedPeople.map((person) => {
                           const bps = shares.namedBps[personKey(person)] ?? 0;
-                          return <td key={personKey(person)}>{line.configured || shares.totalBps ? `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 2)}%` : "—"}</td>;
+                          return <td key={personKey(person)}>{cell(bps)}</td>;
                         })}
                         <td>{total ? `${(total / 100).toFixed(total % 100 === 0 ? 0 : 2)}%` : "—"}</td>
                       </tr>
@@ -720,6 +726,16 @@ export function CompensationWorkspace({
                   })}
                 </tbody>
               </table>
+              {coverageLines.some((line) => businessAllocationShares({
+                entries: line.entries,
+                teams,
+                owner: agencyOwner,
+                namedPeople,
+                paidMonth: draft.effectiveStart || reviewContext?.paidMonth || null,
+              }).mixedTeamVersions) && (
+                <p className="muted-note">Select a paid month. Team membership versions are never combined.</p>
+              )}
+              </>
             )}
             {coverageTable}
             <div className="related-block">

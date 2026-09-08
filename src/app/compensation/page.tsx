@@ -10,9 +10,10 @@ import { listGroups } from "@/data/groups";
 import { listLinesOfBusiness } from "@/data/linesOfBusiness";
 import { listGroupLineEvidence } from "@/data/groupLineEvidence";
 import { listTeams } from "@/data/teams";
-import { resolveAgencyOwnerIdentity } from "@/data/agencyOwner";
+import { getAgencyOwnerForPaidMonth } from "@/data/agencyOwner";
 import { buildCompensationDirectory, namedBusinessPeople } from "@/data/businessCompensation";
 import { parseCommissionIds } from "@/domain/compensationExceptions";
+import { currentPaidMonth, isPaidMonth } from "@/domain/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -32,12 +33,13 @@ export default async function CompensationPage({
   const params = searchParams ? await searchParams : {};
   const focusAllocationId = Number(params.allocationId);
   const paidMonth = params.paidMonth ?? "";
-  const [agents, accountManagers, directory] = await Promise.all([
+  const ownerMonth = isPaidMonth(paidMonth) ? paidMonth : currentPaidMonth();
+  const [agents, accountManagers, directory, agencyOwner] = await Promise.all([
     listAgents(),
     listAccountManagers(),
     buildCompensationDirectory(),
+    getAgencyOwnerForPaidMonth(undefined, ownerMonth),
   ]);
-  const agencyOwner = resolveAgencyOwnerIdentity();
   const reviewCommissions = params.review === "1" && paidMonth
     ? await listPostedCompensationExceptions(undefined, {
       paidMonth,

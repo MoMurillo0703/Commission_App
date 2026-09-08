@@ -212,6 +212,16 @@ export const compensationCorrectionBatches = pgTable("compensation_correction_ba
   createdAt: text("created_at").notNull(),
 });
 
+export const agencyCompensationOwners = pgTable("agency_compensation_owners", {
+  id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
+  agentId: integer("agent_id").references(() => agents.id),
+  accountManagerId: integer("account_manager_id").references(() => accountManagers.id),
+  effectiveStartMonth: text("effective_start_month").notNull(),
+  effectiveEndMonth: text("effective_end_month"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
 export const compensationCorrectionItems = pgTable("compensation_correction_items", {
   id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
   batchId: integer("batch_id").notNull().references(() => compensationCorrectionBatches.id),
@@ -246,3 +256,4 @@ export type CompensationAllocationEntry = typeof compensationAllocationEntries.$
 export type CommissionPayout = typeof commissionPayouts.$inferSelect;
 export type CompensationCorrectionBatch = typeof compensationCorrectionBatches.$inferSelect;
 export type CompensationCorrectionItem = typeof compensationCorrectionItems.$inferSelect;
+export type AgencyCompensationOwner = typeof agencyCompensationOwners.$inferSelect;

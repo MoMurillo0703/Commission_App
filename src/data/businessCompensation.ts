@@ -1,25 +1,26 @@
-import { AGENCY_OWNER_LABEL, personKey, type PersonIdentity } from "@/domain/agencyOwner";
+import { AGENCY_OWNER_LABEL, agencyOwnerForPaidMonth, personKey, type PersonIdentity } from "@/domain/agencyOwner";
 import {
   agencyOwnerDrilldown,
   classifyCompensationGroups,
+  drilldownPayableTotals,
   reconcilePostedCommissions,
   type NamedBusinessPerson,
 } from "@/domain/businessCompensation";
 import { missingLinesForGroup } from "@/domain/compensationHome";
+import { isEligibleAgencyFallback } from "@/domain/compensationFallback";
+import { normalizeReportFilters, type ReportFilters } from "@/domain/reports";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import { listAccountManagers } from "./accountManagers";
 import { listAgents } from "./agents";
-import { resolveAgencyOwnerIdentity } from "./agencyOwner";
+import { listAgencyCompensationOwners } from "./agencyOwner";
 import { listAllocations } from "./allocations";
 import { listCommissions } from "./commissions";
 import { listCorrectedCommissionIds } from "./compensationCorrections";
-import { isEligibleAgencyFallback } from "@/domain/compensationFallback";
 import { listGroups } from "./groups";
 import { listGroupLineEvidence } from "./groupLineEvidence";
 import { listLinesOfBusiness } from "./linesOfBusiness";
 import { listAllPayouts } from "./payouts";
-import { listTeams } from "./teams";
 
 export function namedBusinessPeople(
   agents: Array<{ id: number; name: string }>,
@@ -36,18 +37,51 @@ export function namedBusinessPeople(
   ].filter((person) => !owner || personKey(person) !== personKey(owner));
 }
 
+function commissionInputs(
+  commissions: Awaited<ReturnType<typeof listCommissions>>,
+  payoutsByCommission: Map<number, Awaited<ReturnType<typeof listAllPayouts>>>,
+  corrected: Set<number>,
+) {
+  return commissions.map((commission) => ({
+    id: commission.id,
+    paidMonth: commission.statementMonth,
+    groupId: commission.groupId,
+    carrierId: commission.carrierId,
+    lineOfBusinessId: commission.lineOfBusinessId,
+    groupName: commission.groupName,
+    carrierName: commission.carrierName,
+    lineOfBusinessName: commission.lineOfBusinessName,
+    grossCommissionCents: commission.grossCommissionCents,
+    agentCompensationCents: commission.agentCompensationCents,
+    agencyNetCents: commission.agencyNetCents,
+    hasPriorCorrection: corrected.has(commission.id),
+    payouts: payoutsByCommission.get(commission.id) ?? [],
+  }));
+}
+
 export async function buildMonthlyCompensationReconciliation(
   db: AppDatabase | undefined,
-  paidMonth: string,
+  filters: string | Pick<ReportFilters, "paidMonth" | "startMonth" | "endMonth" | "ytd" | "groupId" | "carrierId" | "lineOfBusinessId">,
 ) {
   const database = await resolveDb(db);
-  const [commissions, payouts, agents, accountManagers] = await Promise.all([
+  const normalized = typeof filters === "string"
+    ? normalizeReportFilters({ kind: "agency", paidMonth: filters })
+    : normalizeReportFilters({ kind: "agency", ...filters });
+  const paidMonth = normalized.paidMonth ?? "";
+  const [commissions, payouts, agents, accountManagers, owners, corrected] = await Promise.all([
     listCommissions(database),
     listAllPayouts(database),
     listAgents(database),
     listAccountManagers(database),
+    listAgencyCompensationOwners(database),
+    listCorrectedCommissionIds(database),
   ]);
-  const owner = resolveAgencyOwnerIdentity();
+  const ownerForPaidMonth = (month: string) => agencyOwnerForPaidMonth(owners.map((row) => ({
+    identity: row.identity,
+    effectiveStartMonth: row.effectiveStartMonth,
+    effectiveEndMonth: row.effectiveEndMonth,
+  })), month);
+  const owner = paidMonth ? ownerForPaidMonth(paidMonth) : (owners[0]?.identity ?? null);
   const namedPeople = namedBusinessPeople(agents, accountManagers, owner);
   const payoutsByCommission = new Map<number, typeof payouts>();
   for (const payout of payouts) {
@@ -55,41 +89,39 @@ export async function buildMonthlyCompensationReconciliation(
     current.push(payout);
     payoutsByCommission.set(payout.commissionId, current);
   }
-  const monthCommissions = commissions.filter((row) => row.statementMonth === paidMonth);
+  const mapped = commissionInputs(commissions, payoutsByCommission, corrected);
   const reconciliation = reconcilePostedCommissions({
     paidMonth,
     owner,
     namedPeople,
-    commissions: monthCommissions.map((commission) => ({
-      id: commission.id,
-      paidMonth: commission.statementMonth,
-      grossCommissionCents: commission.grossCommissionCents,
-      payouts: payoutsByCommission.get(commission.id) ?? [],
-    })),
+    commissions: mapped,
+    filters: normalized,
+    ownerForPaidMonth,
   });
   const drilldown = agencyOwnerDrilldown({
     owner,
-    commissions: monthCommissions.map((commission) => ({
-      paidMonth: commission.statementMonth,
-      carrierName: commission.carrierName,
-      groupName: commission.groupName,
-      lineOfBusinessName: commission.lineOfBusinessName,
-      grossCommissionCents: commission.grossCommissionCents,
-      payouts: payoutsByCommission.get(commission.id) ?? [],
-    })),
+    commissions: mapped,
+    filters: normalized,
+    ownerForPaidMonth,
   });
   return {
     owner,
+    ownerConfigured: Boolean(owner),
     ownerLabel: AGENCY_OWNER_LABEL,
     namedPeople,
     reconciliation,
     drilldown,
-    postedCommissionCount: monthCommissions.length,
+    postedCommissionCount: reconciliation.postedCommissionCount,
+    headerDetail: drilldownPayableTotals(drilldown),
   };
 }
 
-export async function buildAgencyOwnerReport(db: AppDatabase | undefined, paidMonth: string) {
-  const built = await buildMonthlyCompensationReconciliation(db, paidMonth);
+export async function buildAgencyOwnerReport(
+  db: AppDatabase | undefined,
+  filters: Pick<ReportFilters, "paidMonth" | "startMonth" | "endMonth" | "ytd" | "groupId" | "carrierId" | "lineOfBusinessId">,
+) {
+  const built = await buildMonthlyCompensationReconciliation(db, filters);
+  const paidMonth = built.reconciliation.paidMonth;
   const rows = built.drilldown.flatMap((line) => {
     const parts = [
       line.moDirectCents ? { label: "Mo direct", cents: line.moDirectCents } : null,
@@ -115,17 +147,20 @@ export async function buildAgencyOwnerReport(db: AppDatabase | undefined, paidMo
     }));
   });
   return {
-    ownerConfigured: Boolean(built.owner),
+    ownerConfigured: built.ownerConfigured,
     ownerLabel: built.ownerLabel,
     totals: {
       compensationCents: built.reconciliation.moAgencyCents,
       fallbackAgencyCents: built.reconciliation.fallbackAgencyCents,
+      legacyNoPayoutCents: built.reconciliation.legacyNoPayoutCents,
       unresolvedCents: built.reconciliation.unresolvedCents,
       grossCents: built.reconciliation.grossCents,
+      differenceCents: built.reconciliation.differenceCents,
     },
     rows,
     reconciliation: built.reconciliation,
     drilldown: built.drilldown,
+    headerDetail: built.headerDetail,
   };
 }
 

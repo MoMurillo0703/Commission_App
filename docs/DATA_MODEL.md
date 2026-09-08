@@ -10,7 +10,7 @@ Money: integer cents. Rates: integer basis points.
 
 Row-level security is enabled on application tables. Browser clients do not query these tables; the Next.js server uses the database URL.
 
-## Migrations (0001–0008)
+## Migrations (0001–0009)
 
 | File | Role |
 | --- | --- |
@@ -22,6 +22,7 @@ Row-level security is enabled on application tables. Browser clients do not quer
 | `0006_carrier_coverage_aliases.sql` | Carrier-scoped statement coverage label → LOB |
 | `0007_carrier_group_identities.sql` | Carrier + external Group Number → internal Group |
 | `0008_compensation_corrections.sql` | Immutable compensation-correction audit batches/items and one-correction-per-commission protection |
+| `0009_agency_compensation_owners.sql` | Effective-dated Agency compensation owner. Exactly one of `agent_id` / `account_manager_id`. Periods must not overlap. **No owner row is inserted.** |
 
 Do not rewrite an applied migration. Add a new numbered file. Runtime code must not apply these files. See [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
@@ -128,6 +129,34 @@ Carrier-scoped normalized source coverage label → `line_of_business_id`. Uniqu
 
 Carrier-scoped external Group Number → internal `group_id`. Unique per (`carrier_id`, `external_group_number`). Created from explicit/import-backed carrier context (match or create on a statement that has a carrier). Existing `groups.group_number` values are not copied here unless that carrier relationship is known. The same external number may map to different Groups under different carriers.
 
+### `agency_compensation_owners`
+
+Effective-dated Agency compensation owner used for Mo / Agency reporting. Identity is `agent_id` **or** `account_manager_id` (exactly one). Paid month selects the covering row. Changing a person’s display name does not change identity. Changing the owner later does not rewrite historical payouts.
+
+`0009` creates the empty table only. It does **not** insert a production owner row.
+
+Later Product Owner confirmation is required before inserting:
+
+```sql
+INSERT INTO agency_compensation_owners (
+  agent_id,
+  account_manager_id,
+  effective_start_month,
+  effective_end_month,
+  created_at,
+  updated_at
+) VALUES (
+  2,          -- Mo = agents.id 2
+  NULL,
+  '<CONFIRMED_START_PAID_MONTH>',  -- YYYY-MM, Product Owner must confirm
+  NULL,
+  '<ISO timestamp>',
+  '<ISO timestamp>'
+);
+```
+
+Do not infer the start month. Do not insert this row during application deploy.
+
 ### `schema_migrations`
 
 Filename + applied_at. Written only by `npm run db:migrate` / `db:setup`.
@@ -152,6 +181,10 @@ Examples the schema currently enforces:
   - at most five direct Person entries on an active allocation (same activation function)
   - active Group+LOB allocation periods must not overlap (`prevent_overlapping_compensation_allocations`)
   - active or used allocation identity and entries are immutable (`prevent_active_allocation_identity_changes`, `prevent_active_allocation_entry_changes`)
+- **Agency owner triggers** (0009):
+  - exactly one of `agent_id` / `account_manager_id`
+  - valid YYYY-MM start/end months
+  - owner periods must not overlap (`prevent_overlapping_agency_compensation_owners`)
 
 ### Application-enforced integrity
 

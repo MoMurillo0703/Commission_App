@@ -6,6 +6,7 @@ import {
   commissionRecords,
   compensationCorrectionBatches,
   compensationCorrectionItems,
+  agencyCompensationOwners,
 } from "./schema";
 import { createAgent } from "@/data/agents";
 import { createAllocation } from "@/data/allocations";
@@ -106,5 +107,15 @@ describe("compensation correction migration", () => {
     await expectImmutableAudit(db.execute(sql`DELETE FROM compensation_correction_batches`));
     expect(await db.select().from(compensationCorrectionBatches)).toHaveLength(1);
     expect(await db.select().from(compensationCorrectionItems)).toHaveLength(1);
+  });
+});
+
+describe("agency compensation owner migration", () => {
+  it("applies 0009 without inserting a production owner row", async () => {
+    const db = await createTestDb();
+    const applied = await db.execute(sql`SELECT filename FROM schema_migrations ORDER BY filename`) as unknown as { rows: Array<{ filename: string }> };
+    const filenames = applied.rows.map((row) => row.filename);
+    expect(filenames).toContain("0009_agency_compensation_owners.sql");
+    expect(await db.select().from(agencyCompensationOwners)).toHaveLength(0);
   });
 });

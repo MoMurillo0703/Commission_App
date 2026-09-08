@@ -102,6 +102,7 @@ export function correctionPreviewItem(input: {
   grossCommissionCents: number;
   originalAgencyCents: number;
   originalAgencyNetCents: number;
+  originalLabel?: string;
   proposed: CorrectionPreviewItem["proposed"];
   blockedReason: string | null;
 }): CorrectionPreviewItem {
@@ -113,7 +114,7 @@ export function correctionPreviewItem(input: {
     lineOfBusinessName: input.lineOfBusinessName,
     grossCommissionCents: input.grossCommissionCents,
     original: {
-      label: "Agency 100%",
+      label: input.originalLabel ?? "Agency 100%",
       agencyCents: input.originalAgencyCents,
       agencyNetCents: input.originalAgencyNetCents,
     },

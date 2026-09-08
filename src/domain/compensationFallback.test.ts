@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyAgencyFallback } from "./compensationFallback";
+import { classifyAgencyFallback, classifyCorrectionSource, classifyLegacyNoPayout } from "./compensationFallback";
 
 const genuine = {
   commissionId: 11,
@@ -59,5 +59,28 @@ describe("eligible Agency fallback classification", () => {
       ...genuine,
       payouts: [],
     }).eligible).toBe(false);
+  });
+});
+
+describe("legacy no-payout snapshot classification", () => {
+  it("accepts commissions with zero payout rows and rejects payouts as not no-payout", () => {
+    expect(classifyLegacyNoPayout({
+      ...genuine,
+      payouts: [],
+    }).eligible).toBe(true);
+    expect(classifyCorrectionSource({
+      ...genuine,
+      payouts: [],
+    }).class).toBe("legacy_no_payout_snapshot");
+    expect(classifyCorrectionSource(genuine).class).toBe("historical_agency_fallback");
+    expect(classifyCorrectionSource({
+      ...genuine,
+      payouts: [
+        { recipientType: "person", allocationId: null, allocationBps: 7000, compensationCents: 5600 },
+        { recipientType: "agency", allocationId: null, allocationBps: 3000, compensationCents: 2400 },
+      ],
+      agentCompensationCents: 5600,
+      agencyNetCents: 2400,
+    }).class).toBe("not_eligible");
   });
 });
