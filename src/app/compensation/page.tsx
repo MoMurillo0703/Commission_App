@@ -10,6 +10,8 @@ import { listGroups } from "@/data/groups";
 import { listLinesOfBusiness } from "@/data/linesOfBusiness";
 import { listGroupLineEvidence } from "@/data/groupLineEvidence";
 import { listTeams } from "@/data/teams";
+import { resolveAgencyOwnerIdentity } from "@/data/agencyOwner";
+import { buildCompensationDirectory, namedBusinessPeople } from "@/data/businessCompensation";
 import { parseCommissionIds } from "@/domain/compensationExceptions";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +32,12 @@ export default async function CompensationPage({
   const params = searchParams ? await searchParams : {};
   const focusAllocationId = Number(params.allocationId);
   const paidMonth = params.paidMonth ?? "";
+  const [agents, accountManagers, directory] = await Promise.all([
+    listAgents(),
+    listAccountManagers(),
+    buildCompensationDirectory(),
+  ]);
+  const agencyOwner = resolveAgencyOwnerIdentity();
   const reviewCommissions = params.review === "1" && paidMonth
     ? await listPostedCompensationExceptions(undefined, {
       paidMonth,
@@ -47,8 +55,8 @@ export default async function CompensationPage({
       </header>
       <CompensationWorkspace
         groups={await listGroups()}
-        agents={await listAgents()}
-        accountManagers={await listAccountManagers()}
+        agents={agents}
+        accountManagers={accountManagers}
         linesOfBusiness={await listLinesOfBusiness()}
         initialAllocations={await listAllocations()}
         initialTeams={await listTeams()}
@@ -60,6 +68,9 @@ export default async function CompensationPage({
           personName: params.personName ?? null,
           commissions: reviewCommissions,
         } : null}
+        agencyOwner={agencyOwner}
+        namedPeople={namedBusinessPeople(agents, accountManagers, agencyOwner)}
+        directory={directory}
       />
     </AppShell>
   );

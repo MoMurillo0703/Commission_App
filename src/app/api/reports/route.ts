@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { buildAgencyOwnerReport } from "@/data/businessCompensation";
 import { buildAgencyReport, buildIndividualReport, buildTeamReport } from "@/data/reports";
 import { exportReportDocument } from "@/data/reportExport";
 import {
@@ -11,6 +12,7 @@ import { recipientReportReviewState } from "@/domain/recipientStatement";
 import { getDb } from "@/db";
 import { parseId, toErrorResponse } from "@/lib/http";
 import type { ReportKind } from "@/domain/reports";
+import { formatCents } from "@/domain/money";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +38,41 @@ function filtersFrom(url: URL) {
 async function reportPayload(url: URL) {
   const db = await getDb();
   const filters = filtersFrom(url);
+  if (url.searchParams.get("personKind") === "agency_owner") {
+    const paidMonth = filters.paidMonth ?? "";
+    const report = await buildAgencyOwnerReport(db, paidMonth);
+    return {
+      filters: { ...filters, kind: "individual" as const },
+      names: { personName: report.ownerLabel },
+      rows: report.rows,
+      totals: { compensationCents: report.totals.compensationCents, grossCommissionCents: report.totals.grossCents, premiumCents: 0, compensationDistributedCents: 0, agencyNetCents: 0 },
+      document: {
+        agencyName: "Murillo Insurance",
+        title: `${report.ownerLabel} Commission Report`,
+        period: paidMonth,
+        filtersUsed: [`Period: ${paidMonth || "All"}`, `Recipient: ${report.ownerLabel}`],
+        generatedAt: new Date().toISOString(),
+        totals: [
+          { label: "MO / AGENCY", value: formatCents(report.totals.compensationCents) },
+          { label: "UNRESOLVED / FALLBACK", value: formatCents(report.totals.fallbackAgencyCents + report.totals.unresolvedCents) },
+        ],
+        headers: ["Group", "Carrier", "Coverage", "Recipient", "Amount"],
+        rows: report.rows.map((row) => [row.groupName, row.carrierName, row.lineOfBusinessName, row.recipientName, formatCents(row.compensationCents)]),
+        notes: report.ownerConfigured
+          ? ["Fallback Agency 100% settlements are listed separately and are not treated as intentional Mo compensation."]
+          : ["Agency owner identity is not configured. Combined Mo / Agency totals need a durable owner person ID."],
+      },
+      emptyMessage: report.ownerConfigured ? null : "Agency owner identity is not configured.",
+      payable: {
+        payableReady: report.totals.unresolvedCents === 0 && report.totals.fallbackAgencyCents === 0,
+        message: report.totals.fallbackAgencyCents || report.totals.unresolvedCents
+          ? "Unresolved or fallback Agency amounts are excluded from Mo / Agency compensation."
+          : null,
+      },
+      reconciliation: report.reconciliation,
+      drilldown: report.drilldown,
+    };
+  }
   if (filters.kind === "individual" || filters.kind === "recipient") {
     const report = await buildIndividualReport(db, filters);
     const review = recipientReportReviewState({

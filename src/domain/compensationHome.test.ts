@@ -60,10 +60,12 @@ describe("group-first compensation home", () => {
     const groups = compensationGroupSummaries(allocations, [
       { id: 10, name: "Fresno Heating and Cooling" },
       { id: 11, name: "CJ Torres Construction" },
+      { id: 12, name: "Needs Setup Group" },
     ]);
     expect(groups.map((group) => [group.groupName, group.activeAllocationCount])).toEqual([
       ["CJ Torres Construction", 2],
       ["Fresno Heating and Cooling", 1],
+      ["Needs Setup Group", 0],
     ]);
     expect(groupActiveCountLabel(2)).toBe("2 active LOB allocations");
     expect(filterCompensationGroups(groups, "fresno")).toHaveLength(1);

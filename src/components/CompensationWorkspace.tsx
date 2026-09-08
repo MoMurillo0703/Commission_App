@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { AllocationRecipientEditor } from "@/components/AllocationRecipientEditor";
 import { CompensationCorrectionDialog } from "@/components/CompensationCorrectionDialog";
+import { CompensationReconciliation } from "@/components/CompensationReconciliation";
 import { GroupCoverageTable } from "@/components/GroupCoverageTable";
 import type { AllocationView } from "@/data/allocations";
 import {
@@ -50,6 +51,15 @@ import {
 import { runTeamSaveFlow, teamSavedMessage } from "@/domain/teamSaveFlow";
 import type { GroupLineEvidence } from "@/domain/activeGroupLines";
 import { formatStatementMonth } from "@/domain/dates";
+import { AGENCY_OWNER_LABEL, personKey, type PersonIdentity } from "@/domain/agencyOwner";
+import {
+  businessAllocationShares,
+  compensationFilterLabel,
+  filterCompensationGroupClass,
+  type CompensationGroupClass,
+  type CompensationGroupFilter,
+  type NamedBusinessPerson,
+} from "@/domain/businessCompensation";
 import { bpsToPercentString, parsePercentToBps } from "@/domain/money";
 import { fetchWithDeadline, httpFailureMessage, readApiJson, requestFailureMessage, runBusyAction } from "@/lib/apiClient";
 
@@ -64,6 +74,9 @@ export function CompensationWorkspace({
   groupLineEvidence = [],
   focusAllocationId = null,
   reviewContext = null,
+  agencyOwner = null,
+  namedPeople = [],
+  directory = [],
 }: {
   groups: Group[];
   agents: Agent[];
@@ -79,6 +92,9 @@ export function CompensationWorkspace({
     personName: string | null;
     commissions: PostedCompensationException[];
   } | null;
+  agencyOwner?: PersonIdentity | null;
+  namedPeople?: NamedBusinessPerson[];
+  directory?: CompensationGroupClass[];
 }) {
   const focusedAllocation = focusAllocationId
     ? initialAllocations.find((allocation) => allocation.id === focusAllocationId) ?? null
@@ -123,6 +139,7 @@ export function CompensationWorkspace({
   const [confirmationKey, setConfirmationKey] = useState("");
   const [workspaceKeepLineIds, setWorkspaceKeepLineIds] = useState<number[]>(focusedAllocation ? [focusedAllocation.lineOfBusinessId] : []);
   const [showHistory, setShowHistory] = useState(false);
+  const [groupFilter, setGroupFilter] = useState<CompensationGroupFilter>("all");
   const [lineModes, setLineModes] = useState<Record<number, LineApplyMode>>({});
   const [overrideLineId, setOverrideLineId] = useState<number | null>(focusedAllocation?.lineOfBusinessId ?? null);
   const allocationsRef = useRef(initialAllocations);
@@ -400,7 +417,15 @@ export function CompensationWorkspace({
     }
   }
 
-  const groupSummaries = filterCompensationGroups(compensationGroupSummaries(allocations, groups), query);
+  const groupSummaries = filterCompensationGroups(
+    filterCompensationGroupClass(directory.length ? directory : compensationGroupSummaries(allocations, groups).map((group) => ({
+      ...group,
+      needsCompensation: group.activeAllocationCount === 0,
+      configured: group.activeAllocationCount > 0,
+      historicalException: false,
+    })), groupFilter),
+    query,
+  );
   const exceptionGroups = reviewActive && reviewContext
     ? groupCompensationExceptions(reviewCommissions, allocations)
     : [];
@@ -601,6 +626,10 @@ export function CompensationWorkspace({
         </section>
       )}
 
+      {!reviewActive && (
+        <CompensationReconciliation namedPeople={namedPeople} ownerConfigured={Boolean(agencyOwner)} />
+      )}
+
       {!reviewActive && <section className="panel">
         <div className="panel-head">
           <div>
@@ -608,6 +637,18 @@ export function CompensationWorkspace({
             <h2>Compensation</h2>
             <p>Search a group to see every Line of Coverage together. Enter recipients once and apply them to the selected lines. Posted commissions keep their original payout snapshots.</p>
           </div>
+        </div>
+        <div className="form-actions" style={{ marginBottom: 12, flexWrap: "wrap" }}>
+          {(["all", "needs_compensation", "configured", "historical_exceptions"] as CompensationGroupFilter[]).map((filter) => (
+            <button
+              key={filter}
+              type="button"
+              className={groupFilter === filter ? undefined : "secondary"}
+              onClick={() => setGroupFilter(filter)}
+            >
+              {compensationFilterLabel(filter)}
+            </button>
+          ))}
         </div>
         <label className="directory-controls">
           <input aria-label="Search groups" placeholder="Search groups" value={query} onChange={(event) => setQuery(event.target.value)} />
@@ -645,6 +686,41 @@ export function CompensationWorkspace({
             <h2 id="group-workspace-title">{selectedGroup.name}</h2>
             <p>Enter recipients once, select the Lines of Coverage that should use this setup, then apply. Already-configured lines stay unchanged unless you intentionally select them. Posted payout snapshots are not rewritten.</p>
             <h3>Lines of Coverage</h3>
+            {coverageLines.length > 0 && (
+              <table>
+                <thead>
+                  <tr>
+                    <th>LOB</th>
+                    <th>{AGENCY_OWNER_LABEL}</th>
+                    {namedPeople.map((person) => <th key={personKey(person)}>{person.label}</th>)}
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {coverageLines.map((line) => {
+                    const shares = businessAllocationShares({
+                      entries: line.entries,
+                      teams,
+                      owner: agencyOwner,
+                      namedPeople,
+                      paidMonth: draft.effectiveStart || reviewContext?.paidMonth || null,
+                    });
+                    const total = shares.totalBps || (line.configured ? 10000 : 0);
+                    return (
+                      <tr key={`biz-${line.lineOfBusinessId}`}>
+                        <td>{line.name}</td>
+                        <td>{line.configured || shares.totalBps ? `${(shares.moAgencyBps / 100).toFixed(shares.moAgencyBps % 100 === 0 ? 0 : 2)}%` : "—"}</td>
+                        {namedPeople.map((person) => {
+                          const bps = shares.namedBps[personKey(person)] ?? 0;
+                          return <td key={personKey(person)}>{line.configured || shares.totalBps ? `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 2)}%` : "—"}</td>;
+                        })}
+                        <td>{total ? `${(total / 100).toFixed(total % 100 === 0 ? 0 : 2)}%` : "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
             {coverageTable}
             <div className="related-block">
               <button type="button" className="secondary" onClick={() => setShowHistory((current) => !current)}>

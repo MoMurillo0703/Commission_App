@@ -62,6 +62,7 @@ export function ReportsWorkspace({
   const [busy, setBusy] = useState(false);
 
   const people = useMemo(() => [
+    { key: "agency_owner", label: "Mo / Agency · combined business view" },
     ...agents.map((agent) => ({ key: `agent:${agent.id}`, label: `${agent.name} · Agent` })),
     ...accountManagers.map((manager) => ({ key: `account_manager:${manager.id}`, label: `${manager.name} · Account manager` })),
   ], [accountManagers, agents]);
@@ -75,7 +76,9 @@ export function ReportsWorkspace({
     if (groupId) params.set("groupId", groupId);
     if (carrierId) params.set("carrierId", carrierId);
     if (lineOfBusinessId) params.set("lineOfBusinessId", lineOfBusinessId);
-    if (personKey) {
+    if (personKey === "agency_owner") {
+      params.set("personKind", "agency_owner");
+    } else if (personKey) {
       const [personKind, personId] = personKey.split(":");
       params.set("personKind", personKind);
       params.set("personId", personId);

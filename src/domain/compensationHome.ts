@@ -52,9 +52,7 @@ export function compensationGroupSummaries(
     }
     byGroup.set(allocation.groupId, summary);
   }
-  return [...byGroup.values()]
-    .filter((group) => group.activeAllocationCount > 0 || allocations.some((row) => row.groupId === group.groupId))
-    .sort((left, right) => left.groupName.localeCompare(right.groupName));
+  return [...byGroup.values()].sort((left, right) => left.groupName.localeCompare(right.groupName));
 }
 
 export function filterCompensationGroups(groups: CompensationGroupSummary[], query: string) {
