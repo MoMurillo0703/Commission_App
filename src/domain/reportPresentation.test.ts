@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { individualReportDocument, printableReportHtml } from "./reportDocuments";
+import { agencyReportDocument, individualReportDocument, printableReportHtml } from "./reportDocuments";
 import { exportReportDocument } from "@/data/reportExport";
 import {
   SHARE_PERCENT_UNAVAILABLE,
@@ -12,6 +12,7 @@ import {
   isRecipientCompensationPayout,
   recipientCompensationMethod,
   recipientShareLabel,
+  selectedGrossAllowsSharePercent,
   sharePercentIsAvailable,
   topClientRowKey,
 } from "./reportPresentation";
@@ -139,6 +140,27 @@ describe("individual statement grouping", () => {
     expect(group?.recipientCompensationCents).toBe(3261 + 979);
   });
 
+  it("F. John canonical payable remains $420.40", () => {
+    const rows = [
+      individualRow({
+        recipientMethod: "direct",
+        teamName: null,
+        allocationBps: 5000,
+        grossCommissionCents: 11305,
+        compensationCents: 5653,
+        commissionId: 84,
+        payoutId: 200,
+      }),
+      individualRow({
+        recipientMethod: "team",
+        compensationCents: 36387,
+        commissionId: 1,
+        payoutId: 1,
+      }),
+    ];
+    expect(sumIndividualReport(rows).compensationCents).toBe(42040);
+  });
+
   it("H. Individual Grand Total equals canonical recipient payouts", () => {
     const rows = [
       individualRow(),
@@ -237,9 +259,11 @@ describe("agency executive summaries", () => {
   it("D. calculates carrier and Top Client percentages when selected gross is positive", () => {
     const breakdown = agencyCarrierBreakdown(rows);
     const top = agencyTopClients(rows, 5);
+    expect(selectedGrossAllowsSharePercent(rows)).toBe(true);
     expect(sharePercentIsAvailable(40000, 68000)).toBe(true);
     expect(breakdown.rows[0]?.name).toBe("CaliforniaChoice");
     expect(breakdown.rows[0]?.percent).toBe("77.9%");
+    expect(breakdown.totalPercent).toBe("100.0%");
     expect(top.rows[0]?.percent).toBe("58.8%");
     expect(top.combinedPercent).toBe("97.1%");
   });
@@ -255,6 +279,8 @@ describe("agency executive summaries", () => {
     expect(top.rows.every((row) => row.percent === SHARE_PERCENT_UNAVAILABLE)).toBe(true);
     expect(top.combinedPercent).toBe(SHARE_PERCENT_UNAVAILABLE);
     expect(breakdown.rows.every((row) => row.percent === SHARE_PERCENT_UNAVAILABLE)).toBe(true);
+    expect(breakdown.totalPercent).toBe(SHARE_PERCENT_UNAVAILABLE);
+    expect(selectedGrossAllowsSharePercent(zero)).toBe(false);
     expect(formatShareOfTotal(0, 0)).toBe(SHARE_PERCENT_UNAVAILABLE);
   });
 
@@ -271,6 +297,8 @@ describe("agency executive summaries", () => {
     expect(top.combinedPercent).toBe(SHARE_PERCENT_UNAVAILABLE);
     expect(breakdown.totalCents).toBe(-5000);
     expect(breakdown.rows.every((row) => row.percent === SHARE_PERCENT_UNAVAILABLE)).toBe(true);
+    expect(breakdown.totalPercent).toBe(SHARE_PERCENT_UNAVAILABLE);
+    expect(selectedGrossAllowsSharePercent(negative)).toBe(false);
     expect(formatShareOfTotal(-4000, -5000)).toBe(SHARE_PERCENT_UNAVAILABLE);
   });
 
@@ -280,14 +308,51 @@ describe("agency executive summaries", () => {
       agencyRow({ groupId: 2, groupName: "Client B", grossCommissionCents: -6000 }),
     ];
     const top = agencyTopClients(offsetting, 5);
+    const breakdown = agencyCarrierBreakdown(offsetting);
     expect(top.selectedGrossCents).toBe(4000);
     expect(top.rows[0]?.cents).toBe(10000);
     expect(top.rows[0]?.percent).toBe(SHARE_PERCENT_UNAVAILABLE);
     expect(top.rows[1]?.cents).toBe(-6000);
     expect(top.rows[1]?.percent).toBe(SHARE_PERCENT_UNAVAILABLE);
     expect(top.combinedCents).toBe(4000);
-    expect(top.combinedPercent).toBe("100.0%");
+    expect(top.combinedPercent).toBe(SHARE_PERCENT_UNAVAILABLE);
+    expect(breakdown.rows.every((row) => row.percent === SHARE_PERCENT_UNAVAILABLE)).toBe(true);
+    expect(breakdown.totalPercent).toBe(SHARE_PERCENT_UNAVAILABLE);
+    expect(selectedGrossAllowsSharePercent(offsetting)).toBe(false);
     expect(formatShareOfTotal(10000, 4000)).toBe(SHARE_PERCENT_UNAVAILABLE);
+  });
+
+  it("suppresses every carrier and Top Client percentage for mixed-sign positive net gross", () => {
+    const mixed = [
+      agencyRow({ groupId: 1, groupName: "Client A", carrierId: 1, carrierName: "CaliforniaChoice", grossCommissionCents: 70000 }),
+      agencyRow({ groupId: 2, groupName: "Client B", carrierId: 2, carrierName: "ChoiceBuilder", grossCommissionCents: 40000 }),
+      agencyRow({ groupId: 3, groupName: "Chargeback", carrierId: 1, carrierName: "CaliforniaChoice", grossCommissionCents: -10000 }),
+    ];
+    const top = agencyTopClients(mixed, 5);
+    const breakdown = agencyCarrierBreakdown(mixed);
+    const executive = agencyExecutiveSummary(mixed, true, null);
+    expect(top.selectedGrossCents).toBe(100000);
+    expect(top.rows.map((row) => row.cents)).toEqual([70000, 40000, -10000]);
+    expect(sharePercentIsAvailable(70000, 100000)).toBe(true);
+    expect(selectedGrossAllowsSharePercent(mixed)).toBe(false);
+    expect(top.rows.every((row) => row.percent === SHARE_PERCENT_UNAVAILABLE)).toBe(true);
+    expect(top.combinedCents).toBe(100000);
+    expect(top.combinedPercent).toBe(SHARE_PERCENT_UNAVAILABLE);
+    expect(breakdown.totalCents).toBe(100000);
+    expect(breakdown.rows.map((row) => row.cents).sort((a, b) => b - a)).toEqual([60000, 40000]);
+    expect(breakdown.rows.every((row) => row.percent === SHARE_PERCENT_UNAVAILABLE)).toBe(true);
+    expect(breakdown.totalPercent).toBe(SHARE_PERCENT_UNAVAILABLE);
+    expect(executive.carrierBreakdown.totalPercent).toBe(SHARE_PERCENT_UNAVAILABLE);
+    expect(executive.topClients.combinedPercent).toBe(SHARE_PERCENT_UNAVAILABLE);
+    const document = agencyReportDocument(mixed, executive.totals, { kind: "agency", paidMonth: "2026-09" }, {});
+    const html = printableReportHtml(document);
+    expect(html).toContain("$700.00");
+    expect(html).toContain("$400.00");
+    expect(html).toContain("-$100.00");
+    expect(html).not.toContain("70.0%");
+    expect(html).not.toContain("40.0%");
+    expect(html).not.toContain("100.0%");
+    expect(html).toContain(SHARE_PERCENT_UNAVAILABLE);
   });
 
   it("H. keeps existing September positive-gross ranking and percentages unchanged", () => {

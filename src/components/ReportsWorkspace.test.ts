@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { SHARE_PERCENT_UNAVAILABLE, agencyExecutiveSummary } from "@/domain/reportPresentation";
 import { ReportsWorkspace } from "./ReportsWorkspace";
 
 const stamp = "2026-09-01T00:00:00.000Z";
@@ -98,7 +99,7 @@ describe("rendered Reports workspace", () => {
           totals: [{ label: "Total Commission Received", value: "$100.00" }],
         },
         executive: {
-          carrierBreakdown: { rows: [{ id: 1, name: "Choice Builder", cents: 10000, percent: "100.0%" }], totalCents: 10000 },
+          carrierBreakdown: { rows: [{ id: 1, name: "Choice Builder", cents: 10000, percent: "100.0%" }], totalCents: 10000, totalPercent: "100.0%" },
           topClients: {
             rows: [
               { id: 2, name: "Acme", cents: 5000, percent: "50.0%" },
@@ -114,6 +115,79 @@ describe("rendered Reports workspace", () => {
     expect(html).toContain('data-group-id="8"');
     expect(html.match(/data-group-id="/g)?.length).toBe(2);
     expect(html).toContain("Acme");
+  });
+
+  it("hides all Agency share percentages when the selected population includes a chargeback", () => {
+    const rows = [
+      {
+        paidMonth: "2026-09",
+        groupId: 1,
+        groupName: "Client A",
+        carrierId: 1,
+        carrierName: "CaliforniaChoice",
+        lineOfBusinessId: 1,
+        lineOfBusinessName: "Medical",
+        premiumCents: 0,
+        grossCommissionCents: 70000,
+        compensationDistributedCents: 0,
+        agencyNetCents: 70000,
+      },
+      {
+        paidMonth: "2026-09",
+        groupId: 2,
+        groupName: "Client B",
+        carrierId: 2,
+        carrierName: "ChoiceBuilder",
+        lineOfBusinessId: 1,
+        lineOfBusinessName: "Medical",
+        premiumCents: 0,
+        grossCommissionCents: 40000,
+        compensationDistributedCents: 0,
+        agencyNetCents: 40000,
+      },
+      {
+        paidMonth: "2026-09",
+        groupId: 3,
+        groupName: "Chargeback",
+        carrierId: 1,
+        carrierName: "CaliforniaChoice",
+        lineOfBusinessId: 1,
+        lineOfBusinessName: "Medical",
+        premiumCents: 0,
+        grossCommissionCents: -10000,
+        compensationDistributedCents: 0,
+        agencyNetCents: -10000,
+      },
+    ];
+    const executive = agencyExecutiveSummary(rows, true, null);
+    const html = renderToStaticMarkup(createElement(ReportsWorkspace, {
+      groups: [],
+      carriers: [],
+      linesOfBusiness: [],
+      agents: [],
+      accountManagers: [],
+      teams: [],
+      initialReport: {
+        filters: { kind: "agency" },
+        names: {},
+        rows,
+        totals: { grossCommissionCents: 100000 },
+        document: {
+          title: "Agency Commission Report",
+          period: "2026-09",
+          totals: [{ label: "Total Commission Received", value: "$1,000.00" }],
+        },
+        executive,
+      },
+    }));
+    expect(html).toContain("$700.00");
+    expect(html).toContain("$400.00");
+    expect(html).toContain("-$100.00");
+    expect(html).not.toContain("70.0%");
+    expect(html).not.toContain("40.0%");
+    expect(html).not.toContain("60.0%");
+    expect(html).not.toContain("100.0%");
+    expect(html).toContain(SHARE_PERCENT_UNAVAILABLE);
   });
 
   it("prompts for recipient and paid month instead of showing a $0 individual report", () => {

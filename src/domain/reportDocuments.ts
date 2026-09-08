@@ -19,7 +19,6 @@ import {
 import {
   agencyExecutiveSummary,
   commissionStatementPeriod,
-  formatShareOfTotal,
   individualStatementSummary,
   individualTransactionCells,
   type IndividualGroupSection,
@@ -127,7 +126,7 @@ export function agencyReportDocument(
         headers: ["Carrier", "Commission", "% of Month"],
         rows: carrierRows,
         totals: [{
-          cells: ["TOTAL", formatCents(executive.carrierBreakdown.totalCents), formatShareOfTotal(executive.carrierBreakdown.totalCents, executive.carrierBreakdown.totalCents)],
+          cells: ["TOTAL", formatCents(executive.carrierBreakdown.totalCents), executive.carrierBreakdown.totalPercent],
           emphasis: true,
         }],
       },

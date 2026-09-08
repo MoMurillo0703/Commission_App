@@ -43,9 +43,26 @@ export function sharePercentIsAvailable(partCents: number, wholeCents: number) {
   return true;
 }
 
+export function selectedGrossAllowsSharePercent(rows: Array<{ grossCommissionCents: number }>) {
+  if (rows.some((row) => !Number.isInteger(row.grossCommissionCents) || row.grossCommissionCents < 0)) {
+    return false;
+  }
+  const whole = rows.reduce((sum, row) => sum + row.grossCommissionCents, 0);
+  return whole > 0;
+}
+
 export function formatShareOfTotal(partCents: number, wholeCents: number) {
   if (!sharePercentIsAvailable(partCents, wholeCents)) return SHARE_PERCENT_UNAVAILABLE;
   return `${(Math.round((partCents * 1000) / wholeCents) / 10).toFixed(1)}%`;
+}
+
+export function formatShareOfSelectedGross(
+  partCents: number,
+  wholeCents: number,
+  rows: Array<{ grossCommissionCents: number }>,
+) {
+  if (!selectedGrossAllowsSharePercent(rows)) return SHARE_PERCENT_UNAVAILABLE;
+  return formatShareOfTotal(partCents, wholeCents);
 }
 
 export function compareSignedAmountThenId(
@@ -179,6 +196,7 @@ export type NamedAmountShare = {
 export function agencyCarrierBreakdown(rows: AgencyReportRow[]): {
   rows: NamedAmountShare[];
   totalCents: number;
+  totalPercent: string;
 } {
   const totals = new Map<number, { name: string; cents: number }>();
   for (const row of rows) {
@@ -188,9 +206,18 @@ export function agencyCarrierBreakdown(rows: AgencyReportRow[]): {
   }
   const totalCents = [...totals.values()].reduce((sum, row) => sum + row.cents, 0);
   const ranked = [...totals.entries()]
-    .map(([id, row]) => ({ id, name: row.name, cents: row.cents, percent: formatShareOfTotal(row.cents, totalCents) }))
+    .map(([id, row]) => ({
+      id,
+      name: row.name,
+      cents: row.cents,
+      percent: formatShareOfSelectedGross(row.cents, totalCents, rows),
+    }))
     .sort(compareSignedAmountThenId);
-  return { rows: ranked, totalCents };
+  return {
+    rows: ranked,
+    totalCents,
+    totalPercent: formatShareOfSelectedGross(totalCents, totalCents, rows),
+  };
 }
 
 export function agencyTopClients(rows: AgencyReportRow[], limit = 5): {
@@ -210,12 +237,15 @@ export function agencyTopClients(rows: AgencyReportRow[], limit = 5): {
     .map(([id, row]) => ({ id, name: row.name, cents: row.cents }))
     .sort(compareSignedAmountThenId)
     .slice(0, limit)
-    .map((row) => ({ ...row, percent: formatShareOfTotal(row.cents, selectedGrossCents) }));
+    .map((row) => ({
+      ...row,
+      percent: formatShareOfSelectedGross(row.cents, selectedGrossCents, rows),
+    }));
   const combinedCents = ranked.reduce((sum, row) => sum + row.cents, 0);
   return {
     rows: ranked,
     combinedCents,
-    combinedPercent: formatShareOfTotal(combinedCents, selectedGrossCents),
+    combinedPercent: formatShareOfSelectedGross(combinedCents, selectedGrossCents, rows),
     selectedGrossCents,
   };
 }

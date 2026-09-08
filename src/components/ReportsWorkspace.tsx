@@ -7,7 +7,7 @@ import { formatCents } from "@/domain/money";
 import { formatStatementMonth } from "@/domain/dates";
 import type { AgencyReportRow, IndividualReportRow, ReportKind, TeamReportRow } from "@/domain/reports";
 import {
-  formatShareOfTotal,
+  SHARE_PERCENT_UNAVAILABLE,
   groupIndividualReportRows,
   individualTransactionCells,
   informalRecipientName,
@@ -36,7 +36,7 @@ type ReportResponse = {
     notes?: string[];
   };
   executive?: {
-    carrierBreakdown: { rows: Array<{ id: number; name: string; cents: number; percent: string }>; totalCents: number };
+    carrierBreakdown: { rows: Array<{ id: number; name: string; cents: number; percent: string }>; totalCents: number; totalPercent?: string };
     topClients: { rows: Array<{ id: number; name: string; cents: number; percent: string }>; combinedCents: number; combinedPercent: string };
   };
   emptyMessage?: string | null;
@@ -298,7 +298,7 @@ function AgencyReportView({
 }: {
   rows: AgencyReportRow[];
   executive?: {
-    carrierBreakdown: { rows: Array<{ id: number; name: string; cents: number; percent: string }>; totalCents: number };
+    carrierBreakdown: { rows: Array<{ id: number; name: string; cents: number; percent: string }>; totalCents: number; totalPercent?: string };
     topClients: { rows: Array<{ id: number; name: string; cents: number; percent: string }>; combinedCents: number; combinedPercent: string };
   };
 }) {
@@ -328,7 +328,7 @@ function AgencyReportView({
                 <tr className="report-total-row">
                   <td>TOTAL</td>
                   {moneyCell(executive.carrierBreakdown.totalCents)}
-                  <td className="num">{formatShareOfTotal(executive.carrierBreakdown.totalCents, executive.carrierBreakdown.totalCents)}</td>
+                  <td className="num">{executive.carrierBreakdown.totalPercent ?? SHARE_PERCENT_UNAVAILABLE}</td>
                 </tr>
               </tbody>
             </table>
