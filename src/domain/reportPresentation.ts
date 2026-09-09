@@ -191,8 +191,8 @@ export function individualTransactionCells(row: IndividualReportRow, informalNam
     lob: row.lineOfBusinessName,
     coverageMonth: formatCoverageOrSourcePeriod(row),
     agencyCommission: formatCents(row.grossCommissionCents),
-    share: recipientShareLabel(row),
-    recipientCommission: formatCents(row.compensationCents),
+    share: row.reviewRequired ? "REVIEW REQUIRED" : recipientShareLabel(row),
+    recipientCommission: row.reviewRequired ? "REVIEW REQUIRED" : formatCents(row.compensationCents),
     shareHeader: `${informalName}'s %`,
     recipientHeader: `${informalName}'s Comm`,
   };

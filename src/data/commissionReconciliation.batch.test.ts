@@ -27,6 +27,7 @@ import { agencyReportDocument, printableReportHtml } from "@/domain/reportDocume
 const SEPTEMBER_GROSS = 649973;
 const JOHN_SOURCE_GROSS = 214693;
 const JOHN_CANONICAL_PAYABLE = 42040;
+const JOHN_CURRENT_EARNINGS = 45612;
 const HR_GROSS = 46220;
 
 function distribute(count: number, total: number) {
@@ -278,13 +279,13 @@ describe("September commission reporting and identity reconciliation", () => {
       personKind: "agent",
       personId: john.id,
     });
-    expect(johnReport.totals.compensationCents).toBe(JOHN_CANONICAL_PAYABLE);
-    expect(johnReport.totals.compensationCents).toBe(johnBefore);
+    expect(johnBefore).toBe(JOHN_CANONICAL_PAYABLE);
+    expect(johnReport.totals.compensationCents).toBe(JOHN_CURRENT_EARNINGS);
     expect(johnReport.rows.every((row) => row.paidMonth === "2026-09")).toBe(true);
     expect(johnReport.rows.some((row) => row.premiumMonth === "2026-06" || row.premiumMonth === "2026-08")).toBe(true);
     expect(johnReport.rows.every((row) => row.recipientMethod === "direct" || row.recipientMethod === "team")).toBe(true);
     expect(johnReport.rows.some((row) => row.recipientType === "team")).toBe(false);
-    expect(johnReport.rows.reduce((sum, row) => sum + row.compensationCents, 0)).toBe(JOHN_CANONICAL_PAYABLE);
+    expect(johnReport.rows.reduce((sum, row) => sum + row.compensationCents, 0)).toBe(JOHN_CURRENT_EARNINGS);
 
     const hrPayouts = await listPayoutsForCommission(db, johnSource[0]!.id);
     expect(hrPayouts.every((row) => row.recipientType !== "team_member")).toBe(true);

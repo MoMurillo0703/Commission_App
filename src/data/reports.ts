@@ -17,20 +17,16 @@ import { agents, carriers, commissionRecords, groups, linesOfBusiness } from "@/
 import { historicalAllocationForPaidMonth, historicalAllocationIncludesRecipient } from "@/domain/compensationCorrection";
 import { compensationReviewHref } from "@/domain/compensationExceptions";
 import { isEligibleAgencyFallback } from "@/domain/compensationFallback";
+import { projectIndividualEarnings, projectTeamEarnings } from "@/domain/currentEarnings";
 import { recipientPayableReadiness } from "@/domain/recipientStatement";
-import {
-  agencyExecutiveSummary,
-  isRecipientCompensationPayout,
-  recipientCompensationMethod,
-} from "@/domain/reportPresentation";
-import { individualRecipientTypeLabel } from "@/domain/reportWorkspace";
+import { agencyExecutiveSummary } from "@/domain/reportPresentation";
 import { allocationCandidates, listAllocations } from "./allocations";
 import { buildMonthlyCompensationReconciliation } from "./businessCompensation";
 import { listCorrectedCommissionIds } from "./compensationCorrections";
 import { listAllPayouts } from "./payouts";
-import { listTeams } from "./teams";
-import { getAccountManager } from "./accountManagers";
-import { getAgent } from "./agents";
+import { listTeams, type TeamView } from "./teams";
+import { getAccountManager, listAccountManagers } from "./accountManagers";
+import { getAgent, listAgents } from "./agents";
 import { getCarrier } from "./carriers";
 import { getGroup } from "./groups";
 import { getLineOfBusiness } from "./linesOfBusiness";
@@ -150,60 +146,59 @@ export async function buildAgencyReport(db: AppDatabase | undefined, input: Repo
   };
 }
 
+function personNameLookup(
+  agents: Array<{ id: number; name: string }>,
+  managers: Array<{ id: number; name: string }>,
+) {
+  const names = new Map<string, string>();
+  for (const agent of agents) names.set(`agent:${agent.id}`, agent.name);
+  for (const manager of managers) names.set(`account_manager:${manager.id}`, manager.name);
+  return (kind: "agent" | "account_manager", id: number) => names.get(`${kind}:${id}`) ?? "Person";
+}
+
+function earningsTeams(teams: TeamView[]) {
+  return teams.map((team) => ({
+    id: team.id,
+    name: team.name,
+    members: team.members.map((member) => ({
+      personKind: member.personKind,
+      personId: member.personId,
+      name: member.personName,
+      shareBps: member.shareBps,
+      effectiveStart: member.effectiveStart,
+      effectiveEnd: member.effectiveEnd,
+      status: member.status,
+    })),
+  }));
+}
+
 export async function buildIndividualReport(db: AppDatabase | undefined, input: ReportFilters) {
   const database = await resolveDb(db);
   const filters = normalizeReportFilters({ ...input, kind: input.kind === "recipient" ? "recipient" : "individual" });
   const commissions = await postedCommissions(database, filters);
-  const payouts = await listAllPayouts(database);
-  const byCommission = new Map(commissions.map((row) => [row.id, row]));
-  const rows: IndividualReportRow[] = [];
-  for (const payout of payouts) {
-    if (!isRecipientCompensationPayout(payout)) continue;
-    const method = recipientCompensationMethod(payout.recipientType);
-    if (!method) continue;
-    const commission = byCommission.get(payout.commissionId);
-    if (!commission) continue;
-    if (filters.personKind && payout.personKind !== filters.personKind) continue;
-    if (filters.personId && payout.personId !== filters.personId) continue;
-    if (filters.teamId && payout.teamId !== filters.teamId) continue;
-    rows.push({
-      paidMonth: commission.paidMonth,
-      groupId: commission.groupId,
-      groupName: commission.groupName,
-      carrierId: commission.carrierId,
-      carrierName: commission.carrierName,
-      lineOfBusinessId: commission.lineOfBusinessId,
-      lineOfBusinessName: commission.lineOfBusinessName,
-      recipientName: payout.personName ?? "Person",
-      recipientType: individualRecipientTypeLabel({ personKind: payout.personKind, teamName: payout.teamName }),
-      recipientMethod: method,
-      personKind: payout.personKind,
-      personId: payout.personId,
-      teamName: payout.teamName,
-      grossCommissionCents: commission.grossCommissionCents,
-      allocationBps: payout.allocationBps,
-      teamInternalBps: payout.teamInternalBps,
-      compensationCents: payout.compensationCents,
-      commissionId: commission.id,
-      payoutId: payout.id,
-      allocationId: payout.allocationId,
-      premiumCents: commission.premiumCents,
-      premiumMonth: commission.premiumMonth,
-      sourcePeriodLabel: commission.sourcePeriodLabel,
-      importStatementId: commission.importStatementId,
-    });
-  }
+  const [payouts, agents, managers, allocations, teams] = await Promise.all([
+    listAllPayouts(database),
+    listAgents(database),
+    listAccountManagers(database),
+    listAllocations(database),
+    listTeams(database),
+  ]);
+  const rows: IndividualReportRow[] = projectIndividualEarnings({
+    commissions,
+    allocations: allocationCandidates(allocations),
+    teams: earningsTeams(teams),
+    names: { personName: personNameLookup(agents, managers) },
+    personKind: filters.personKind,
+    personId: filters.personId,
+    teamId: filters.teamId,
+  });
   const payoutsByCommission = new Map<number, typeof payouts>();
   for (const payout of payouts) {
     const current = payoutsByCommission.get(payout.commissionId) ?? [];
     current.push(payout);
     payoutsByCommission.set(payout.commissionId, current);
   }
-  const [corrected, allocations, teams] = await Promise.all([
-    listCorrectedCommissionIds(database),
-    listAllocations(database),
-    listTeams(database),
-  ]);
+  const corrected = await listCorrectedCommissionIds(database);
   const candidates = allocationCandidates(allocations);
   const payable = recipientPayableReadiness({
     postedCommissions: commissions.map((commission) => {
@@ -269,52 +264,19 @@ export async function buildTeamReport(db: AppDatabase | undefined, input: Report
   const database = await resolveDb(db);
   const filters = normalizeReportFilters({ ...input, kind: "team" });
   const commissions = await postedCommissions(database, filters);
-  const payouts = await listAllPayouts(database);
-  const byCommission = new Map(commissions.map((row) => [row.id, row]));
-  const teamParents = payouts.filter((payout) => payout.recipientType === "team" && (!filters.teamId || payout.teamId === filters.teamId));
-  const rows: TeamReportRow[] = [];
-  for (const team of teamParents) {
-    const commission = byCommission.get(team.commissionId);
-    if (!commission) continue;
-    const members = payouts.filter((payout) => payout.parentPayoutId === team.id);
-    if (members.length === 0) {
-      rows.push({
-        snapshotKey: `${commission.id}:${team.id}`,
-        paidMonth: commission.paidMonth,
-        teamId: team.teamId ?? 0,
-        teamName: team.teamName ?? "Team",
-        groupId: commission.groupId,
-        groupName: commission.groupName,
-        lineOfBusinessId: commission.lineOfBusinessId,
-        lineOfBusinessName: commission.lineOfBusinessName,
-        grossCommissionCents: commission.grossCommissionCents,
-        teamAllocationBps: team.allocationBps,
-        teamCompensationCents: team.compensationCents,
-        memberName: "—",
-        memberCompensationCents: 0,
-        memberAllocationBps: 0,
-      });
-      continue;
-    }
-    for (const member of members) {
-      rows.push({
-        snapshotKey: `${commission.id}:${team.id}`,
-        paidMonth: commission.paidMonth,
-        teamId: team.teamId ?? 0,
-        teamName: team.teamName ?? "Team",
-        groupId: commission.groupId,
-        groupName: commission.groupName,
-        lineOfBusinessId: commission.lineOfBusinessId,
-        lineOfBusinessName: commission.lineOfBusinessName,
-        grossCommissionCents: commission.grossCommissionCents,
-        teamAllocationBps: team.allocationBps,
-        teamCompensationCents: team.compensationCents,
-        memberName: member.personName ?? "Member",
-        memberCompensationCents: member.compensationCents,
-        memberAllocationBps: member.allocationBps,
-      });
-    }
-  }
+  const [agents, managers, allocations, teams] = await Promise.all([
+    listAgents(database),
+    listAccountManagers(database),
+    listAllocations(database),
+    listTeams(database),
+  ]);
+  const rows: TeamReportRow[] = projectTeamEarnings({
+    commissions,
+    allocations: allocationCandidates(allocations),
+    teams: earningsTeams(teams),
+    names: { personName: personNameLookup(agents, managers) },
+    teamId: filters.teamId,
+  });
   return {
     filters,
     names: await reportNameLookup(database, filters),

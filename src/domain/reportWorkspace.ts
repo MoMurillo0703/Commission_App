@@ -22,7 +22,7 @@ export function individualReportNeedsRecipientAndMonth(kind: ReportKind) {
 }
 
 export function individualReportPrompt() {
-  return "Choose a recipient and a paid month, then run the Individual Commission Report. The report uses posted payout snapshots and does not mark anyone paid.";
+  return "Choose a recipient and a paid month, then run the Individual Commission Report. The report shows current calculated earnings for that Paid Month. It does not prove anyone was paid.";
 }
 
 export function renderedReportKind(report: { filters?: { kind?: ReportKind } } | null) {

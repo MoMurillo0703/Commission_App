@@ -405,11 +405,15 @@ function IndividualStatement({
   recipientName: string;
   footerTotals?: Array<{ label: string; value: string }>;
 }) {
-  if (rows.length === 0) return <p className="empty">No posted payout records match this recipient and paid month.</p>;
+  if (rows.length === 0) return <p className="empty">No current calculated earnings match this recipient and paid month.</p>;
   const informal = informalRecipientName(recipientName);
   const groups = groupIndividualReportRows(rows);
+  const reviewRows = rows.filter((row) => row.reviewRequired);
   return (
     <>
+      {reviewRows.length > 0 && (
+        <p className="form-error">REVIEW REQUIRED — {reviewRows.length} commission{reviewRows.length === 1 ? "" : "s"} need a valid allocation or Team membership before earnings can be calculated.</p>
+      )}
       {groups.map((group) => {
         const shareHeader = `${informal}'s %`;
         const recipientHeader = `${informal}'s Comm`;
@@ -438,7 +442,7 @@ function IndividualStatement({
                       <td>{cells.coverageMonth}</td>
                       {moneyCell(row.grossCommissionCents)}
                       <td className="num">{cells.share}</td>
-                      {moneyCell(row.compensationCents)}
+                      {row.reviewRequired ? <td>REVIEW REQUIRED</td> : moneyCell(row.compensationCents)}
                     </tr>
                   );
                 })}

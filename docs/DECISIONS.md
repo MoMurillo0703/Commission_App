@@ -28,3 +28,4 @@ Record only intentional decisions and why. Do not restate the full rulebook.
 | 2026-09 | Carrier-scoped Group identities (`0007`) | CaliforniaChoice Group Number belongs to the carrier, not `groups.group_number` | [`DATA_MODEL.md`](DATA_MODEL.md) |
 | 2026-09 | Docs live under `/docs` with one owner per topic | Audits found conflicting root files (`BUILD_STATUS`, `PROJECT`, work package 001) | [`AGENTS.md`](../AGENTS.md) |
 | 2026-09 | Recipient statement PDF from posted payouts; no generated-report ledger | Sprint 1 needs a downloadable payable statement without a second financial dataset | [`CURRENT_SPRINT.md`](CURRENT_SPRINT.md) |
+| 2026-09 | Individual/Team reports project current unpaid earnings from Paid Month | Stored payout snapshots are audit artifacts and must not hide a commission or freeze current earnings; no Agent Payment ledger yet | [`BUSINESS_RULES.md`](BUSINESS_RULES.md) |

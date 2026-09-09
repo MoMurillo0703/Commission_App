@@ -34,6 +34,7 @@ import { allocationProgressLabel, allocationTotals } from "@/domain/allocations"
 import { plannedAllocationTargets, type LineApplyMode } from "@/domain/allocationBulkApply";
 import {
   clearCoverageModes,
+  defaultCoverageModes,
   groupCoverageLines,
   selectNeedingSetupModes,
   setCoverageMode,
@@ -50,7 +51,7 @@ import {
 } from "@/domain/compensationHome";
 import { runTeamSaveFlow, teamSavedMessage } from "@/domain/teamSaveFlow";
 import type { GroupLineEvidence } from "@/domain/activeGroupLines";
-import { formatStatementMonth } from "@/domain/dates";
+import { currentPaidMonth, formatStatementMonth } from "@/domain/dates";
 import { AGENCY_OWNER_LABEL, personKey, type PersonIdentity } from "@/domain/agencyOwner";
 import {
   businessAllocationShares,
@@ -437,7 +438,8 @@ export function CompensationWorkspace({
     && !queueOpen
     && (!reviewActive || exceptionWork.groups.some((group) => group.groupId === selectedGroupId)),
   );
-  const selectedHistory = selectedGroupId ? historicalAllocationsForGroup(allocations, selectedGroupId) : [];
+  const asOfMonth = draft.effectiveStart || reviewContext?.paidMonth || currentPaidMonth();
+  const selectedHistory = selectedGroupId ? historicalAllocationsForGroup(allocations, selectedGroupId, asOfMonth) : [];
   const coverageLines = groupCoverageLines({
     groupId: selectedGroupId ?? draftGroupId,
     lines: linesOfBusiness,
@@ -449,6 +451,7 @@ export function CompensationWorkspace({
         ? currentQueueItem.lineOfBusinessIds
         : []),
     ],
+    asOfMonth,
   });
   const applyLines = coverageLines;
   const templateEntries = draft.entries.flatMap((entry) => {
@@ -465,12 +468,22 @@ export function CompensationWorkspace({
     }
   });
 
+  const templateComplete = allocationTotals(templateEntries).complete;
   const displayedLineModes = overrideLineId != null
     ? Object.fromEntries(coverageLines.map((line) => [
         line.lineOfBusinessId,
         line.lineOfBusinessId === overrideLineId ? "template" as const : "skip" as const,
       ]))
-    : lineModes;
+    : Object.keys(lineModes).length
+      ? lineModes
+      : defaultCoverageModes(coverageLines, templateComplete);
+  const selectedApplyTargets = plannedAllocationTargets({
+    lineIds: coverageLines.map((line) => line.lineOfBusinessId),
+    modes: displayedLineModes,
+    templateEntries: [],
+  });
+  const needsTemplateEntries = selectedApplyTargets.some((target) => target.mode === "template");
+  const canApplySelected = selectedApplyTargets.length > 0 && (!needsTemplateEntries || totals.complete);
 
   function beginLineOverride(line: (typeof coverageLines)[number]) {
     const allocation = allocations.find((row) => row.id === line.allocationId);
@@ -528,7 +541,7 @@ export function CompensationWorkspace({
       onDeactivate={(allocationId) => void deactivate(allocationId)}
       onSelectNeedingSetup={() => {
         setOverrideLineId(null);
-        setLineModes(selectNeedingSetupModes(coverageLines));
+        setLineModes(selectNeedingSetupModes(coverageLines, templateComplete));
       }}
       onClearSelection={() => {
         setOverrideLineId(null);
@@ -684,8 +697,8 @@ export function CompensationWorkspace({
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <p className="eyebrow">Group compensation</p>
             <h2 id="group-workspace-title">{selectedGroup.name}</h2>
-            <p>Enter recipients once, select the Lines of Coverage that should use this setup, then apply. Already-configured lines stay unchanged unless you intentionally select them. Posted payout snapshots are not rewritten.</p>
-            <h3>Lines of Coverage</h3>
+            <p>Enter recipients once, select the Lines of Coverage that should use this setup, then apply. Already-configured lines stay unchanged unless you intentionally select them. Current earnings use this Paid Month effective start. Posted payout snapshots are not rewritten.</p>
+            <h3>CURRENT / AS-OF COMPENSATION</h3>
             {coverageLines.length > 0 && (
               <>
               <table>
@@ -740,18 +753,19 @@ export function CompensationWorkspace({
             {coverageTable}
             <div className="related-block">
               <button type="button" className="secondary" onClick={() => setShowHistory((current) => !current)}>
-                {showHistory ? "Hide history" : "Show historical allocations"}
+                {showHistory ? "Hide compensation history" : "Show compensation history"}
               </button>
+              {showHistory && <h3>COMPENSATION HISTORY</h3>}
               {showHistory && (selectedHistory.length === 0 ? (
-                <p className="empty">No historical allocations for this group.</p>
+                <p className="empty">No compensation history for this group before the as-of Paid Month.</p>
               ) : (
                 <table>
                   <thead>
                     <tr>
                       <th>LOB</th>
                       <th>Recipients</th>
-                      <th>Effective</th>
-                      <th>Status</th>
+                      <th>Effective start</th>
+                      <th>Effective end</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -759,8 +773,8 @@ export function CompensationWorkspace({
                       <tr key={row.id} className="history-row">
                         <td>{row.lineOfBusinessName}</td>
                         <td>{allocationRecipientSummary(row)}</td>
-                        <td>{formatStatementMonth(row.effectiveStart)} – {row.effectiveEnd ? formatStatementMonth(row.effectiveEnd) : "Present"}</td>
-                        <td>{row.status}</td>
+                        <td>{formatStatementMonth(row.effectiveStart)}</td>
+                        <td>{row.effectiveEnd ? formatStatementMonth(row.effectiveEnd) : "Present"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -783,7 +797,7 @@ export function CompensationWorkspace({
               {error && <p className="form-error">{error}</p>}
               {success && <p className="form-success">{success}</p>}
               <div className="form-actions full">
-                <button type="submit" disabled={busy || !totals.complete || coverageLines.length === 0}>
+                <button type="submit" disabled={busy || !canApplySelected || coverageLines.length === 0}>
                   {busy ? "Saving…" : "Apply to Selected Lines"}
                 </button>
                 <button type="button" className="secondary" onClick={() => { resetDraft(); closeGroupWorkspace(); }}>Close</button>
@@ -884,7 +898,7 @@ export function CompensationWorkspace({
               {queueNotice && <p className="muted-note">{queueNotice}</p>}
               {success && <p className="form-success">{success}</p>}
               <div className="form-actions full">
-                <button type="submit" disabled={busy || !totals.complete}>{busy ? "Saving…" : "Apply to Selected Lines"}</button>
+                <button type="submit" disabled={busy || !canApplySelected}>{busy ? "Saving…" : "Apply to Selected Lines"}</button>
                 <button type="button" className="secondary" onClick={skipCurrent}>Skip for now</button>
                 <button type="button" className="secondary" onClick={() => { setQueueOpen(closeQueue().open); setQueueNotice(""); setSuccess(""); resetDraft(); }}>Close</button>
               </div>

@@ -1,7 +1,9 @@
 import { allocationTotals } from "./allocations";
 import { allocationEntriesMatch } from "./allocationTerms";
+import { AGENCY_OWNER_LABEL } from "./agencyOwner";
 import { linesForGroupSelection, type GroupLineEvidence } from "./activeGroupLines";
-import { allocationRecipientSummary, type CompensationHomeAllocation } from "./compensationHome";
+import { allocationCoversMonth, allocationRecipientSummary, type CompensationHomeAllocation } from "./compensationHome";
+import { currentPaidMonth } from "./dates";
 import type { LineApplyMode } from "./allocationBulkApply";
 
 export type GroupCoverageLine = {
@@ -12,6 +14,8 @@ export type GroupCoverageLine = {
   agencyOnly: boolean;
   recipientSummary: string | null;
   allocationId: number | null;
+  effectiveStart: string | null;
+  effectiveEnd: string | null;
   entries: Array<CompensationHomeAllocation["entries"][number] & {
     personKind?: string | null;
     personId?: number | null;
@@ -19,8 +23,8 @@ export type GroupCoverageLine = {
   }>;
 };
 
-function isCompleteActive(allocation: CompensationHomeAllocation) {
-  return allocation.status === "active" && allocationTotals(allocation.entries).complete;
+function isCompleteCovering(allocation: CompensationHomeAllocation, asOfMonth: string) {
+  return allocationCoversMonth(allocation, asOfMonth) && allocationTotals(allocation.entries).complete;
 }
 
 function isAgencyOnly(allocation: CompensationHomeAllocation | undefined) {
@@ -38,23 +42,30 @@ export function groupCoverageLines(input: {
   evidence: GroupLineEvidence[];
   allocations: CompensationHomeAllocation[];
   keepLineIds?: number[];
+  asOfMonth?: string;
 }): GroupCoverageLine[] {
   const visible = linesForGroupSelection(input.groupId, input.lines, input.evidence, input.keepLineIds ?? []);
   if (!input.groupId) return [];
+  const asOfMonth = input.asOfMonth ?? currentPaidMonth();
   return visible.map((line) => {
-    const current = input.allocations.find((row) => (
-      row.groupId === input.groupId
-      && row.lineOfBusinessId === line.id
-      && isCompleteActive(row)
-    ));
+    const covering = input.allocations
+      .filter((row) => (
+        row.groupId === input.groupId
+        && row.lineOfBusinessId === line.id
+        && isCompleteCovering(row, asOfMonth)
+      ))
+      .sort((left, right) => right.effectiveStart.localeCompare(left.effectiveStart) || left.id - right.id);
+    const current = covering[0];
     return {
       lineOfBusinessId: line.id,
       name: line.name,
       needsSetup: !current,
       configured: Boolean(current),
       agencyOnly: isAgencyOnly(current),
-      recipientSummary: current ? allocationRecipientSummary(current) : null,
+      recipientSummary: current ? allocationRecipientSummary(current) : `${AGENCY_OWNER_LABEL} 100%`,
       allocationId: current?.id ?? null,
+      effectiveStart: current?.effectiveStart ?? null,
+      effectiveEnd: current?.effectiveEnd ?? null,
       entries: current?.entries ?? [],
     };
   });
@@ -70,8 +81,8 @@ export function coverageArrangementLabel(
     compensationBps: number;
   }>,
 ) {
-  if (line.needsSetup) return "Needs setup";
-  if (line.agencyOnly) return "Agency 100%";
+  if (!line.configured) return "Agency 100% — Default / Not explicitly configured";
+  if (line.agencyOnly) return "Agency 100% — Configured";
   if (templateEntries && templateEntries.length > 0 && allocationEntriesMatch(
     templateEntries.map((entry) => ({
       recipientType: entry.recipientType as "agency" | "person" | "team",
@@ -94,12 +105,21 @@ export function coverageArrangementLabel(
   return "Already configured";
 }
 
-export function defaultCoverageModes(lines: GroupCoverageLine[]): Record<number, LineApplyMode> {
-  return Object.fromEntries(lines.map((line) => [line.lineOfBusinessId, line.needsSetup ? "template" : "skip"]));
+export function defaultCoverageModes(
+  lines: GroupCoverageLine[],
+  templateComplete = false,
+): Record<number, LineApplyMode> {
+  return Object.fromEntries(lines.map((line) => [
+    line.lineOfBusinessId,
+    line.needsSetup ? (templateComplete ? "template" : "agency") : "skip",
+  ]));
 }
 
-export function selectNeedingSetupModes(lines: GroupCoverageLine[]): Record<number, LineApplyMode> {
-  return defaultCoverageModes(lines);
+export function selectNeedingSetupModes(
+  lines: GroupCoverageLine[],
+  templateComplete = false,
+): Record<number, LineApplyMode> {
+  return defaultCoverageModes(lines, templateComplete);
 }
 
 export function clearCoverageModes(lines: GroupCoverageLine[]): Record<number, LineApplyMode> {

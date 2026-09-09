@@ -38,6 +38,7 @@ describe("group coverage workspace", () => {
         status: "active",
         entries: [{ recipientType: "agency", personName: null, teamName: null, compensationBps: 10000 }],
       }],
+      asOfMonth: "2026-09",
     });
     expect(coverage.map((line) => line.name)).toEqual(["Medical", "Dental", "Vision", "Life"]);
     expect(coverage.filter((line) => line.needsSetup).map((line) => line.name)).toEqual(["Medical", "Dental", "Vision"]);
@@ -45,9 +46,10 @@ describe("group coverage workspace", () => {
       configured: true,
       agencyOnly: true,
     });
-    expect(coverageArrangementLabel(coverage.find((line) => line.name === "Medical")!)).toBe("Needs setup");
-    expect(coverageArrangementLabel(coverage.find((line) => line.name === "Life")!)).toBe("Agency 100%");
-    expect(defaultCoverageModes(coverage)).toEqual({ 1: "template", 2: "template", 3: "template", 4: "skip" });
+    expect(coverageArrangementLabel(coverage.find((line) => line.name === "Medical")!)).toBe("Agency 100% — Default / Not explicitly configured");
+    expect(coverageArrangementLabel(coverage.find((line) => line.name === "Life")!)).toBe("Agency 100% — Configured");
+    expect(defaultCoverageModes(coverage)).toEqual({ 1: "agency", 2: "agency", 3: "agency", 4: "skip" });
+    expect(defaultCoverageModes(coverage, true)).toEqual({ 1: "template", 2: "template", 3: "template", 4: "skip" });
     expect(selectNeedingSetupModes(coverage)).toEqual(defaultCoverageModes(coverage));
     expect(clearCoverageModes(coverage)).toEqual({ 1: "skip", 2: "skip", 3: "skip", 4: "skip" });
   });
@@ -61,6 +63,8 @@ describe("group coverage workspace", () => {
       agencyOnly: false,
       recipientSummary: "John Elizondo 70% · Maurilio Murillo 20% · Laura Montoya 10%",
       allocationId: 11,
+      effectiveStart: "2026-08",
+      effectiveEnd: null,
       entries: groupSplit,
     };
     const vision = {
@@ -77,5 +81,20 @@ describe("group coverage workspace", () => {
     expect(coverageArrangementLabel(medical, groupSplit)).toBe("Uses Group split");
     expect(coverageArrangementLabel(vision, groupSplit)).toBe("Override — John Elizondo 50% · Agency 50%");
     expect(setCoverageMode({ 1: "skip" }, 1, "template")).toEqual({ 1: "template" });
+  });
+
+  it("does not display unused system LOBs without evidence", () => {
+    const coverage = groupCoverageLines({
+      groupId: 1,
+      lines: [...lines, { id: 99, name: "Unused System LOB" }],
+      evidence: [
+        { groupId: 1, lineOfBusinessId: 1 },
+        { groupId: 1, lineOfBusinessId: 2 },
+      ],
+      allocations: [],
+      asOfMonth: "2026-08",
+    });
+    expect(coverage.map((line) => line.name)).toEqual(["Medical", "Dental"]);
+    expect(coverage.every((line) => !line.configured)).toBe(true);
   });
 });

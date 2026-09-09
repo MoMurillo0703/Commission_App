@@ -94,7 +94,7 @@ describe("posted commission reports", () => {
     expect(emptyMonth.availability.availablePaidMonths).toContain("2026-09");
   });
 
-  it("uses posted allocation snapshots for individual and team reports", async () => {
+  it("uses current earnings projection for individual and team reports", async () => {
     const { db, john, team } = await seed();
     const individual = await buildIndividualReport(db, {
       kind: "individual",

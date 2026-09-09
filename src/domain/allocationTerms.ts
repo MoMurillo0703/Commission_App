@@ -166,7 +166,8 @@ export function classifyRequestedAllocation(
     allocationHasExactTerms(allocation, requested, teamsById)
   )) ?? null;
   if (exact) return { status: "exact", allocation: exact };
-  if (overlaps.length > 0) return { status: "conflict", allocation: overlaps[0] ?? null };
+  const closable = overlaps.length > 0 && overlaps.every((prior) => prior.effectiveStart < requested.effectiveStart);
+  if (overlaps.length > 0 && !closable) return { status: "conflict", allocation: overlaps[0] ?? null };
   return { status: "missing", allocation: null };
 }
 

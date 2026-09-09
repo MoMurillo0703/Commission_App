@@ -67,6 +67,7 @@ describe("group-first compensation workspace", () => {
       evidence: lines.map((line) => ({ groupId: 1, lineOfBusinessId: line.id })),
       allocations: [lifeAllocation],
       templateEntries,
+      asOfMonth: "2026-09",
     });
 
     expect(workspace.queue).toHaveLength(2);
@@ -75,7 +76,7 @@ describe("group-first compensation workspace", () => {
     expect(workspace.queueNeedsLabel).toBe("3 Lines of Coverage need compensation");
     expect(workspace.rows.map((row) => row.name)).toEqual(["Medical", "Dental", "Vision", "Life"]);
     expect(workspace.rows.find((row) => row.name === "Life")).toMatchObject({
-      status: "Agency 100%",
+      status: "Agency 100% — Configured",
       selectedByDefault: false,
       configured: true,
     });
@@ -120,6 +121,7 @@ describe("group-first compensation workspace", () => {
       evidence: lines.map((line) => ({ groupId: 1, lineOfBusinessId: line.id })),
       allocations: [lifeAllocation],
       templateEntries,
+      asOfMonth: "2026-09",
     });
     const overrideModes = setCoverageMode(
       Object.fromEntries(workspace.coverage.map((line) => [line.lineOfBusinessId, "skip"])),
@@ -152,5 +154,27 @@ describe("group-first compensation workspace", () => {
       done: true,
       advance: true,
     });
+  });
+
+  it("persists selected unconfigured LOBs as explicit Agency 100% when no template is entered", () => {
+    const workspace = buildGroupCompensationWorkspace({
+      pairs: acceptancePairs(),
+      groupId: 1,
+      lines,
+      evidence: lines.map((line) => ({ groupId: 1, lineOfBusinessId: line.id })),
+      allocations: [lifeAllocation],
+      asOfMonth: "2026-08",
+    });
+    expect(workspace.applyTargets.every((target) => target.mode === "agency")).toBe(true);
+    expect(workspace.applyTargets.map((target) => target.lineOfBusinessId)).toEqual([1, 2, 3]);
+    const body = bulkAllocationRequestBody({
+      groupId: 1,
+      effectiveStart: "2026-08",
+      effectiveEnd: "",
+      targets: workspace.applyTargets,
+      draftEntries: draftFromAllocationEntries([{ recipientType: "agency", compensationPercent: "100" }]),
+    });
+    expect(body.targets.every((target) => target.entries[0]?.recipientType === "agency")).toBe(true);
+    expect(body.targets.some((target) => target.lineOfBusinessId === 4)).toBe(false);
   });
 });

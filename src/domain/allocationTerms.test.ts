@@ -91,6 +91,11 @@ describe("allocation exact-term comparison", () => {
       entries: [{ recipientType: "agency", compensationBps: 10000 }],
     }], requested).status).toBe("conflict");
     expect(classifyRequestedAllocation([], requested).status).toBe("missing");
+    expect(classifyRequestedAllocation([{
+      ...matching,
+      effectiveStart: "2026-08",
+      entries: [{ recipientType: "agency", compensationBps: 10000 }],
+    }], requested).status).toBe("missing");
   });
 
   it("classifies a requested set as exact, partial, conflict, or missing", () => {

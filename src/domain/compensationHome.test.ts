@@ -61,7 +61,7 @@ describe("group-first compensation home", () => {
       { id: 10, name: "Fresno Heating and Cooling" },
       { id: 11, name: "CJ Torres Construction" },
       { id: 12, name: "Needs Setup Group" },
-    ]);
+    ], "2026-09");
     expect(groups.map((group) => [group.groupName, group.activeAllocationCount])).toEqual([
       ["CJ Torres Construction", 2],
       ["Fresno Heating and Cooling", 1],
@@ -72,13 +72,17 @@ describe("group-first compensation home", () => {
   });
 
   it("keeps current allocations and history on the selected group only", () => {
-    expect(currentAllocationsForGroup(allocations, 10)).toHaveLength(1);
-    expect(historicalAllocationsForGroup(allocations, 10)).toHaveLength(1);
+    expect(currentAllocationsForGroup(allocations, 10, "2026-09")).toHaveLength(1);
+    expect(historicalAllocationsForGroup(allocations, 10, "2026-09")).toHaveLength(1);
+    expect(currentAllocationsForGroup(allocations, 10, "2026-08")).toHaveLength(1);
+    expect(currentAllocationsForGroup(allocations, 10, "2026-08")[0]?.status).toBe("inactive");
+    expect(historicalAllocationsForGroup(allocations, 10, "2026-08")[0]?.status).toBe("active");
     expect(missingLinesForGroup(
       10,
       [{ groupId: 10, lineOfBusinessId: 1 }, { groupId: 10, lineOfBusinessId: 8 }],
       [{ id: 1, name: "Dental" }, { id: 8, name: "Life" }],
       allocations,
+      "2026-09",
     ).map((line) => line.name)).toEqual(["Life"]);
   });
 });

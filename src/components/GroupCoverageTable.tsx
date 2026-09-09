@@ -1,8 +1,15 @@
 import type { LineApplyMode } from "@/domain/allocationBulkApply";
+import { formatStatementMonth } from "@/domain/dates";
 import {
   coverageArrangementLabel,
   type GroupCoverageLine,
 } from "@/domain/groupCoverage";
+
+function effectiveLabel(line: GroupCoverageLine) {
+  if (!line.configured || !line.effectiveStart) return "—";
+  if (!line.effectiveEnd) return formatStatementMonth(line.effectiveStart);
+  return `${formatStatementMonth(line.effectiveStart)} – ${formatStatementMonth(line.effectiveEnd)}`;
+}
 
 export function GroupCoverageTable({
   lines,
@@ -50,15 +57,15 @@ export function GroupCoverageTable({
         <thead>
           <tr>
             <th>Apply</th>
-            <th>Coverage</th>
-            <th>Status</th>
-            <th>Recipients</th>
+            <th>LOB</th>
+            <th>Compensation</th>
+            <th>Effective</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           {lines.map((line) => {
-            const mode = modes[line.lineOfBusinessId] ?? (line.needsSetup ? "template" : "skip");
+            const mode = modes[line.lineOfBusinessId] ?? (line.needsSetup ? "agency" : "skip");
             const selected = mode !== "skip";
             return (
               <tr key={line.lineOfBusinessId}>
@@ -71,8 +78,8 @@ export function GroupCoverageTable({
                   />
                 </td>
                 <td><strong>{line.name}</strong></td>
-                <td>{mode === "agency" && selected ? "Agency 100% / no recipient compensation" : coverageArrangementLabel(line, templateEntries)}</td>
-                <td>{line.recipientSummary || "—"}</td>
+                <td>{coverageArrangementLabel(line, templateEntries)}</td>
+                <td>{effectiveLabel(line)}</td>
                 <td>
                   <div className="form-actions">
                     <button type="button" className="secondary" onClick={() => onAgency(line.lineOfBusinessId)}>

@@ -1,5 +1,6 @@
 import { plannedAllocationTargets, type LineApplyMode } from "./allocationBulkApply";
 import { allocationEntryPayload, type DraftRecipient } from "./allocationEditor";
+import { allocationTotals } from "./allocations";
 import {
   afterGroupQueueRefresh,
   groupCompensationQueue,
@@ -8,6 +9,7 @@ import {
 } from "./compensationQueue";
 import type { GroupLineEvidence } from "./activeGroupLines";
 import type { CompensationHomeAllocation } from "./compensationHome";
+import { currentPaidMonth } from "./dates";
 import {
   coverageArrangementLabel,
   defaultCoverageModes,
@@ -24,7 +26,7 @@ export type WorkspaceTemplateEntry = {
 };
 
 export function coverageModeForLine(line: GroupCoverageLine, modes: Record<number, LineApplyMode>): LineApplyMode {
-  return modes[line.lineOfBusinessId] ?? (line.needsSetup ? "template" : "skip");
+  return modes[line.lineOfBusinessId] ?? (line.needsSetup ? "agency" : "skip");
 }
 
 export function buildGroupCompensationWorkspace(input: {
@@ -34,6 +36,7 @@ export function buildGroupCompensationWorkspace(input: {
   evidence: GroupLineEvidence[];
   allocations: CompensationHomeAllocation[];
   templateEntries?: WorkspaceTemplateEntry[];
+  asOfMonth?: string;
 }) {
   const queue = groupCompensationQueue(input.pairs);
   const queueItem = queue.find((item) => item.groupId === input.groupId) ?? null;
@@ -43,8 +46,9 @@ export function buildGroupCompensationWorkspace(input: {
     evidence: input.evidence,
     allocations: input.allocations,
     keepLineIds: queueItem?.lineOfBusinessIds ?? [],
+    asOfMonth: input.asOfMonth ?? currentPaidMonth(),
   });
-  const modes = defaultCoverageModes(coverage);
+  const modes = defaultCoverageModes(coverage, allocationTotals(input.templateEntries ?? []).complete);
   return {
     queue,
     queueItem,

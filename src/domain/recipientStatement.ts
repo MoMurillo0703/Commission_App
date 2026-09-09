@@ -53,7 +53,7 @@ export function recipientPayableReadiness(input: {
 }
 
 export function recipientStatementDisclaimer() {
-  return "This statement shows amounts calculated as payable from posted commissions and stored payout snapshots. Generating it does not mean the recipient has been paid.";
+  return "This statement shows current calculated earnings from posted commissions and the compensation in effect for each commission's Paid Month. Generating it does not mean the recipient has been paid.";
 }
 
 export function sourceCommissionIds(rows: Array<Pick<IndividualReportRow, "commissionId">>) {

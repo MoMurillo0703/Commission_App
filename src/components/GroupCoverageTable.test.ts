@@ -28,6 +28,7 @@ describe("rendered group coverage table", () => {
         status: "active",
         entries: [{ recipientType: "agency", personName: null, teamName: null, compensationBps: 10000 }],
       }],
+      asOfMonth: "2026-09",
     });
     const html = renderToStaticMarkup(createElement(GroupCoverageTable, {
       lines: coverage,
@@ -47,11 +48,11 @@ describe("rendered group coverage table", () => {
     expect(html).toContain("Dental");
     expect(html).toContain("Vision");
     expect(html).toContain("Life");
-    expect(html).toContain("Needs setup");
-    expect(html).toContain("Agency 100%");
-    expect(html).toContain("Agency 100%");
-    expect(html.match(/Needs setup/g)?.length).toBe(3);
+    expect(html).toContain("Agency 100% — Default / Not explicitly configured");
+    expect(html).toContain("Agency 100% — Configured");
+    expect(html.match(/Agency 100% — Default \/ Not explicitly configured/g)?.length).toBe(3);
     expect(html).toContain("Change");
+    expect(html).toContain("Effective");
     expect(html).toContain('aria-label="Select Medical"');
     expect(html).toContain('aria-label="Select Life"');
     expect(html).toMatch(/aria-label="Select Medical"[^>]*checked/);

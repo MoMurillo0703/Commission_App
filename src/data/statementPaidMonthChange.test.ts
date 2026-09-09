@@ -303,12 +303,12 @@ describe("posted statement Change Paid Month", () => {
     const johnSeptember = await buildIndividualReport(db, { kind: "individual", paidMonth: "2026-09", personKind: "agent", personId: john.id });
     const johnAugust = await buildIndividualReport(db, { kind: "individual", paidMonth: "2026-08", personKind: "agent", personId: john.id });
     expect(johnSeptember.rows).toHaveLength(0);
-    expect(johnAugust.totals.compensationCents).toBeGreaterThan(0);
+    expect(johnAugust.totals.compensationCents).toBe(0);
 
     const teamSeptember = await buildTeamReport(db, { kind: "team", paidMonth: "2026-09", teamId: team.id });
     const teamAugust = await buildTeamReport(db, { kind: "team", paidMonth: "2026-08", teamId: team.id });
     expect(teamSeptember.rows).toHaveLength(0);
-    expect(teamAugust.rows.length).toBeGreaterThan(0);
+    expect(teamAugust.rows).toHaveLength(0);
 
     const [audit] = await db.select().from(statementPaidMonthChanges);
     expect(audit.oldPaidMonth).toBe("2026-09");
@@ -368,8 +368,8 @@ describe("posted statement Change Paid Month", () => {
     });
     expect(headerIdentity((await getCommission(db, settled.id))!)).toEqual(beforeHeader);
     expect(payoutIdentity(await listPayoutsForCommission(db, settled.id))).toEqual(beforePayouts);
-    expect((await buildIndividualReport(db, { kind: "individual", paidMonth: "2026-08", personKind: "agent", personId: john.id })).totals.compensationCents).toBe(9000);
-    expect((await buildIndividualReport(db, { kind: "individual", paidMonth: "2026-08", personKind: "agent", personId: mo.id })).rows).toHaveLength(0);
+    expect((await buildIndividualReport(db, { kind: "individual", paidMonth: "2026-08", personKind: "agent", personId: john.id })).totals.compensationCents).toBe(0);
+    expect((await buildIndividualReport(db, { kind: "individual", paidMonth: "2026-08", personKind: "agent", personId: mo.id })).totals.compensationCents).toBe(9000);
   });
 
   it("allows a move when effective Team membership differs and does not recalculate", async () => {

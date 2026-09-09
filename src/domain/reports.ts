@@ -59,6 +59,8 @@ export type IndividualReportRow = {
   premiumMonth?: string | null;
   sourcePeriodLabel?: string | null;
   importStatementId?: number | null;
+  reviewRequired?: boolean;
+  reviewReason?: string | null;
 };
 
 export type TeamReportRow = {
@@ -76,6 +78,8 @@ export type TeamReportRow = {
   memberName: string;
   memberCompensationCents: number;
   memberAllocationBps: number;
+  reviewRequired?: boolean;
+  reviewReason?: string | null;
 };
 
 export type ReportTotals = {
