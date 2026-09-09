@@ -7,12 +7,12 @@ Authoritative owner: **Alex**. Update this file when a release is deployed or ac
 | Field | Value |
 | --- | --- |
 | URL | https://commissionapp-iota.vercel.app |
-| SHA | `b8e67c621ef4e0af83e2d9e3776886cecf045a92` |
+| SHA | `0defc6aa4c88fb98d7e36affd40661dd759d4463` |
 | Deployed | 2026-09-09 |
-| Migrations | **0001–0011** applied (`0010_commission_source_identity.sql` and `0011_source_labels_and_paid_month_changes.sql` applied explicitly before/during this application deploy; additive schema only; no commission or payout backfill) |
+| Migrations | **0001–0011** (no new migration for this application deploy) |
 | Agency owner | Mo / `agents.id = 2`, effective **2026-09 → Present** |
-| Release state | **DEPLOYED — AWAITING PRODUCT QA / ACCEPTANCE** |
-| Product acceptance | Pending Tom production QA and Mo live acceptance of Change Paid Month, reports/source-period display, and related statement workflow. Do not move a live statement Paid Month, repair H&R/Anthem/linkage, or correct Historical Agency Fallback / Legacy No-Payout commissions as a deploy test. |
+| Release state | **DEPLOYED — AWAITING LIVE PRODUCT QA** |
+| Product acceptance | Pending Tom’s live production QA of simplified Change Paid Month (Cal Choice Sep → Aug allowed without destination allocation; financial snapshots preserved). Do not execute H&R/Anthem/linkage repairs or historical compensation correction as a deploy test. |
 
 This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 
@@ -34,7 +34,7 @@ This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 - Report compensation warnings can open Compensation on the exact Groups that need setup
 - Authorized historical compensation correction for proven Agency fallbacks and legacy no-payout snapshots, bound to the preview token, with append-only `0008` audit batches/items
 - Durable Agency compensation owner (`0009`) and Mo / Agency monthly reconciliation with strict Historical Agency Fallback vs LEGACY — NO PAYOUT SNAPSHOT classification; owner coverage is required for payable-ready
-- Posted-statement Change Paid Month (preview → confirm → immutable audit); source coverage / Group / LOB / period labels (`0010`/`0011`); Agency and Individual reports plus PDF/print show coverage month vs source period
+- Posted-statement Change Paid Month is a receipt-month metadata correction (preview → confirm → immutable audit). Destination allocation and Team membership are not required. Posted financial snapshots are preserved. Source coverage / Group / LOB / period labels (`0010`/`0011`); Agency and Individual reports plus PDF/print show coverage month vs source period
 - Recipient commission statement + binary PDF from posted `commission_payouts`
 - Agency / Individual / Team reporting foundation with CSV, XLSX, printable HTML, and PDF export
 - Auth allow-list
