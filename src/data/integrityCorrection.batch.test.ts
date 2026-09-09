@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createAccountManager } from "./accountManagers";
 import { createAgent } from "./agents";
 import { createAllocation, updateAllocation } from "./allocations";
@@ -17,7 +17,7 @@ import { listPayoutsForCommission } from "./payouts";
 import { confirmStatementPaidMonthChange, previewStatementPaidMonthChange } from "./statementPaidMonthChange";
 import { createImportStatement, getImportStatement } from "./statements";
 import { createTeam, replaceTeamMembers } from "./teams";
-import { setTransactionFailPoint } from "./transactionTestHook";
+import { setAfterAllocationNamespaceLock, setTransactionFailPoint } from "./transactionTestHook";
 import { createTestDb } from "@/db/test-db";
 import {
   commissionPayouts,
@@ -28,7 +28,10 @@ import type { StatementPreview } from "@/domain/workbook";
 
 const initiator = { id: "user-1", email: "mo@example.com", name: "Mo Murillo" };
 
-afterEach(() => setTransactionFailPoint(null));
+afterEach(() => {
+  setTransactionFailPoint(null);
+  setAfterAllocationNamespaceLock(null);
+});
 
 function preview(rows: Array<{ key: string; group: string; amount: string }> = [
   { key: "Commissions:1", group: "Acme", amount: "100.00" },
@@ -141,6 +144,19 @@ describe("final integrity correction batch", () => {
       { kind: "carrier", mutate: async ({ postedId }) => { await db.update(commissionRecords).set({ carrierId: otherCarrier.id }).where(eq(commissionRecords.id, postedId)); } },
       { kind: "lob", mutate: async ({ postedId }) => { await db.update(commissionRecords).set({ lineOfBusinessId: medical.id }).where(eq(commissionRecords.id, postedId)); } },
       { kind: "coverage", mutate: async ({ postedId }) => { await db.update(commissionRecords).set({ premiumMonth: "2026-06", sourcePeriodLabel: "06-26" }).where(eq(commissionRecords.id, postedId)); } },
+      { kind: "sourceCoverage", mutate: async ({ postedId }) => { await db.update(commissionRecords).set({ sourceCoverageLabel: "MED" }).where(eq(commissionRecords.id, postedId)); } },
+      { kind: "agent", mutate: async ({ postedId }) => { await db.update(commissionRecords).set({ agentId: john.id }).where(eq(commissionRecords.id, postedId)); } },
+      {
+        kind: "headerMoney",
+        mutate: async ({ postedId }) => {
+          const current = await getCommission(db, postedId);
+          await db.update(commissionRecords).set({
+            compensationBps: 5000,
+            agentCompensationCents: (current?.agentCompensationCents ?? 0) + 1,
+            agencyNetCents: (current?.agencyNetCents ?? 0) - 1,
+          }).where(eq(commissionRecords.id, postedId));
+        },
+      },
       { kind: "allocation", mutate: async ({ allocationId }) => { await updateAllocation(db, allocationId, { status: "inactive" }); } },
       {
         kind: "team",
@@ -557,5 +573,61 @@ describe("final integrity correction batch", () => {
       grossCommissionCents: 250,
     })).rejects.toThrow(/Forced transaction failure/);
     expect(await db.select().from(commissionRecords)).toHaveLength(beforeCount);
+
+    const original = await getCommission(db, posted.id);
+    const originalPayouts = await listPayoutsForCommission(db, posted.id);
+    expect(originalPayouts.length).toBeGreaterThan(0);
+    setTransactionFailPoint("update-commission-after-header");
+    await expect(updateCommission(db, posted.id, { notes: "should not persist" })).rejects.toThrow(/Forced transaction failure: update-commission-after-header/);
+    const restored = await getCommission(db, posted.id);
+    expect(restored).toEqual(original);
+    expect(await listPayoutsForCommission(db, posted.id)).toEqual(originalPayouts);
+    expect(restored?.notes).toBeNull();
+    expect(restored?.grossCommissionCents).toBe(original?.grossCommissionCents);
+    expect(restored?.agentCompensationCents).toBe(original?.agentCompensationCents);
+    expect(restored?.agencyNetCents).toBe(original?.agencyNetCents);
+  });
+
+  it("blocks a new applicable allocation from slipping into paid-month confirmation", async () => {
+    const { db, john, group, carrier, dental, statement } = await postedFixture("phantom-allocation");
+    const posted = await createCommission(db, {
+      statementMonth: "2026-09",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: dental.id,
+      grossCommissionCents: 2500,
+      importStatementId: statement.id,
+      sourceRowKey: "Commissions:1",
+    });
+    const first = await previewStatementPaidMonthChange(db, statement.id, "2026-08");
+    expect(first.confirmable).toBe(true);
+    expect(first.items[0]?.impactClass).toBe("equivalent_terms");
+
+    let heldLocks: Array<{ classid: number; objid: number }> = [];
+    setAfterAllocationNamespaceLock(async (lockedDb) => {
+      const result = await (lockedDb as typeof db).execute(sql`
+        SELECT classid::int AS classid, objid::int AS objid
+        FROM pg_locks
+        WHERE locktype = 'advisory' AND granted
+      `) as unknown as { rows?: Array<{ classid: number; objid: number }> };
+      heldLocks = result.rows ?? [];
+    });
+    await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: dental.id,
+      effectiveStart: "2026-01",
+      entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }],
+    });
+    await expect(confirmStatementPaidMonthChange(db, {
+      statementId: statement.id,
+      newPaidMonth: "2026-08",
+      reason: "Phantom allocation must not commit.",
+      confirmationKey: "phantom-alloc",
+      previewToken: first.previewToken,
+      initiator,
+    })).rejects.toThrow(/no longer matches|different compensation terms/);
+    expect(heldLocks.some((lock) => lock.classid === group.id && lock.objid === dental.id)).toBe(true);
+    expect((await getImportStatement(db, statement.id))?.paidMonth).toBe("2026-09");
+    expect((await getCommission(db, posted.id))?.statementMonth).toBe("2026-09");
   });
 });

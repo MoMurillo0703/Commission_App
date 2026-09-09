@@ -454,12 +454,12 @@ export async function updateCommission(db: AppDatabase | undefined, id: number, 
         .set(valuesFrom(merged, settled, new Date().toISOString(), existing))
         .where(eq(commissionRecords.id, id));
       if (settled.settled) {
-        failIfTestHook("header-payout-after-header");
         await replaceCommissionPayouts(transaction, id, settled.settled.payouts, settled.allocationId);
       }
       const updated = await getCommission(transaction, id);
       if (!updated) throw new ValidationError("Commission record not found after update.");
       assertHeaderPayoutConsistency(updated, await listPayoutsForCommission(transaction, id));
+      failIfTestHook("update-commission-after-header");
     });
   } catch (error) {
     if (isForeignKeyError(error)) throw new ValidationError("Commission records must reference existing groups, carriers, lines of business, and agents.");

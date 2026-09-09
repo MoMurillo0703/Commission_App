@@ -20,6 +20,7 @@ import { getAgent } from "./agents";
 import { getGroup } from "./groups";
 import { getLineOfBusiness } from "./linesOfBusiness";
 import { getTeam } from "./teams";
+import { lockAllocationNamespaces } from "./allocationNamespaceLock";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 
 export type AllocationEntryView = {
@@ -318,10 +319,15 @@ async function writeAllocationRecord(
 export async function createAllocation(db: AppDatabase | undefined, input: AllocationWrite) {
   const database = await resolveDb(db);
   const prepared = await prepareAllocationWrite(database, input);
-  const siblings = await listAllocationsForPair(database, input.groupId, input.lineOfBusinessId);
-  const insertedId = await database.transaction(async (tx) => (
-    writeAllocationRecord(tx as unknown as AppDatabase, input, prepared.period, prepared.status, siblings)
-  ));
+  const insertedId = await database.transaction(async (tx) => {
+    const transaction = tx as unknown as AppDatabase;
+    await lockAllocationNamespaces(transaction, [{
+      groupId: input.groupId,
+      lineOfBusinessId: input.lineOfBusinessId,
+    }]);
+    const siblings = await listAllocationsForPair(transaction, input.groupId, input.lineOfBusinessId);
+    return writeAllocationRecord(transaction, input, prepared.period, prepared.status, siblings);
+  });
   return (await getAllocation(database, insertedId))!;
 }
 
@@ -393,16 +399,21 @@ export async function createAllocationsForLines(
   }
 
   const createdIds = await database.transaction(async (tx) => {
+    const transaction = tx as unknown as AppDatabase;
+    await lockAllocationNamespaces(transaction, toCreate.map((item) => ({
+      groupId: item.write.groupId,
+      lineOfBusinessId: item.write.lineOfBusinessId,
+    })));
     const ids: number[] = [];
     for (const item of toCreate) {
-      const siblings = await listAllocationsForPair(tx as unknown as AppDatabase, item.write.groupId, item.write.lineOfBusinessId);
+      const siblings = await listAllocationsForPair(transaction, item.write.groupId, item.write.lineOfBusinessId);
       const classified = classifyRequestedAllocation(siblings, item.terms);
       if (classified.status === "conflict") {
         throw new ValidationError(allocationConflictReviewMessage());
       }
       if (classified.status === "exact") continue;
       ids.push(await writeAllocationRecord(
-        tx as unknown as AppDatabase,
+        transaction,
         item.write,
         period,
         status,
@@ -448,8 +459,15 @@ export async function updateAllocation(
       throw new ValidationError("An active compensation allocation already exists for this group, line, and period.");
     }
   }
-  await database.update(compensationAllocations)
-    .set({ status, effectiveEnd: period.effectiveEnd, updatedAt: new Date().toISOString() })
-    .where(eq(compensationAllocations.id, id));
+  await database.transaction(async (tx) => {
+    const transaction = tx as unknown as AppDatabase;
+    await lockAllocationNamespaces(transaction, [{
+      groupId: existing.groupId,
+      lineOfBusinessId: existing.lineOfBusinessId,
+    }]);
+    await transaction.update(compensationAllocations)
+      .set({ status, effectiveEnd: period.effectiveEnd, updatedAt: new Date().toISOString() })
+      .where(eq(compensationAllocations.id, id));
+  });
   return (await getAllocation(database, id))!;
 }

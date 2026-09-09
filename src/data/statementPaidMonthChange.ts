@@ -18,7 +18,8 @@ import { getCommission, type CommissionView } from "./commissions";
 import { listPayoutsForCommission } from "./payouts";
 import { getImportStatement } from "./statements";
 import { currentTeamMembers, listTeams, type TeamView } from "./teams";
-import { failIfTestHook } from "./transactionTestHook";
+import { lockAllocationNamespaces } from "./allocationNamespaceLock";
+import { failIfTestHook, runAfterAllocationNamespaceLock } from "./transactionTestHook";
 import { ConflictError, isUniqueConstraintError, NotFoundError, ValidationError } from "@/lib/errors";
 import { isPaidMonth } from "@/domain/dates";
 import {
@@ -217,6 +218,11 @@ async function lockPaidMonthSources(db: AppDatabase, statementId: number, commis
     }
   }
   await lockTeams(db, [...payoutTeamIds, ...allocationTeamIds]);
+  await lockAllocationNamespaces(db, commissions.map((row) => ({
+    groupId: row.groupId,
+    lineOfBusinessId: row.lineOfBusinessId,
+  })));
+  await runAfterAllocationNamespaceLock(db);
 }
 
 async function assemblePreview(
@@ -301,12 +307,17 @@ async function assemblePreview(
     grossCommissionCents: commission.grossCommissionCents,
     statementMonth: commission.statementMonth,
     premiumMonth: commission.premiumMonth,
+    sourceCoverageLabel: commission.sourceCoverageLabel,
     sourceGroupLabel: commission.sourceGroupLabel,
     sourceLobLabel: commission.sourceLobLabel,
     sourcePeriodLabel: commission.sourcePeriodLabel,
     sourceReference: commission.sourceReference,
     sourceRowKey: commission.sourceRowKey,
     importStatementId: commission.importStatementId,
+    agentId: commission.agentId,
+    compensationBps: commission.compensationBps,
+    agentCompensationCents: commission.agentCompensationCents,
+    agencyNetCents: commission.agencyNetCents,
     corrected: corrected.has(commission.id),
   }));
   const allTeamIds = teamIdsFromAllocations(relevantAllocations);

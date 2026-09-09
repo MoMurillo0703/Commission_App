@@ -70,12 +70,17 @@ export type PaidMonthCommissionBind = {
   grossCommissionCents: number;
   statementMonth: string;
   premiumMonth: string | null;
+  sourceCoverageLabel: string | null;
   sourceGroupLabel: string | null;
   sourceLobLabel: string | null;
   sourcePeriodLabel: string | null;
   sourceReference: string | null;
   sourceRowKey: string | null;
   importStatementId: number | null;
+  agentId: number | null;
+  compensationBps: number | null;
+  agentCompensationCents: number;
+  agencyNetCents: number;
   corrected: boolean;
 };
 
@@ -254,12 +259,17 @@ export function invariantStateAfterPaidMonthMove(state: ReturnType<typeof paidMo
       lineOfBusinessId: row.lineOfBusinessId,
       grossCommissionCents: row.grossCommissionCents,
       premiumMonth: row.premiumMonth,
+      sourceCoverageLabel: row.sourceCoverageLabel,
       sourceGroupLabel: row.sourceGroupLabel,
       sourceLobLabel: row.sourceLobLabel,
       sourcePeriodLabel: row.sourcePeriodLabel,
       sourceReference: row.sourceReference,
       sourceRowKey: row.sourceRowKey,
       importStatementId: row.importStatementId,
+      agentId: row.agentId,
+      compensationBps: row.compensationBps,
+      agentCompensationCents: row.agentCompensationCents,
+      agencyNetCents: row.agencyNetCents,
       corrected: row.corrected,
     })),
     payouts: state.payouts,
