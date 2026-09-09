@@ -8,6 +8,7 @@ Record only intentional decisions and why. Do not restate the full rulebook.
 | --- | --- | --- | --- |
 | 2026 | Paid month drives compensation | Agency cash received is the organizing event; coverage month is extra when known | [`BUSINESS_RULES.md`](BUSINESS_RULES.md) |
 | 2026-09 | Posted statement Paid Month may be corrected without delete/re-upload | Mo needs to move a posted statement to the month the agency actually received it; payouts must not be silently recalculated | [`BUSINESS_RULES.md`](BUSINESS_RULES.md), [`DATA_MODEL.md`](DATA_MODEL.md) (`0011`) |
+| 2026-09 | Change Paid Month is a receipt-month metadata correction, not compensation recalculation | Destination allocation and Team membership do not gate or rewrite stored snapshots; September→August is allowed with no August plan | [`BUSINESS_RULES.md`](BUSINESS_RULES.md) |
 | 2026-09 | H&R canonical Group is 29 | Group 8 is re-pointed into 29 without deleting Group 8 or copying its current allocations | [`BUSINESS_RULES.md`](BUSINESS_RULES.md) |
 | 2026-09 | Anthem group-business LOB codes are bounded | MED/MEDHMO → Group Medical; DENPPO → Group Dental; VIS → Group Vision. Carrier-scoped, deterministic, raw-source preserving | [`DATA_MODEL.md`](DATA_MODEL.md) |
 | 2026-09 | Raw Group, LOB, and source-period labels are independent | Do not overload `source_coverage_label` for imported LOB | [`DATA_MODEL.md`](DATA_MODEL.md) (`0011`) |

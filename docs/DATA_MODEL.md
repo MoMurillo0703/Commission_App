@@ -132,11 +132,11 @@ Audit-only history for an authorized fallback correction. One batch has a unique
 
 Paid month (authoritative agency-receipt month), optional carrier, original and display names, source type, status, unique `fingerprint`, preview and mapping JSON, optional storage path, extraction path, layout id/version, row counts.
 
-Posted statements are not deleted. An authorized **Change Paid Month** action may move `import_statements.paid_month` and every linked `commission_records.statement_month` together. It does not change source file, source row identity, coverage/source fields, gross, or payout snapshots. If any linked commission is settled/corrected and the new month selects different terms or no valid allocation, the change is blocked. The entire move is one database transaction.
+Posted statements are not deleted. An authorized **Change Paid Month** action may move `import_statements.paid_month` and every linked `commission_records.statement_month` together. It does not change source file, source row identity, coverage/source fields, gross, compensation, Agency Net, or payout snapshots. Destination allocation and Team membership are not consulted. The entire move is one database transaction.
 
 ### `statement_paid_month_changes`
 
-Immutable audit of posted-statement Paid Month changes. Records statement ID, old/new paid month, affected commission IDs/count, gross affected, initiator, reason, preview token, request fingerprint, impact classification JSON, and whether payout correction was required/performed. Triggers reject UPDATE and DELETE. Confirmation is bound to the current statement state; a stale preview is rejected. The same confirmation key is idempotent.
+Immutable audit of posted-statement Paid Month changes. Records statement ID, old/new paid month, affected commission IDs/count, gross affected, initiator, reason, preview token, request fingerprint, classification JSON recording that financial snapshots were preserved, and that payout correction was not required or performed. Triggers reject UPDATE and DELETE. Confirmation is bound to the current statement population, financial headers, source/coverage identity, and stored payout snapshots; allocation and Team configuration are not bound. A stale preview is rejected. The same confirmation key is idempotent.
 
 ### `carrier_statement_layouts`
 

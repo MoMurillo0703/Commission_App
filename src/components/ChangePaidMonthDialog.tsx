@@ -5,20 +5,6 @@ import { formatCents } from "@/domain/money";
 import { formatStatementMonth } from "@/domain/dates";
 import { fetchWithDeadline, httpFailureMessage, readApiJson, requestFailureMessage, runBusyAction } from "@/lib/apiClient";
 
-type ImpactItem = {
-  commissionId: number;
-  groupName: string;
-  carrierName: string;
-  lineOfBusinessName: string;
-  grossCommissionCents: number;
-  coverageMonth: string | null;
-  sourcePeriodLabel: string | null;
-  payoutCount: number;
-  impactClass: string;
-  impactCode: string;
-  blockedReason: string | null;
-};
-
 type PreviewResponse = {
   statementId: number;
   statementName: string;
@@ -26,14 +12,9 @@ type PreviewResponse = {
   currentPaidMonth: string;
   newPaidMonth: string;
   commissionCount: number;
-  commissionIds: number[];
   grossAffectedCents: number;
-  recipientPayoutsAffected: number;
-  historicalAllocationsAffected: number;
-  reportsAffected: string[];
-  items: ImpactItem[];
+  payoutCount: number;
   confirmable: boolean;
-  payoutCorrectionRequired: boolean;
   previewToken: string;
 };
 
@@ -101,9 +82,9 @@ export function ChangePaidMonthDialog({
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="paid-month-title" onClick={onClose}>
       <form className="modal" onClick={(event) => event.stopPropagation()} onSubmit={confirm}>
         <h2 id="paid-month-title">Change Paid Month</h2>
-        <p>This moves the entire posted statement to another agency-receipt month. Coverage and source periods stay unchanged. Posted statements are not deleted.</p>
         {step === "choose" ? (
           <>
+            <p>This moves the posted statement and its existing financial results to another reporting month. Compensation is not recalculated.</p>
             <label>
               Current Paid Month
               <input value={formatStatementMonth(currentPaidMonth)} readOnly />
@@ -115,47 +96,23 @@ export function ChangePaidMonthDialog({
             {error && <p className="form-error">{error}</p>}
             <div className="form-actions">
               <button type="button" disabled={busy || !newPaidMonth} onClick={() => void loadPreview()}>
-                Preview Impact
+                Preview
               </button>
               <button type="button" className="secondary" onClick={onClose}>Cancel</button>
             </div>
           </>
         ) : preview ? (
           <>
-            <p><strong>Statement:</strong> {preview.statementName}</p>
-            <p><strong>Carrier:</strong> {preview.carrierName || "—"}</p>
-            <p><strong>Current Paid Month:</strong> {formatStatementMonth(preview.currentPaidMonth)}</p>
-            <p><strong>New Paid Month:</strong> {formatStatementMonth(preview.newPaidMonth)}</p>
-            <p><strong>Commission rows affected:</strong> {preview.commissionCount}</p>
-            <p><strong>Gross affected:</strong> {formatCents(preview.grossAffectedCents)}</p>
-            <p><strong>Recipient payouts affected:</strong> {preview.recipientPayoutsAffected}</p>
-            <p><strong>Historical allocations affected:</strong> {preview.historicalAllocationsAffected}</p>
-            <p><strong>Reports affected:</strong> {preview.reportsAffected.join("; ")}</p>
-            <table>
-              <thead>
-                <tr>
-                  <th>Commission</th>
-                  <th>Group</th>
-                  <th>Class</th>
-                  <th>Coverage / Source</th>
-                  <th>Gross</th>
-                </tr>
-              </thead>
-              <tbody>
-                {preview.items.map((item) => (
-                  <tr key={item.commissionId}>
-                    <td>{item.commissionId}</td>
-                    <td>{item.groupName}</td>
-                    <td>{item.impactCode} {item.impactClass.replace(/_/g, " ")}</td>
-                    <td>{item.coverageMonth || item.sourcePeriodLabel || "—"}</td>
-                    <td>{formatCents(item.grossCommissionCents)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {preview.items.some((item) => item.blockedReason) && (
-              <p className="form-error">{preview.items.find((item) => item.blockedReason)?.blockedReason}</p>
-            )}
+            <p><strong>{preview.statementName}</strong></p>
+            <p>{formatStatementMonth(preview.currentPaidMonth)} → {formatStatementMonth(preview.newPaidMonth)}</p>
+            <p>{preview.commissionCount} commissions</p>
+            <p>{formatCents(preview.grossAffectedCents)} gross</p>
+            <p><strong>Existing compensation:</strong> Preserved</p>
+            <p><strong>Existing payouts:</strong> {preview.payoutCount} payout records preserved</p>
+            <p><strong>Agency Net:</strong> Preserved</p>
+            <p><strong>Coverage / Source Period:</strong> Unchanged</p>
+            <p><strong>Compensation recalculation:</strong> None</p>
+            <p>Changing Paid Month moves this statement and its existing financial results to the selected reporting month.</p>
             <label>
               Reason
               <input value={reason} onChange={(event) => setReason(event.target.value)} required />

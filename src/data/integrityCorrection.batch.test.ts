@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createAccountManager } from "./accountManagers";
 import { createAgent } from "./agents";
 import { createAllocation, updateAllocation } from "./allocations";
@@ -82,7 +82,7 @@ async function postedFixture(seed: string) {
 }
 
 describe("final integrity correction batch", () => {
-  it("A. classifies different effective Team membership as changed compensation terms", async () => {
+  it("A. different effective Team membership does not block Paid Month correction", async () => {
     const { db, john, mo, laura, nancy, group, carrier, dental, statement } = await postedFixture("team-membership");
     const team = await createTeam(db, {
       name: "Team X",
@@ -103,7 +103,7 @@ describe("final integrity correction batch", () => {
       effectiveStart: "2026-01",
       entries: [{ recipientType: "team", teamId: team.id, compensationBps: 10000 }],
     });
-    await createCommission(db, {
+    const posted = await createCommission(db, {
       statementMonth: "2026-09",
       groupId: group.id,
       carrierId: carrier.id,
@@ -112,18 +112,19 @@ describe("final integrity correction batch", () => {
       importStatementId: statement.id,
       sourceRowKey: "Commissions:1",
     });
+    const beforePayouts = await listPayoutsForCommission(db, posted.id);
     const impact = await previewStatementPaidMonthChange(db, statement.id, "2026-08");
-    expect(impact.items[0]?.impactClass).toBe("different_terms");
-    expect(impact.confirmable).toBe(false);
-    await expect(confirmStatementPaidMonthChange(db, {
+    expect(impact.confirmable).toBe(true);
+    await confirmStatementPaidMonthChange(db, {
       statementId: statement.id,
       newPaidMonth: "2026-08",
       reason: "Membership changed.",
       confirmationKey: "team-terms-1",
       previewToken: impact.previewToken,
       initiator,
-    })).rejects.toThrow(/different compensation terms/);
-    expect((await getImportStatement(db, statement.id))?.paidMonth).toBe("2026-09");
+    });
+    expect((await getImportStatement(db, statement.id))?.paidMonth).toBe("2026-08");
+    expect(await listPayoutsForCommission(db, posted.id)).toEqual(beforePayouts);
   });
 
   it("B. rejects confirmation after any financially relevant preview-bound state changes", async () => {
@@ -155,16 +156,6 @@ describe("final integrity correction batch", () => {
             agentCompensationCents: (current?.agentCompensationCents ?? 0) + 1,
             agencyNetCents: (current?.agencyNetCents ?? 0) - 1,
           }).where(eq(commissionRecords.id, postedId));
-        },
-      },
-      { kind: "allocation", mutate: async ({ allocationId }) => { await updateAllocation(db, allocationId, { status: "inactive" }); } },
-      {
-        kind: "team",
-        mutate: async ({ teamId }) => {
-          await replaceTeamMembers(db, teamId, [
-            { personKind: "agent", personId: john.id, shareBps: 5000, effectiveStart: "2026-09" },
-            { personKind: "agent", personId: mo.id, shareBps: 5000, effectiveStart: "2026-09" },
-          ], { requireComplete: true, closePrior: true });
         },
       },
       {
@@ -222,7 +213,7 @@ describe("final integrity correction batch", () => {
         confirmationKey: `stale-${kind}`,
         previewToken: first.previewToken,
         initiator,
-      })).rejects.toThrow(/no longer matches|blocked until compensation|different compensation|no valid allocation/);
+      })).rejects.toThrow(/no longer matches/);
       expect((await getImportStatement(db, statement.id))?.paidMonth).toBe("2026-09");
       expect((await getCommission(db, posted.id))?.statementMonth).toBe("2026-09");
     }
@@ -272,7 +263,7 @@ describe("final integrity correction batch", () => {
     expect((await getImportStatement(db, fallbackStatement.id))?.paidMonth).toBe("2026-09");
   });
 
-  it("C-E. rejects stale allocation, Team membership, and payout decisions", async () => {
+  it("C-E. allocation/Team races do not invalidate Paid Month; payout snapshot races do", async () => {
     const { db, john, mo, group, carrier, dental, statement } = await postedFixture("concurrency");
     const team = await createTeam(db, {
       name: "Concurrent Team",
@@ -296,44 +287,62 @@ describe("final integrity correction batch", () => {
       importStatementId: statement.id,
       sourceRowKey: "Commissions:1",
     });
+    const beforePayouts = await listPayoutsForCommission(db, posted.id);
     const previewA = await previewStatementPaidMonthChange(db, statement.id, "2026-08");
     await updateAllocation(db, allocation.id, { status: "inactive" });
-    await expect(confirmStatementPaidMonthChange(db, {
+    await replaceTeamMembers(db, team.id, [
+      { personKind: "agent", personId: john.id, shareBps: 8000, effectiveStart: "2026-10" },
+      { personKind: "agent", personId: mo.id, shareBps: 2000, effectiveStart: "2026-10" },
+    ], { requireComplete: true, closePrior: true });
+    await confirmStatementPaidMonthChange(db, {
       statementId: statement.id,
       newPaidMonth: "2026-08",
-      reason: "Allocation raced.",
-      confirmationKey: "race-alloc",
+      reason: "Allocation and Team races are not inputs.",
+      confirmationKey: "race-config",
       previewToken: previewA.previewToken,
       initiator,
-    })).rejects.toThrow(/no longer matches/);
+    });
+    expect((await getImportStatement(db, statement.id))?.paidMonth).toBe("2026-08");
+    expect(await listPayoutsForCommission(db, posted.id)).toEqual(beforePayouts);
 
-    const previewB = await previewStatementPaidMonthChange(db, statement.id, "2026-08");
-    await replaceTeamMembers(db, team.id, [
-      { personKind: "agent", personId: john.id, shareBps: 8000, effectiveStart: "2026-08" },
-      { personKind: "agent", personId: mo.id, shareBps: 2000, effectiveStart: "2026-08" },
-    ], { requireComplete: true, closePrior: true });
-    await expect(confirmStatementPaidMonthChange(db, {
-      statementId: statement.id,
-      newPaidMonth: "2026-08",
-      reason: "Team raced.",
-      confirmationKey: "race-team",
-      previewToken: previewB.previewToken,
-      initiator,
-    })).rejects.toThrow(/no longer matches|different compensation terms/);
-
-    const previewC = await previewStatementPaidMonthChange(db, statement.id, "2026-08");
-    const payout = (await listPayoutsForCommission(db, posted.id)).find((row) => row.recipientType === "team_member")!;
+    const payoutStatement = await createImportStatement(db, {
+      originalFilename: "race-payout.csv",
+      paidMonth: "2026-09",
+      carrierId: carrier.id,
+      sourceType: "csv",
+      status: "posted",
+      fingerprint: fingerprintBuffer(new TextEncoder().encode("race-payout")),
+      preview: preview(),
+    });
+    const payoutBook = await createGroup(db, { name: "Payout Race Book" });
+    await createAllocation(db, {
+      groupId: payoutBook.id,
+      lineOfBusinessId: dental.id,
+      effectiveStart: "2026-01",
+      entries: [{ recipientType: "team", teamId: team.id, compensationBps: 10000 }],
+    });
+    const payoutPosted = await createCommission(db, {
+      statementMonth: "2026-09",
+      groupId: payoutBook.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: dental.id,
+      grossCommissionCents: 9100,
+      importStatementId: payoutStatement.id,
+      sourceRowKey: "Commissions:1",
+    });
+    const previewC = await previewStatementPaidMonthChange(db, payoutStatement.id, "2026-08");
+    const payout = (await listPayoutsForCommission(db, payoutPosted.id)).find((row) => row.recipientType === "team_member")!;
     await db.update(commissionPayouts).set({ personName: "Changed Identity" }).where(eq(commissionPayouts.id, payout.id));
     await expect(confirmStatementPaidMonthChange(db, {
-      statementId: statement.id,
+      statementId: payoutStatement.id,
       newPaidMonth: "2026-08",
       reason: "Payout raced.",
       confirmationKey: "race-payout",
       previewToken: previewC.previewToken,
       initiator,
     })).rejects.toThrow(/no longer matches/);
-    expect((await getImportStatement(db, statement.id))?.paidMonth).toBe("2026-09");
-    expect((await getCommission(db, posted.id))?.statementMonth).toBe("2026-09");
+    expect((await getImportStatement(db, payoutStatement.id))?.paidMonth).toBe("2026-09");
+    expect((await getCommission(db, payoutPosted.id))?.statementMonth).toBe("2026-09");
   });
 
   it("F. rejects same-carrier source rows with the wrong Group or amount", async () => {
@@ -615,7 +624,7 @@ describe("final integrity correction batch", () => {
     expect(restoredPayouts).toHaveLength(0);
   });
 
-  it("blocks a new applicable allocation from slipping into paid-month confirmation", async () => {
+  it("does not treat a new applicable allocation as an input to paid-month confirmation", async () => {
     const { db, john, group, carrier, dental, statement } = await postedFixture("phantom-allocation");
     const posted = await createCommission(db, {
       statementMonth: "2026-09",
@@ -626,35 +635,26 @@ describe("final integrity correction batch", () => {
       importStatementId: statement.id,
       sourceRowKey: "Commissions:1",
     });
+    const beforePayouts = await listPayoutsForCommission(db, posted.id);
     const first = await previewStatementPaidMonthChange(db, statement.id, "2026-08");
     expect(first.confirmable).toBe(true);
-    expect(first.items[0]?.impactClass).toBe("equivalent_terms");
 
-    let heldLocks: Array<{ classid: number; objid: number }> = [];
-    setAfterAllocationNamespaceLock(async (lockedDb) => {
-      const result = await (lockedDb as typeof db).execute(sql`
-        SELECT classid::int AS classid, objid::int AS objid
-        FROM pg_locks
-        WHERE locktype = 'advisory' AND granted
-      `) as unknown as { rows?: Array<{ classid: number; objid: number }> };
-      heldLocks = result.rows ?? [];
-    });
     await createAllocation(db, {
       groupId: group.id,
       lineOfBusinessId: dental.id,
       effectiveStart: "2026-01",
       entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }],
     });
-    await expect(confirmStatementPaidMonthChange(db, {
+    await confirmStatementPaidMonthChange(db, {
       statementId: statement.id,
       newPaidMonth: "2026-08",
-      reason: "Phantom allocation must not commit.",
+      reason: "Allocation config is not an input.",
       confirmationKey: "phantom-alloc",
       previewToken: first.previewToken,
       initiator,
-    })).rejects.toThrow(/no longer matches|different compensation terms/);
-    expect(heldLocks.some((lock) => lock.classid === group.id && lock.objid === dental.id)).toBe(true);
-    expect((await getImportStatement(db, statement.id))?.paidMonth).toBe("2026-09");
-    expect((await getCommission(db, posted.id))?.statementMonth).toBe("2026-09");
+    });
+    expect((await getImportStatement(db, statement.id))?.paidMonth).toBe("2026-08");
+    expect((await getCommission(db, posted.id))?.statementMonth).toBe("2026-08");
+    expect(await listPayoutsForCommission(db, posted.id)).toEqual(beforePayouts);
   });
 });

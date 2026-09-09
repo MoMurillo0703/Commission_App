@@ -1,17 +1,6 @@
 import { fingerprintBuffer } from "./fingerprint";
 import { stableJson } from "./compensationCorrection";
-import type { AllocationCandidate } from "./allocations";
-import { historicalAllocationForPaidMonth } from "./compensationCorrection";
 import { payoutIdentityFingerprint } from "./payoutSnapshot";
-
-export const PAID_MONTH_IMPACT = {
-  unsettled: "A",
-  equivalent_terms: "B",
-  different_terms: "C",
-  no_allocation: "D",
-} as const;
-
-export type PaidMonthImpactClass = keyof typeof PAID_MONTH_IMPACT;
 
 export type PaidMonthInitiator = {
   id: string | null;
@@ -32,34 +21,7 @@ export type PaidMonthPayoutLike = {
   allocationBps: number;
   teamInternalBps?: number | null;
   compensationCents: number;
-};
-
-export type PaidMonthTeamMembershipBind = {
-  teamId: number;
-  membershipId: number;
-  personKind: string;
-  personId: number;
-  shareBps: number;
-  effectiveStart: string;
-  effectiveEnd: string | null;
-  status: string;
-};
-
-export type PaidMonthAllocationBind = {
-  id: number;
-  groupId: number;
-  lineOfBusinessId: number;
-  effectiveStart: string;
-  effectiveEnd: string | null;
-  status: string;
-  entries: Array<{
-    id: number;
-    recipientType: string;
-    personKind: string | null;
-    personId: number | null;
-    teamId: number | null;
-    compensationBps: number;
-  }>;
+  createdAt?: string | null;
 };
 
 export type PaidMonthCommissionBind = {
@@ -84,110 +46,14 @@ export type PaidMonthCommissionBind = {
   corrected: boolean;
 };
 
-export function allocationTermsFingerprint(allocation: AllocationCandidate | PaidMonthAllocationBind | null) {
-  if (!allocation) return "none";
-  return stableJson({
-    id: "id" in allocation ? allocation.id : null,
-    groupId: allocation.groupId,
-    lineOfBusinessId: allocation.lineOfBusinessId,
-    effectiveStart: allocation.effectiveStart,
-    effectiveEnd: allocation.effectiveEnd,
-    status: allocation.status,
-    entries: [...allocation.entries]
-      .map((entry) => ({
-        id: "id" in entry ? entry.id : null,
-        recipientType: entry.recipientType,
-        personKind: entry.personKind ?? null,
-        personId: entry.personId ?? null,
-        teamId: entry.teamId ?? null,
-        compensationBps: entry.compensationBps,
-      }))
-      .sort((left, right) => (
-        (left.id ?? 0) - (right.id ?? 0)
-        || left.recipientType.localeCompare(right.recipientType)
-        || (left.personKind ?? "").localeCompare(right.personKind ?? "")
-        || (left.personId ?? 0) - (right.personId ?? 0)
-        || (left.teamId ?? 0) - (right.teamId ?? 0)
-        || left.compensationBps - right.compensationBps
-      )),
-  });
-}
-
-export function teamMembershipFingerprint(members: PaidMonthTeamMembershipBind[]) {
-  return stableJson(
-    [...members]
-      .map((member) => ({
-        teamId: member.teamId,
-        membershipId: member.membershipId,
-        personKind: member.personKind,
-        personId: member.personId,
-        shareBps: member.shareBps,
-        effectiveStart: member.effectiveStart,
-        effectiveEnd: member.effectiveEnd,
-        status: member.status,
-      }))
-      .sort((left, right) => (
-        left.teamId - right.teamId
-        || left.personKind.localeCompare(right.personKind)
-        || left.personId - right.personId
-        || left.shareBps - right.shareBps
-        || left.effectiveStart.localeCompare(right.effectiveStart)
-      )),
-  );
-}
-
-export function isImplicitAgencyPayouts(payouts: PaidMonthPayoutLike[]) {
-  return payouts.length > 0
-    && payouts.every((payout) => payout.allocationId == null)
-    && payouts.every((payout) => payout.recipientType === "agency");
-}
-
-export function effectiveTeamMembershipsChanged(
-  currentMembers: PaidMonthTeamMembershipBind[],
-  proposedMembers: PaidMonthTeamMembershipBind[],
-) {
-  return teamMembershipFingerprint(currentMembers) !== teamMembershipFingerprint(proposedMembers);
-}
-
-export function classifyPaidMonthImpact(input: {
-  payouts: PaidMonthPayoutLike[];
-  corrected: boolean;
-  oldAllocation: AllocationCandidate | PaidMonthAllocationBind | null;
-  newAllocation: AllocationCandidate | PaidMonthAllocationBind | null;
-  currentTeamMemberships?: PaidMonthTeamMembershipBind[];
-  proposedTeamMemberships?: PaidMonthTeamMembershipBind[];
-}): PaidMonthImpactClass {
-  if (input.payouts.length === 0 && !input.corrected) return "unsettled";
-  if (!input.newAllocation) {
-    if (!input.oldAllocation && isImplicitAgencyPayouts(input.payouts)) return "equivalent_terms";
-    return "no_allocation";
-  }
-  const allocationEquivalent = allocationTermsFingerprint(input.oldAllocation) === allocationTermsFingerprint(input.newAllocation);
-  const teamsChanged = effectiveTeamMembershipsChanged(
-    input.currentTeamMemberships ?? [],
-    input.proposedTeamMemberships ?? [],
-  );
-  if (allocationEquivalent && !teamsChanged) return "equivalent_terms";
-  if (!input.oldAllocation && isImplicitAgencyPayouts(input.payouts) && !allocationEquivalent) {
-    return "different_terms";
-  }
-  if (allocationEquivalent && teamsChanged) return "different_terms";
-  return "different_terms";
-}
-
-export function paidMonthImpactAllowsConfirm(impactClass: PaidMonthImpactClass) {
-  return impactClass === "unsettled" || impactClass === "equivalent_terms";
-}
+export type PaidMonthBoundPayout = PaidMonthPayoutLike & { commissionId: number };
 
 export function paidMonthBoundState(input: {
   statementId: number;
   currentPaidMonth: string;
   newPaidMonth: string;
   commissions: PaidMonthCommissionBind[];
-  payouts: Array<PaidMonthPayoutLike & { commissionId: number }>;
-  allocations: PaidMonthAllocationBind[];
-  currentTeamMemberships: PaidMonthTeamMembershipBind[];
-  proposedTeamMemberships: PaidMonthTeamMembershipBind[];
+  payouts: PaidMonthBoundPayout[];
 }) {
   return {
     statement: {
@@ -200,9 +66,6 @@ export function paidMonthBoundState(input: {
       left.commissionId - right.commissionId
       || (left.id ?? 0) - (right.id ?? 0)
     )),
-    allocations: [...input.allocations].sort((left, right) => left.id - right.id),
-    currentTeamMemberships: input.currentTeamMemberships,
-    proposedTeamMemberships: input.proposedTeamMemberships,
   };
 }
 
@@ -234,20 +97,18 @@ export function statementPayoutFingerprint(
   )));
 }
 
-export function resolvePaidMonthAllocations(
-  allocations: AllocationCandidate[],
-  query: { groupId: number; lineOfBusinessId: number },
-  oldPaidMonth: string,
-  newPaidMonth: string,
-) {
-  return {
-    oldAllocation: historicalAllocationForPaidMonth(allocations, { ...query, paidMonth: oldPaidMonth }),
-    newAllocation: historicalAllocationForPaidMonth(allocations, { ...query, paidMonth: newPaidMonth }),
-  };
-}
-
 export function stalePaidMonthPreviewMessage() {
   return "The paid-month preview no longer matches the current statement. Preview again.";
+}
+
+export function paidMonthAuditClassification(input: { payoutCount: number }) {
+  return {
+    financialSnapshotsPreserved: true,
+    compensationRecalculation: "none",
+    payoutCount: input.payoutCount,
+    payoutCorrectionRequired: false,
+    payoutCorrectionPerformed: false,
+  };
 }
 
 export function invariantStateAfterPaidMonthMove(state: ReturnType<typeof paidMonthBoundState>) {
@@ -273,10 +134,5 @@ export function invariantStateAfterPaidMonthMove(state: ReturnType<typeof paidMo
       corrected: row.corrected,
     })),
     payouts: state.payouts,
-    allocations: state.allocations,
-    membershipsByMonth: {
-      [state.statement.currentPaidMonth]: state.currentTeamMemberships,
-      [state.statement.newPaidMonth]: state.proposedTeamMemberships,
-    },
   });
 }
