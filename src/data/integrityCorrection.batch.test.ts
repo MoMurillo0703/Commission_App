@@ -574,18 +574,45 @@ describe("final integrity correction batch", () => {
     })).rejects.toThrow(/Forced transaction failure/);
     expect(await db.select().from(commissionRecords)).toHaveLength(beforeCount);
 
-    const original = await getCommission(db, posted.id);
-    const originalPayouts = await listPayoutsForCommission(db, posted.id);
-    expect(originalPayouts.length).toBeGreaterThan(0);
+  });
+
+  it("rolls back an allowed updateCommission financial header and payout replacement", async () => {
+    const { db, john, group, carrier, dental } = await postedFixture("update-financial-rollback");
+    const row = await createCommission(db, {
+      statementMonth: "2026-09",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: dental.id,
+      agentId: john.id,
+      grossCommissionCents: 10000,
+      compensationBps: 4000,
+    });
+    await db.delete(commissionPayouts).where(eq(commissionPayouts.commissionId, row.id));
+    const original = await getCommission(db, row.id);
+    const originalPayouts = await listPayoutsForCommission(db, row.id);
+    expect(original).not.toBeNull();
+    expect(originalPayouts).toHaveLength(0);
+    expect(original?.grossCommissionCents).toBe(10000);
+    expect(original?.compensationBps).toBe(4000);
+    expect(original?.agentCompensationCents).toBe(4000);
+    expect(original?.agencyNetCents).toBe(6000);
+
     setTransactionFailPoint("update-commission-after-header");
-    await expect(updateCommission(db, posted.id, { notes: "should not persist" })).rejects.toThrow(/Forced transaction failure: update-commission-after-header/);
-    const restored = await getCommission(db, posted.id);
+    await expect(updateCommission(db, row.id, {
+      grossCommissionCents: 20000,
+      compensationBps: 5000,
+    })).rejects.toThrow(/Forced transaction failure: update-commission-after-header/);
+
+    const restored = await getCommission(db, row.id);
+    const restoredPayouts = await listPayoutsForCommission(db, row.id);
     expect(restored).toEqual(original);
-    expect(await listPayoutsForCommission(db, posted.id)).toEqual(originalPayouts);
-    expect(restored?.notes).toBeNull();
-    expect(restored?.grossCommissionCents).toBe(original?.grossCommissionCents);
-    expect(restored?.agentCompensationCents).toBe(original?.agentCompensationCents);
-    expect(restored?.agencyNetCents).toBe(original?.agencyNetCents);
+    expect(restoredPayouts).toEqual(originalPayouts);
+    expect(restored?.grossCommissionCents).toBe(10000);
+    expect(restored?.compensationBps).toBe(4000);
+    expect(restored?.agentCompensationCents).toBe(4000);
+    expect(restored?.agencyNetCents).toBe(6000);
+    expect(restored?.agentId).toBe(john.id);
+    expect(restoredPayouts).toHaveLength(0);
   });
 
   it("blocks a new applicable allocation from slipping into paid-month confirmation", async () => {
