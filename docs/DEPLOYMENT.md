@@ -34,7 +34,7 @@ npm run db:migrate
 
 `npm run db:setup` is the same script. It takes an advisory transaction lock, applies missing files from `migrations/`, then prints `connected:` and `carriers table reachable`.
 
-Production currently has **0001–0008**. `0008_compensation_corrections.sql` was applied explicitly before application SHA `f065161` went live. **`0009_agency_compensation_owners.sql` is not applied.** It creates the owner table with no owner row. Do not insert `agents.id = 2` until the Product Owner confirms the effective start paid month. No backfill. Do not infer or backfill identities from existing `groups.group_number` values.
+Production currently has **0001–0011**. `0010_commission_source_identity.sql` and `0011_source_labels_and_paid_month_changes.sql` were applied explicitly with application SHA `b8e67c6`. Additive only: source label columns and immutable `statement_paid_month_changes`. No commission or payout backfill. Mo (`agents.id = 2`) remains Agency owner effective paid month **2026-09** (open-ended). Do not infer or backfill identities from existing `groups.group_number` values.
 
 Historical SQLite files in `migrations/sqlite/` are not applied.
 

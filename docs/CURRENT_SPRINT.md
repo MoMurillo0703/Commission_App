@@ -4,7 +4,7 @@ Authoritative owner: **Alex**.
 
 ## Phase
 
-Commission App 1.0 Sprint 1 — **DEPLOYED — PRODUCT ACCEPTANCE PENDING**. Production is `f065161` with migration **0008** applied. Product Acceptance is pending Mo’s live check of Report → Compensation exceptions and authorized historical compensation correction. This is not Done. Do not mark Product Accepted or Done until Mo completes that workflow. Do not correct Mo’s six commissions as a deploy test.
+Commission App 1.0 Sprint 1 — **DEPLOYED — AWAITING PRODUCT QA / ACCEPTANCE**. Production is `b8e67c621ef4e0af83e2d9e3776886cecf045a92` with migrations **0001–0011** applied (deployed 2026-09-09). Mo is configured as Agency owner (`agents.id = 2`) effective **2026-09 → Present**. Product QA/acceptance is pending Tom’s production verification and Mo’s live check of Change Paid Month and reports. This is not Done. Do not mark Product Accepted or Done until those workflows complete. Do not move a live statement Paid Month, execute H&R/Anthem/linkage repairs, or correct the 12 Historical Agency Fallback or 49 Legacy No-Payout September commissions as a deploy test.
 
 ## Authorized work
 
