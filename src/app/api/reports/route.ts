@@ -95,11 +95,13 @@ async function reportPayload(url: URL) {
     const review = recipientReportReviewState({
       personSelected: Boolean(filters.personId && filters.personKind),
       personName: report.names.personName ?? null,
-      payoutRowCount: report.rows.length,
+      calculatedRowCount: report.rows.filter((row) => !row.reviewRequired).length,
       payableCents: report.totals.compensationCents,
       postedCommissionCount: report.availability.postedCommissionCount,
       matchingCommissionCount: report.matchingCommissionCount,
-      unallocatedCount: report.payable.unallocated.length,
+      reviewRequiredCount: report.rows.filter((row) => row.reviewRequired).length,
+      readinessKind: report.readiness?.kind === "calculated" ? "ready" : report.readiness?.kind,
+      showTotals: report.readiness?.showTotals,
     });
     const recipientName = report.names.personName || (filters.personId ? "Unknown person" : "All people");
     const document = individualReportDocument(report.rows, report.totals, report.filters, report.names, recipientName);

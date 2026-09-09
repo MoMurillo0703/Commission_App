@@ -3,6 +3,7 @@ import {
   compensationGroupSummaries,
   currentAllocationsForGroup,
   filterCompensationGroups,
+  futureAllocationsForGroup,
   groupActiveCountLabel,
   historicalAllocationsForGroup,
   missingLinesForGroup,
@@ -74,9 +75,11 @@ describe("group-first compensation home", () => {
   it("keeps current allocations and history on the selected group only", () => {
     expect(currentAllocationsForGroup(allocations, 10, "2026-09")).toHaveLength(1);
     expect(historicalAllocationsForGroup(allocations, 10, "2026-09")).toHaveLength(1);
-    expect(currentAllocationsForGroup(allocations, 10, "2026-08")).toHaveLength(1);
-    expect(currentAllocationsForGroup(allocations, 10, "2026-08")[0]?.status).toBe("inactive");
-    expect(historicalAllocationsForGroup(allocations, 10, "2026-08")[0]?.status).toBe("active");
+    expect(currentAllocationsForGroup(allocations, 10, "2026-08")).toHaveLength(0);
+    expect(futureAllocationsForGroup(allocations, 10, "2026-08")).toHaveLength(1);
+    expect(futureAllocationsForGroup(allocations, 10, "2026-08")[0]?.status).toBe("active");
+    expect(historicalAllocationsForGroup(allocations, 10, "2026-08")).toHaveLength(1);
+    expect(historicalAllocationsForGroup(allocations, 10, "2026-08")[0]?.status).toBe("inactive");
     expect(missingLinesForGroup(
       10,
       [{ groupId: 10, lineOfBusinessId: 1 }, { groupId: 10, lineOfBusinessId: 8 }],

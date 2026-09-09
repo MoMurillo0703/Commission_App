@@ -63,7 +63,9 @@ describe("compensation correction integrity", () => {
       personKind: "agent",
       personId: john.id,
     });
-    expect(historical.payable?.unallocated.map((row) => row.commissionId)).toEqual([posted.id]);
+    expect(historical.payable?.unallocated).toHaveLength(0);
+    expect(historical.payable?.payableReady).toBe(true);
+    expect(historical.totals.compensationCents).toBe(10000);
 
     const previewA = await previewCompensationCorrection(db, [posted.id]);
     expect(previewA.previewToken).toBeTruthy();

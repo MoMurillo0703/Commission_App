@@ -60,32 +60,58 @@ export function sourceCommissionIds(rows: Array<Pick<IndividualReportRow, "commi
   return [...new Set(rows.flatMap((row) => row.commissionId == null ? [] : [row.commissionId]))].sort((left, right) => left - right);
 }
 
-export type RecipientReviewKind = "ready" | "legitimate_zero" | "missing_payouts" | "unknown_person" | "no_commissions";
+export type RecipientReviewKind = "ready" | "legitimate_zero" | "review_required" | "unknown_person" | "no_commissions";
 
 export function recipientReportReviewState(input: {
   personSelected: boolean;
   personName: string | null;
-  payoutRowCount: number;
+  payoutRowCount?: number;
+  calculatedRowCount?: number;
   payableCents: number;
   postedCommissionCount: number;
   matchingCommissionCount: number;
-  unallocatedCount: number;
+  unallocatedCount?: number;
+  reviewRequiredCount?: number;
+  readinessKind?: RecipientReviewKind | "calculated";
+  showTotals?: boolean;
 }) {
   if (!input.personSelected || !input.personName) {
     return {
       kind: "unknown_person" as const,
-      emptyMessage: "Choose an Agent or Account Manager. The statement uses that person's stored payout rows, not a generic Recipient label.",
+      emptyMessage: "Choose an Agent or Account Manager. Current earnings use that person's calculated recipient results, not a generic Recipient label.",
       showPayableTotals: false,
     };
   }
-  if (input.payoutRowCount > 0 && input.payableCents === 0) {
+  if (input.reviewRequiredCount && input.reviewRequiredCount > 0) {
+    return {
+      kind: "review_required" as const,
+      emptyMessage: null,
+      showPayableTotals: true,
+    };
+  }
+  if (input.readinessKind === "review_required") {
+    return {
+      kind: "review_required" as const,
+      emptyMessage: null,
+      showPayableTotals: true,
+    };
+  }
+  if (input.readinessKind === "legitimate_zero" || input.showTotals && (input.calculatedRowCount ?? input.payoutRowCount ?? 0) === 0 && input.matchingCommissionCount > 0) {
     return {
       kind: "legitimate_zero" as const,
       emptyMessage: null,
       showPayableTotals: true,
     };
   }
-  if (input.payoutRowCount > 0) {
+  const rowCount = input.calculatedRowCount ?? input.payoutRowCount ?? 0;
+  if (rowCount > 0 && input.payableCents === 0) {
+    return {
+      kind: "legitimate_zero" as const,
+      emptyMessage: null,
+      showPayableTotals: true,
+    };
+  }
+  if (rowCount > 0 || input.readinessKind === "ready" || input.readinessKind === "calculated") {
     return {
       kind: "ready" as const,
       emptyMessage: null,
@@ -102,10 +128,8 @@ export function recipientReportReviewState(input: {
     };
   }
   return {
-    kind: "missing_payouts" as const,
-    emptyMessage: input.unallocatedCount > 0
-      ? `${input.personName} has no stored payout rows for this period. ${input.unallocatedCount} posted commission${input.unallocatedCount === 1 ? "" : "s"} on assigned groups settled without a complete allocation. Confirm compensation before treating this as payable.`
-      : `${input.personName} has no stored payout snapshots for this period. Posted commissions exist, but this person is not a payout recipient on those rows. Missing snapshots are not invented as $0 pay.`,
-    showPayableTotals: false,
+    kind: "legitimate_zero" as const,
+    emptyMessage: null,
+    showPayableTotals: true,
   };
 }

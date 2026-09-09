@@ -54,10 +54,84 @@ export function coveringAllocationsForPaidMonth(
   query: { groupId: number; lineOfBusinessId: number; paidMonth: string },
 ) {
   return allocations.filter((allocation) => (
-    allocation.groupId === query.groupId
+    allocation.status === "active"
+    && allocation.groupId === query.groupId
     && allocation.lineOfBusinessId === query.lineOfBusinessId
     && paidMonthInRange(query.paidMonth, allocation.effectiveStart, allocation.effectiveEnd)
   )).sort((left, right) => right.effectiveStart.localeCompare(left.effectiveStart) || left.id - right.id);
+}
+
+export type CommissionEarningsKind = "calculated" | "agency_default" | "review_required";
+
+export type CommissionEarningsOutcome = {
+  commissionId: number;
+  paidMonth: string;
+  groupId: number;
+  groupName: string;
+  lineOfBusinessId: number;
+  lineOfBusinessName: string;
+  grossCommissionCents: number;
+  kind: CommissionEarningsKind;
+  defaultAgency: boolean;
+  reviewReason: EarningsReviewReason | null;
+  allocationId: number | null;
+};
+
+export type CurrentEarningsReadinessKind = "calculated" | "legitimate_zero" | "review_required" | "no_commissions";
+
+export type CurrentEarningsReadiness = {
+  kind: CurrentEarningsReadinessKind;
+  payableReady: boolean;
+  showTotals: boolean;
+  reviewRequired: boolean;
+  message: string | null;
+  reviewCommissionIds: number[];
+};
+
+export function currentEarningsReadiness(input: {
+  matchingCommissionCount: number;
+  outcomes: CommissionEarningsOutcome[];
+  recipientRowCount: number;
+}): CurrentEarningsReadiness {
+  const review = input.outcomes.filter((outcome) => outcome.kind === "review_required");
+  if (review.length > 0) {
+    return {
+      kind: "review_required",
+      payableReady: false,
+      showTotals: true,
+      reviewRequired: true,
+      message: "REVIEW REQUIRED — this report contains commissions that cannot be calculated from the applicable allocation or Team membership. Calculated totals are not fully ready.",
+      reviewCommissionIds: review.map((outcome) => outcome.commissionId),
+    };
+  }
+  if (input.matchingCommissionCount === 0) {
+    return {
+      kind: "no_commissions",
+      payableReady: true,
+      showTotals: false,
+      reviewRequired: false,
+      message: null,
+      reviewCommissionIds: [],
+    };
+  }
+  if (input.recipientRowCount === 0) {
+    return {
+      kind: "legitimate_zero",
+      payableReady: true,
+      showTotals: true,
+      reviewRequired: false,
+      message: null,
+      reviewCommissionIds: [],
+    };
+  }
+  return {
+    kind: "calculated",
+    payableReady: true,
+    showTotals: true,
+    reviewRequired: false,
+    message: null,
+    reviewCommissionIds: [],
+  };
 }
 
 export function resolveEarningsAllocation(
@@ -142,7 +216,7 @@ export function settleCurrentCommissionEarnings(input: {
   }
 }
 
-export function projectIndividualEarnings(input: {
+export function evaluateIndividualEarnings(input: {
   commissions: EarningsCommission[];
   allocations: AllocationCandidate[];
   teams: EarningsTeam[];
@@ -150,8 +224,9 @@ export function projectIndividualEarnings(input: {
   personKind?: PersonKind | null;
   personId?: number | null;
   teamId?: number | null;
-}): IndividualReportRow[] {
+}): { rows: IndividualReportRow[]; outcomes: CommissionEarningsOutcome[] } {
   const rows: IndividualReportRow[] = [];
+  const outcomes: CommissionEarningsOutcome[] = [];
   for (const commission of input.commissions) {
     const result = settleCurrentCommissionEarnings({
       commission,
@@ -159,7 +234,20 @@ export function projectIndividualEarnings(input: {
       teams: input.teams,
       names: input.names,
     });
+    const outcomeBase = {
+      commissionId: commission.id,
+      paidMonth: commission.paidMonth,
+      groupId: commission.groupId,
+      groupName: commission.groupName,
+      lineOfBusinessId: commission.lineOfBusinessId,
+      lineOfBusinessName: commission.lineOfBusinessName,
+      grossCommissionCents: commission.grossCommissionCents,
+      defaultAgency: result.defaultAgency,
+      reviewReason: result.reviewReason,
+      allocationId: result.allocationId,
+    };
     if (result.reviewReason) {
+      outcomes.push({ ...outcomeBase, kind: "review_required" });
       rows.push({
         paidMonth: commission.paidMonth,
         groupId: commission.groupId,
@@ -189,6 +277,10 @@ export function projectIndividualEarnings(input: {
       });
       continue;
     }
+    outcomes.push({
+      ...outcomeBase,
+      kind: result.defaultAgency ? "agency_default" : "calculated",
+    });
     const leaves = (result.settled?.payouts ?? []).filter((payout) => payout.recipientType === "person" || payout.recipientType === "team_member");
     for (const payout of leaves) {
       const method = recipientCompensationMethod(payout.recipientType);
@@ -225,7 +317,11 @@ export function projectIndividualEarnings(input: {
       });
     }
   }
-  return rows;
+  return { rows, outcomes };
+}
+
+export function projectIndividualEarnings(input: Parameters<typeof evaluateIndividualEarnings>[0]): IndividualReportRow[] {
+  return evaluateIndividualEarnings(input).rows;
 }
 
 export function projectTeamEarnings(input: {

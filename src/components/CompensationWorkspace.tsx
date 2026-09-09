@@ -46,6 +46,7 @@ import {
   compensationGroupSummaries,
   filterCompensationGroups,
   groupActiveCountLabel,
+  futureAllocationsForGroup,
   historicalAllocationsForGroup,
   allocationRecipientSummary,
 } from "@/domain/compensationHome";
@@ -440,6 +441,7 @@ export function CompensationWorkspace({
   );
   const asOfMonth = draft.effectiveStart || reviewContext?.paidMonth || currentPaidMonth();
   const selectedHistory = selectedGroupId ? historicalAllocationsForGroup(allocations, selectedGroupId, asOfMonth) : [];
+  const selectedFuture = selectedGroupId ? futureAllocationsForGroup(allocations, selectedGroupId, asOfMonth) : [];
   const coverageLines = groupCoverageLines({
     groupId: selectedGroupId ?? draftGroupId,
     lines: linesOfBusiness,
@@ -751,6 +753,31 @@ export function CompensationWorkspace({
               </>
             )}
             {coverageTable}
+            {selectedFuture.length > 0 && (
+              <div className="related-block">
+                <h3>FUTURE</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>LOB</th>
+                      <th>Recipients</th>
+                      <th>Effective start</th>
+                      <th>Effective end</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedFuture.map((row) => (
+                      <tr key={row.id}>
+                        <td>{row.lineOfBusinessName}</td>
+                        <td>{allocationRecipientSummary(row)}</td>
+                        <td>{formatStatementMonth(row.effectiveStart)}</td>
+                        <td>{row.effectiveEnd ? formatStatementMonth(row.effectiveEnd) : "Present"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             <div className="related-block">
               <button type="button" className="secondary" onClick={() => setShowHistory((current) => !current)}>
                 {showHistory ? "Hide compensation history" : "Show compensation history"}

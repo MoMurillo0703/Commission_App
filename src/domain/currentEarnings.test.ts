@@ -2,12 +2,19 @@ import { describe, expect, it } from "vitest";
 import type { AllocationCandidate } from "./allocations";
 import {
   EARNINGS_REVIEW_REQUIRED,
+  currentEarningsReadiness,
+  evaluateIndividualEarnings,
   projectIndividualEarnings,
   projectTeamEarnings,
   resolveEarningsAllocation,
   settleCurrentCommissionEarnings,
 } from "./currentEarnings";
-import { currentAllocationsForGroup, historicalAllocationsForGroup } from "./compensationHome";
+import {
+  classifyAllocationPeriod,
+  currentAllocationsForGroup,
+  futureAllocationsForGroup,
+  historicalAllocationsForGroup,
+} from "./compensationHome";
 
 const john = { kind: "agent" as const, id: 1, name: "John Elizondo" };
 const mo = { kind: "agent" as const, id: 2, name: "Mo Murillo" };
@@ -236,18 +243,48 @@ describe("current earnings projection", () => {
     expect(new Set(team.map((row) => row.snapshotKey)).size).toBe(1);
   });
 
-  it("surfaces REVIEW REQUIRED for incomplete allocations, conflicts, and invalid Team membership", () => {
-    const incomplete: AllocationCandidate = {
+  it("ignores inactive covering allocations and does not treat them as conflicts", () => {
+    const inactive: AllocationCandidate = {
       id: 61,
       groupId: 1,
       lineOfBusinessId: 12,
       effectiveStart: "2026-08",
       effectiveEnd: null,
       status: "inactive",
+      entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }],
+    };
+    expect(resolveEarningsAllocation([inactive], { groupId: 1, lineOfBusinessId: 12, paidMonth: "2026-08" })).toMatchObject({
+      defaultAgency: true,
+      reviewReason: null,
+    });
+    expect(projectIndividualEarnings({
+      commissions: [josesRows[4]!],
+      allocations: [inactive],
+      teams: [calChoiceTeam],
+      names,
+      personKind: "agent",
+      personId: john.id,
+    })).toHaveLength(0);
+    const active = teamAllocation(62, 1, 12, "2026-08");
+    expect(resolveEarningsAllocation([inactive, active], { groupId: 1, lineOfBusinessId: 12, paidMonth: "2026-08" })).toMatchObject({
+      allocation: { id: 62 },
+      defaultAgency: false,
+      reviewReason: null,
+    });
+  });
+
+  it("surfaces REVIEW REQUIRED for incomplete active allocations, active conflicts, and invalid Team membership", () => {
+    const incomplete: AllocationCandidate = {
+      id: 61,
+      groupId: 1,
+      lineOfBusinessId: 12,
+      effectiveStart: "2026-08",
+      effectiveEnd: null,
+      status: "active",
       entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 7000 }],
     };
     const conflictA = teamAllocation(62, 1, 11, "2026-08");
-    const conflictB = { ...teamAllocation(63, 1, 11, "2026-07"), status: "inactive" as const };
+    const conflictB = teamAllocation(63, 1, 11, "2026-07");
     const futureTeam = {
       ...calChoiceTeam,
       members: calChoiceTeam.members.map((member) => ({ ...member, effectiveStart: "2026-09" })),
@@ -274,7 +311,36 @@ describe("current earnings projection", () => {
     }).reviewReason).toBe("Team has invalid effective membership");
   });
 
-  it("classifies current vs history from the as-of Paid Month, not status", () => {
+  it("lets REVIEW REQUIRED win over legitimate-zero and payable-ready", () => {
+    const evaluated = evaluateIndividualEarnings({
+      commissions: [josesRows[4]!, josesRows[5]!],
+      allocations: [{
+        id: 70,
+        groupId: 1,
+        lineOfBusinessId: 12,
+        effectiveStart: "2026-08",
+        effectiveEnd: null,
+        status: "active",
+        entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 7000 }],
+      }, teamAllocation(71, 1, 13, "2026-08")],
+      teams: [calChoiceTeam],
+      names,
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(evaluated.rows.some((row) => row.reviewRequired)).toBe(true);
+    expect(evaluated.rows.some((row) => row.lineOfBusinessName === "Vision" && row.compensationCents === 655)).toBe(true);
+    const readiness = currentEarningsReadiness({
+      matchingCommissionCount: 2,
+      outcomes: evaluated.outcomes,
+      recipientRowCount: evaluated.rows.filter((row) => !row.reviewRequired).length,
+    });
+    expect(readiness.kind).toBe("review_required");
+    expect(readiness.payableReady).toBe(false);
+    expect(readiness.showTotals).toBe(true);
+  });
+
+  it("classifies current, future, and history from the as-of Paid Month and active status", () => {
     const allocations = [
       {
         id: 1,
@@ -298,9 +364,35 @@ describe("current earnings projection", () => {
         status: "active" as const,
         entries: [{ recipientType: "agency", personName: "Agency", teamName: null, compensationBps: 10000 }],
       },
+      {
+        id: 3,
+        groupId: 10,
+        groupName: "Joses",
+        lineOfBusinessId: 1,
+        lineOfBusinessName: "Dental",
+        effectiveStart: "2026-01",
+        effectiveEnd: "2026-07",
+        status: "active" as const,
+        entries: [{ recipientType: "agency", personName: "Agency", teamName: null, compensationBps: 10000 }],
+      },
+      {
+        id: 4,
+        groupId: 10,
+        groupName: "Joses",
+        lineOfBusinessId: 1,
+        lineOfBusinessName: "Dental",
+        effectiveStart: "2026-08",
+        effectiveEnd: "2026-10",
+        status: "inactive" as const,
+        entries: [{ recipientType: "person", personName: "John", teamName: null, compensationBps: 10000 }],
+      },
     ];
+    expect(currentAllocationsForGroup(allocations, 10, "2026-08").map((row) => row.id)).toEqual([1]);
+    expect(futureAllocationsForGroup(allocations, 10, "2026-08").map((row) => row.id)).toEqual([2]);
+    expect(historicalAllocationsForGroup(allocations, 10, "2026-08").map((row) => row.id).sort()).toEqual([3, 4]);
+    expect(classifyAllocationPeriod(allocations[3]!, "2026-08")).toBe("history");
     expect(currentAllocationsForGroup(allocations, 10, "2026-09").map((row) => row.id)).toEqual([1]);
-    expect(historicalAllocationsForGroup(allocations, 10, "2026-09").map((row) => row.id)).toEqual([2]);
+    expect(historicalAllocationsForGroup(allocations, 10, "2026-09").map((row) => row.id)).not.toContain(2);
     expect(currentAllocationsForGroup(allocations, 10, "2026-11").map((row) => row.id)).toEqual([2]);
   });
 });

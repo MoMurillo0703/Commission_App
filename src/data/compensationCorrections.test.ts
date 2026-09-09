@@ -15,7 +15,6 @@ import { individualReportDocument } from "@/domain/reportDocuments";
 import {
   exceptionWorkSummary,
   groupCompensationExceptions,
-  parseCommissionIds,
 } from "@/domain/compensationExceptions";
 import { newerAllocationBlockedMessage } from "@/domain/compensationCorrection";
 import { formatCents } from "@/domain/money";
@@ -127,9 +126,10 @@ describe("authorized historical compensation correction", () => {
       personKind: "agent",
       personId: john.id,
     });
-    expect(johnReady.payable?.unallocated).toHaveLength(6);
-    expect(johnReady.payable?.message).toMatch(/6 commissions need compensation setup/);
-    expect(parseCommissionIds(new URL(johnReady.payable!.reviewHref!, "https://app.local").searchParams.get("commissionIds")).sort((left, right) => left - right)).toEqual(reviewIds.sort((left, right) => left - right));
+    expect(johnReady.payable?.unallocated).toHaveLength(0);
+    expect(johnReady.payable?.payableReady).toBe(true);
+    expect(johnReady.payable?.message).toBeNull();
+    expect(johnReady.rows.filter((row) => reviewIds.includes(row.commissionId ?? 0))).toHaveLength(6);
 
     const preview = await previewCompensationCorrection(db, reviewIds);
     expect(preview.previewToken).toMatch(/^[a-f0-9]{64}$/);

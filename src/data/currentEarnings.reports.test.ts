@@ -11,7 +11,7 @@ import { buildAgencyReport, buildIndividualReport, buildTeamReport } from "./rep
 import { createTeam } from "./teams";
 import { createTestDb } from "@/db/test-db";
 import { commissionPayouts, commissionRecords } from "@/db/schema";
-import { currentAllocationsForGroup, historicalAllocationsForGroup } from "@/domain/compensationHome";
+import { currentAllocationsForGroup, futureAllocationsForGroup, historicalAllocationsForGroup } from "@/domain/compensationHome";
 
 async function snapshotRecords(db: Awaited<ReturnType<typeof createTestDb>>) {
   const [payouts, commissions] = await Promise.all([
@@ -111,6 +111,10 @@ describe("current unpaid earnings reports", () => {
     expect(johnReport.rows.find((row) => row.lineOfBusinessName === "Medical")?.compensationCents).toBe(43453);
     expect(johnReport.rows.find((row) => row.lineOfBusinessName === "Vision")?.compensationCents).toBe(655);
     expect(johnReport.totals.compensationCents).toBe(37056);
+    expect(johnReport.payable?.payableReady).toBe(true);
+    expect(johnReport.payable?.message).toBeNull();
+    expect(johnReport.payable?.unallocated).toHaveLength(0);
+    expect(johnReport.readiness?.kind).toBe("calculated");
     expect(await snapshotRecords(db)).toEqual(before);
 
     const teamReport = await buildTeamReport(db, { kind: "team", paidMonth: "2026-08", teamId: team.id });
@@ -139,6 +143,8 @@ describe("current unpaid earnings reports", () => {
     });
     expect(august.rows).toHaveLength(0);
     expect(august.totals.compensationCents).toBe(0);
+    expect(august.readiness?.kind).toBe("legitimate_zero");
+    expect(august.payable?.message).toBeNull();
     const afterSourceChange = await updateCommission(db, posted[4]!.id, { premiumMonth: "2026-09", sourcePeriodLabel: "09-26" });
     expect(afterSourceChange.statementMonth).toBe("2026-08");
     const afterSource = await snapshotRecords(db);
@@ -212,7 +218,8 @@ describe("current unpaid earnings reports", () => {
     expect(closed?.effectiveEnd).toBe("2026-10");
     expect(next?.effectiveEnd).toBeNull();
     expect(currentAllocationsForGroup(dentalHistory, group.id, "2026-09").map((row) => row.effectiveStart)).toEqual(["2026-08"]);
-    expect(historicalAllocationsForGroup(dentalHistory, group.id, "2026-09").map((row) => row.effectiveStart)).toEqual(["2026-11"]);
+    expect(futureAllocationsForGroup(dentalHistory, group.id, "2026-09").map((row) => row.effectiveStart)).toEqual(["2026-11"]);
+    expect(historicalAllocationsForGroup(dentalHistory, group.id, "2026-09")).toHaveLength(0);
   });
 
   it("saves selected unconfigured LOBs as explicit Agency 100% and keeps John at $0", async () => {
@@ -235,6 +242,9 @@ describe("current unpaid earnings reports", () => {
       personId: john.id,
     });
     expect(johnReport.totals.compensationCents).toBe(0);
+    expect(johnReport.readiness?.kind).toBe("legitimate_zero");
+    expect(johnReport.payable?.payableReady).toBe(true);
+    expect(johnReport.payable?.message).toBeNull();
     expect((await snapshotRecords(db)).payouts).toEqual(before.payouts);
   });
 
@@ -272,6 +282,123 @@ describe("current unpaid earnings reports", () => {
     expect(report.rows[0]?.reviewRequired).toBe(true);
     expect(report.rows[0]?.reviewReason).toBe("Team has invalid effective membership");
     expect(report.rows[0]?.recipientName).toBe("REVIEW REQUIRED");
+    expect(report.payable?.payableReady).toBe(false);
+    expect(report.payable?.message).toMatch(/REVIEW REQUIRED/);
+    expect(report.readiness?.kind).toBe("review_required");
+  });
+
+  it("does not use an inactive covering allocation and does not conflict it with an active one", async () => {
+    const { db, john, mo, group, dental, posted } = await seedJoses();
+    const inactive = await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: dental.id,
+      effectiveStart: "2026-08",
+      status: "inactive",
+      entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }],
+    });
+    const before = await snapshotRecords(db);
+    const inactiveOnly = await buildIndividualReport(db, {
+      kind: "individual",
+      paidMonth: "2026-08",
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(inactiveOnly.totals.compensationCents).toBe(0);
+    expect(inactiveOnly.readiness?.kind).toBe("legitimate_zero");
+    expect(inactiveOnly.payable?.message).toBeNull();
+    await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: dental.id,
+      effectiveStart: "2026-08",
+      entries: [{ recipientType: "person", personKind: "agent", personId: mo.id, compensationBps: 10000 }],
+    });
+    const johnAfter = await buildIndividualReport(db, {
+      kind: "individual",
+      paidMonth: "2026-08",
+      personKind: "agent",
+      personId: john.id,
+    });
+    const moAfter = await buildIndividualReport(db, {
+      kind: "individual",
+      paidMonth: "2026-08",
+      personKind: "agent",
+      personId: mo.id,
+    });
+    expect(johnAfter.readiness?.kind).not.toBe("review_required");
+    expect(moAfter.rows.filter((row) => row.lineOfBusinessName === "Dental").reduce((sum, row) => sum + row.compensationCents, 0)).toBe(-2519 * 4);
+    expect(inactive.status).toBe("inactive");
+    expect(posted.length).toBe(6);
+    expect((await snapshotRecords(db)).payouts).toEqual(before.payouts);
+  });
+
+  it("treats no August allocation as a legitimate Agency-default zero with no snapshot warning", async () => {
+    const { db, john } = await seedJoses();
+    const before = await snapshotRecords(db);
+    const report = await buildIndividualReport(db, {
+      kind: "individual",
+      paidMonth: "2026-08",
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(report.matchingCommissionCount).toBe(6);
+    expect(report.totals.compensationCents).toBe(0);
+    expect(report.rows).toHaveLength(0);
+    expect(report.readiness?.kind).toBe("legitimate_zero");
+    expect(report.payable?.payableReady).toBe(true);
+    expect(report.payable?.message).toBeNull();
+    expect(report.payable?.unallocated).toHaveLength(0);
+    expect(report.payable?.reviewHref).toBeNull();
+    expect(await snapshotRecords(db)).toEqual(before);
+  });
+
+  it("keeps valid calculated rows visible when another projected row is REVIEW REQUIRED", async () => {
+    const db = await createTestDb();
+    const john = await createAgent(db, { name: "John Elizondo" });
+    const group = await createGroup(db, { name: "Mixed Review" });
+    const carrier = await createCarrier(db, { name: "Principal" });
+    const dental = await createLineOfBusiness(db, { name: "Dental" });
+    const medical = await createLineOfBusiness(db, { name: "Medical" });
+    await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: dental.id,
+      effectiveStart: "2026-08",
+      entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }],
+    });
+    const valid = await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: dental.id,
+      grossCommissionCents: 10000,
+    });
+    const invalid = await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: medical.id,
+      grossCommissionCents: 8000,
+    });
+    const team = await createTeam(db, {
+      name: "Broken Team",
+      members: [{ personKind: "agent", personId: john.id, shareBps: 10000, effectiveStart: "2026-09" }],
+    });
+    await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: medical.id,
+      effectiveStart: "2026-08",
+      entries: [{ recipientType: "team", teamId: team.id, compensationBps: 10000 }],
+    });
+    const report = await buildIndividualReport(db, {
+      kind: "individual",
+      paidMonth: "2026-08",
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(report.rows.find((row) => row.commissionId === valid.id)?.compensationCents).toBe(10000);
+    expect(report.rows.find((row) => row.commissionId === invalid.id)?.reviewRequired).toBe(true);
+    expect(report.readiness?.kind).toBe("review_required");
+    expect(report.payable?.payableReady).toBe(false);
+    expect(report.payable?.message).toMatch(/REVIEW REQUIRED/);
   });
 
   it("projects direct Person, Team, and mixed allocations from posted commissions rather than payout snapshots", async () => {

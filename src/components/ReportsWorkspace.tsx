@@ -405,7 +405,24 @@ function IndividualStatement({
   recipientName: string;
   footerTotals?: Array<{ label: string; value: string }>;
 }) {
-  if (rows.length === 0) return <p className="empty">No current calculated earnings match this recipient and paid month.</p>;
+  if (rows.length === 0 && (!footerTotals || footerTotals.length === 0)) {
+    return <p className="empty">No current calculated earnings match this recipient and paid month.</p>;
+  }
+  if (rows.length === 0) {
+    return (
+      <section className="report-grand-total">
+        <h3>Grand Total</h3>
+        <div className="stats report-summary">
+          {footerTotals!.map((total) => (
+            <article key={total.label} className="card">
+              <p>{total.label}</p>
+              <strong className={total.value.startsWith("-") ? "neg" : undefined}>{total.value}</strong>
+            </article>
+          ))}
+        </div>
+      </section>
+    );
+  }
   const informal = informalRecipientName(recipientName);
   const groups = groupIndividualReportRows(rows);
   const reviewRows = rows.filter((row) => row.reviewRequired);

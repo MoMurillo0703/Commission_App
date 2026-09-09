@@ -75,18 +75,21 @@ describe("recipient payable readiness", () => {
     expect(recipientStatementDisclaimer()).toMatch(/does not mean the recipient has been paid/);
   });
 
-  it("does not present a missing-payout review as a $0 payroll statement", () => {
+  it("treats a projected Agency-default $0 as a successful legitimate zero, not missing payouts", () => {
     expect(recipientReportReviewState({
       personSelected: true,
-      personName: "Laura Montoya",
-      payoutRowCount: 0,
+      personName: "John Elizondo",
+      calculatedRowCount: 0,
       payableCents: 0,
       postedCommissionCount: 4,
       matchingCommissionCount: 4,
-      unallocatedCount: 2,
+      reviewRequiredCount: 0,
+      readinessKind: "legitimate_zero",
+      showTotals: true,
     })).toMatchObject({
-      kind: "missing_payouts",
-      showPayableTotals: false,
+      kind: "legitimate_zero",
+      showPayableTotals: true,
+      emptyMessage: null,
     });
     expect(recipientReportReviewState({
       personSelected: true,
@@ -97,6 +100,19 @@ describe("recipient payable readiness", () => {
       matchingCommissionCount: 2,
       unallocatedCount: 0,
     }).kind).toBe("legitimate_zero");
+    expect(recipientReportReviewState({
+      personSelected: true,
+      personName: "John Elizondo",
+      calculatedRowCount: 1,
+      payableCents: 655,
+      postedCommissionCount: 2,
+      matchingCommissionCount: 2,
+      reviewRequiredCount: 1,
+    })).toMatchObject({
+      kind: "review_required",
+      showPayableTotals: true,
+      emptyMessage: null,
+    });
     expect(recipientReportReviewState({
       personSelected: false,
       personName: null,

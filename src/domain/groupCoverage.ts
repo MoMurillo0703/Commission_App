@@ -24,7 +24,9 @@ export type GroupCoverageLine = {
 };
 
 function isCompleteCovering(allocation: CompensationHomeAllocation, asOfMonth: string) {
-  return allocationCoversMonth(allocation, asOfMonth) && allocationTotals(allocation.entries).complete;
+  return allocation.status === "active"
+    && allocationCoversMonth(allocation, asOfMonth)
+    && allocationTotals(allocation.entries).complete;
 }
 
 function isAgencyOnly(allocation: CompensationHomeAllocation | undefined) {

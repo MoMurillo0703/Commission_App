@@ -32,6 +32,24 @@ export function allocationCoversMonth(
   return paidMonthInRange(asOfMonth, allocation.effectiveStart, allocation.effectiveEnd);
 }
 
+export type AllocationPeriodClass = "current" | "future" | "history";
+
+export function isActiveCoveringAllocation(
+  allocation: Pick<CompensationHomeAllocation, "status" | "effectiveStart" | "effectiveEnd">,
+  asOfMonth: string,
+) {
+  return allocation.status === "active" && allocationCoversMonth(allocation, asOfMonth);
+}
+
+export function classifyAllocationPeriod(
+  allocation: Pick<CompensationHomeAllocation, "status" | "effectiveStart" | "effectiveEnd">,
+  asOfMonth: string,
+): AllocationPeriodClass {
+  if (isActiveCoveringAllocation(allocation, asOfMonth)) return "current";
+  if (allocation.status === "active" && allocation.effectiveStart > asOfMonth) return "future";
+  return "history";
+}
+
 export function compensationGroupSummaries(
   allocations: CompensationHomeAllocation[],
   groups: Array<{ id: number; name: string }>,
@@ -53,7 +71,7 @@ export function compensationGroupSummaries(
       activeAllocationCount: 0,
       currentLineNames: [],
     };
-    if (allocationCoversMonth(allocation, asOfMonth)) {
+    if (isActiveCoveringAllocation(allocation, asOfMonth)) {
       summary.activeAllocationCount += 1;
       if (!summary.currentLineNames.includes(allocation.lineOfBusinessName)) {
         summary.currentLineNames.push(allocation.lineOfBusinessName);
@@ -79,8 +97,18 @@ export function currentAllocationsForGroup(
   asOfMonth = currentPaidMonth(),
 ) {
   return allocations
-    .filter((row) => row.groupId === groupId && allocationCoversMonth(row, asOfMonth))
+    .filter((row) => row.groupId === groupId && classifyAllocationPeriod(row, asOfMonth) === "current")
     .sort((left, right) => left.lineOfBusinessName.localeCompare(right.lineOfBusinessName));
+}
+
+export function futureAllocationsForGroup(
+  allocations: CompensationHomeAllocation[],
+  groupId: number,
+  asOfMonth = currentPaidMonth(),
+) {
+  return allocations
+    .filter((row) => row.groupId === groupId && classifyAllocationPeriod(row, asOfMonth) === "future")
+    .sort((left, right) => left.effectiveStart.localeCompare(right.effectiveStart) || left.lineOfBusinessName.localeCompare(right.lineOfBusinessName));
 }
 
 export function historicalAllocationsForGroup(
@@ -89,7 +117,7 @@ export function historicalAllocationsForGroup(
   asOfMonth = currentPaidMonth(),
 ) {
   return allocations
-    .filter((row) => row.groupId === groupId && !allocationCoversMonth(row, asOfMonth))
+    .filter((row) => row.groupId === groupId && classifyAllocationPeriod(row, asOfMonth) === "history")
     .sort((left, right) => right.effectiveStart.localeCompare(left.effectiveStart) || left.lineOfBusinessName.localeCompare(right.lineOfBusinessName));
 }
 
@@ -108,7 +136,7 @@ export function missingLinesForGroup(
 ) {
   const currentLineIds = new Set(
     allocations
-      .filter((row) => row.groupId === groupId && allocationCoversMonth(row, asOfMonth) && allocationTotals(row.entries).complete)
+      .filter((row) => row.groupId === groupId && isActiveCoveringAllocation(row, asOfMonth) && allocationTotals(row.entries).complete)
       .map((row) => row.lineOfBusinessId),
   );
   const needed = [...new Set(evidence.filter((item) => item.groupId === groupId).map((item) => item.lineOfBusinessId))];

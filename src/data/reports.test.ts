@@ -306,8 +306,11 @@ describe("posted commission reports", () => {
       personKind: "agent",
       personId: john.id,
     });
-    expect(historical.payable?.unallocated.map((row) => row.commissionId)).toEqual([johnCommission.id]);
-    expect(historical.payable?.reviewHref).toContain(`commissionIds=${johnCommission.id}`);
+    expect(historical.payable?.unallocated).toHaveLength(0);
+    expect(historical.payable?.payableReady).toBe(true);
+    expect(historical.payable?.message).toBeNull();
+    expect(historical.rows[0]?.commissionId).toBe(johnCommission.id);
+    expect(historical.totals.compensationCents).toBe(5000);
   });
 
   it("uses stored Agent and Account Manager payout identities and names", async () => {

@@ -14,16 +14,12 @@ import {
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import { agents, carriers, commissionRecords, groups, linesOfBusiness } from "@/db/schema";
-import { historicalAllocationForPaidMonth, historicalAllocationIncludesRecipient } from "@/domain/compensationCorrection";
 import { compensationReviewHref } from "@/domain/compensationExceptions";
-import { isEligibleAgencyFallback } from "@/domain/compensationFallback";
-import { projectIndividualEarnings, projectTeamEarnings } from "@/domain/currentEarnings";
-import { recipientPayableReadiness } from "@/domain/recipientStatement";
+import { currentEarningsReadiness, evaluateIndividualEarnings, projectTeamEarnings } from "@/domain/currentEarnings";
+import type { UnallocatedPostedCommission } from "@/domain/recipientStatement";
 import { agencyExecutiveSummary } from "@/domain/reportPresentation";
 import { allocationCandidates, listAllocations } from "./allocations";
 import { buildMonthlyCompensationReconciliation } from "./businessCompensation";
-import { listCorrectedCommissionIds } from "./compensationCorrections";
-import { listAllPayouts } from "./payouts";
 import { listTeams, type TeamView } from "./teams";
 import { getAccountManager, listAccountManagers } from "./accountManagers";
 import { getAgent, listAgents } from "./agents";
@@ -176,14 +172,13 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
   const database = await resolveDb(db);
   const filters = normalizeReportFilters({ ...input, kind: input.kind === "recipient" ? "recipient" : "individual" });
   const commissions = await postedCommissions(database, filters);
-  const [payouts, agents, managers, allocations, teams] = await Promise.all([
-    listAllPayouts(database),
+  const [agents, managers, allocations, teams] = await Promise.all([
     listAgents(database),
     listAccountManagers(database),
     listAllocations(database),
     listTeams(database),
   ]);
-  const rows: IndividualReportRow[] = projectIndividualEarnings({
+  const evaluation = evaluateIndividualEarnings({
     commissions,
     allocations: allocationCandidates(allocations),
     teams: earningsTeams(teams),
@@ -192,51 +187,13 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
     personId: filters.personId,
     teamId: filters.teamId,
   });
-  const payoutsByCommission = new Map<number, typeof payouts>();
-  for (const payout of payouts) {
-    const current = payoutsByCommission.get(payout.commissionId) ?? [];
-    current.push(payout);
-    payoutsByCommission.set(payout.commissionId, current);
-  }
-  const corrected = await listCorrectedCommissionIds(database);
-  const candidates = allocationCandidates(allocations);
-  const payable = recipientPayableReadiness({
-    postedCommissions: commissions.map((commission) => {
-      const eligible = isEligibleAgencyFallback({
-        commissionId: commission.id,
-        grossCommissionCents: commission.grossCommissionCents,
-        agentCompensationCents: commission.compensationDistributedCents,
-        agencyNetCents: commission.agencyNetCents,
-        payouts: payoutsByCommission.get(commission.id) ?? [],
-        hasPriorCorrection: corrected.has(commission.id),
-      });
-      const historicallyRelevant = Boolean(
-        filters.personId
-        && (filters.personKind === "agent" || filters.personKind === "account_manager")
-        && historicalAllocationIncludesRecipient(
-          historicalAllocationForPaidMonth(candidates, {
-            groupId: commission.groupId,
-            lineOfBusinessId: commission.lineOfBusinessId,
-            paidMonth: commission.paidMonth,
-          }),
-          teams,
-          commission.paidMonth,
-          { personKind: filters.personKind, personId: filters.personId },
-        ),
-      );
-      return {
-        id: commission.id,
-        groupId: commission.groupId,
-        groupName: commission.groupName,
-        lineOfBusinessId: commission.lineOfBusinessId,
-        lineOfBusinessName: commission.lineOfBusinessName,
-        paidMonth: commission.paidMonth,
-        grossCommissionCents: commission.grossCommissionCents,
-        isEligibleFallback: eligible && historicallyRelevant,
-      };
-    }),
+  const rows = evaluation.rows;
+  const readiness = currentEarningsReadiness({
+    matchingCommissionCount: commissions.length,
+    outcomes: evaluation.outcomes,
+    recipientRowCount: rows.filter((row) => !row.reviewRequired).length,
   });
-  const paidMonth = filters.paidMonth ?? payable.unallocated[0]?.paidMonth ?? "";
+  const paidMonth = filters.paidMonth ?? evaluation.outcomes[0]?.paidMonth ?? "";
   const names = await reportNameLookup(database, filters);
   return {
     filters,
@@ -245,17 +202,20 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
     totals: sumIndividualReport(rows),
     availability: await reportAvailability(database, rows.length),
     payable: {
-      ...payable,
-      reviewHref: payable.unallocated.length && paidMonth
+      payableReady: readiness.payableReady,
+      unallocated: [] as UnallocatedPostedCommission[],
+      message: readiness.message,
+      reviewHref: readiness.reviewCommissionIds.length && paidMonth
         ? compensationReviewHref({
           paidMonth,
-          commissionIds: payable.unallocated.map((row) => row.commissionId),
+          commissionIds: readiness.reviewCommissionIds,
           personKind: filters.personKind,
           personId: filters.personId,
           personName: names.personName,
         })
         : null,
     },
+    readiness,
     matchingCommissionCount: commissions.length,
   };
 }
