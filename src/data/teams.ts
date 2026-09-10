@@ -3,7 +3,7 @@ import { isPaidMonth, paidMonthInRange, paidMonthRangesOverlap, previousPaidMont
 import { validateTeamMemberShares, type PersonKind } from "@/domain/allocations";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
-import { teamMemberships, teams } from "@/db/schema";
+import { accountManagers, agents, teamMemberships, teams } from "@/db/schema";
 import { getAccountManager } from "./accountManagers";
 import { getAgent } from "./agents";
 import { isUniqueConstraintError, NotFoundError, ValidationError } from "@/lib/errors";
@@ -50,6 +50,27 @@ function asStatus(value: string): TeamStatus {
   return value === "inactive" ? "inactive" : "active";
 }
 
+async function personNameDirectory(db: AppDatabase) {
+  const [agentRows, managerRows] = await Promise.all([
+    db.select({ id: agents.id, name: agents.name }).from(agents),
+    db.select({ id: accountManagers.id, name: accountManagers.name }).from(accountManagers),
+  ]);
+  return {
+    agents: new Map(agentRows.map((row) => [row.id, row.name])),
+    managers: new Map(managerRows.map((row) => [row.id, row.name])),
+  };
+}
+
+function personNameFromDirectory(
+  directory: Awaited<ReturnType<typeof personNameDirectory>>,
+  kind: PersonKind,
+  id: number,
+) {
+  const name = kind === "agent" ? directory.agents.get(id) : directory.managers.get(id);
+  if (!name) throw new NotFoundError("Person not found.");
+  return name;
+}
+
 async function personName(db: AppDatabase, kind: PersonKind, id: number) {
   if (kind === "agent") {
     const agent = await getAgent(db, id);
@@ -79,58 +100,62 @@ function normalizePeriod(start: string, end: string | null | undefined) {
 
 export async function listTeams(db?: AppDatabase): Promise<TeamView[]> {
   const database = await resolveDb(db);
-  const teamRows = await database.select().from(teams).orderBy(teams.name);
-  const membershipRows = await database.select().from(teamMemberships).orderBy(desc(teamMemberships.effectiveStart), teamMemberships.id);
-  return Promise.all(teamRows.map(async (team) => ({
+  const [teamRows, membershipRows, directory] = await Promise.all([
+    database.select().from(teams).orderBy(teams.name),
+    database.select().from(teamMemberships).orderBy(desc(teamMemberships.effectiveStart), teamMemberships.id),
+    personNameDirectory(database),
+  ]);
+  return teamRows.map((team) => ({
     id: team.id,
     name: team.name,
     status: asStatus(team.status),
     createdAt: team.createdAt,
     updatedAt: team.updatedAt,
-    members: await Promise.all(
-      membershipRows
-        .filter((member) => member.teamId === team.id)
-        .map(async (member) => ({
-          id: member.id,
-          teamId: member.teamId,
-          personKind: member.personKind as PersonKind,
-          personId: member.personId,
-          personName: await personName(database, member.personKind as PersonKind, member.personId),
-          shareBps: member.shareBps,
-          effectiveStart: member.effectiveStart,
-          effectiveEnd: member.effectiveEnd,
-          status: asStatus(member.status),
-        })),
-    ),
-  })));
+    members: membershipRows
+      .filter((member) => member.teamId === team.id)
+      .map((member) => ({
+        id: member.id,
+        teamId: member.teamId,
+        personKind: member.personKind as PersonKind,
+        personId: member.personId,
+        personName: personNameFromDirectory(directory, member.personKind as PersonKind, member.personId),
+        shareBps: member.shareBps,
+        effectiveStart: member.effectiveStart,
+        effectiveEnd: member.effectiveEnd,
+        status: asStatus(member.status),
+      })),
+  }));
 }
 
 export async function getTeam(db: AppDatabase | undefined, id: number) {
   const database = await resolveDb(db);
   const [team] = await database.select().from(teams).where(eq(teams.id, id));
   if (!team) return null;
-  const membershipRows = await database
-    .select()
-    .from(teamMemberships)
-    .where(eq(teamMemberships.teamId, id))
-    .orderBy(desc(teamMemberships.effectiveStart), teamMemberships.id);
+  const [membershipRows, directory] = await Promise.all([
+    database
+      .select()
+      .from(teamMemberships)
+      .where(eq(teamMemberships.teamId, id))
+      .orderBy(desc(teamMemberships.effectiveStart), teamMemberships.id),
+    personNameDirectory(database),
+  ]);
   return {
     id: team.id,
     name: team.name,
     status: asStatus(team.status),
     createdAt: team.createdAt,
     updatedAt: team.updatedAt,
-    members: await Promise.all(membershipRows.map(async (member) => ({
+    members: membershipRows.map((member) => ({
       id: member.id,
       teamId: member.teamId,
       personKind: member.personKind as PersonKind,
       personId: member.personId,
-      personName: await personName(database, member.personKind as PersonKind, member.personId),
+      personName: personNameFromDirectory(directory, member.personKind as PersonKind, member.personId),
       shareBps: member.shareBps,
       effectiveStart: member.effectiveStart,
       effectiveEnd: member.effectiveEnd,
       status: asStatus(member.status),
-    }))),
+    })),
   };
 }
 

@@ -7,13 +7,20 @@ import { listPostedGroupLobMonths } from "./commissions";
 import { listGroups } from "./groups";
 import { listLinesOfBusiness } from "./linesOfBusiness";
 
-export async function listCompensationQueue(db?: AppDatabase) {
+export type CompensationQueueSources = {
+  groups?: Awaited<ReturnType<typeof listGroups>>;
+  linesOfBusiness?: Awaited<ReturnType<typeof listLinesOfBusiness>>;
+  allocations?: Awaited<ReturnType<typeof listAllocations>>;
+  posted?: Awaited<ReturnType<typeof listPostedGroupLobMonths>>;
+};
+
+export async function listCompensationQueue(db?: AppDatabase, sources: CompensationQueueSources = {}) {
   const database = await resolveDb(db);
   const [groups, linesOfBusiness, allocations, posted] = await Promise.all([
-    listGroups(database),
-    listLinesOfBusiness(database),
-    listAllocations(database),
-    listPostedGroupLobMonths(database),
+    sources.groups ? Promise.resolve(sources.groups) : listGroups(database),
+    sources.linesOfBusiness ? Promise.resolve(sources.linesOfBusiness) : listLinesOfBusiness(database),
+    sources.allocations ? Promise.resolve(sources.allocations) : listAllocations(database),
+    sources.posted ? Promise.resolve(sources.posted) : listPostedGroupLobMonths(database),
   ]);
   return identifyCompensationQueue({
     groups,
@@ -24,6 +31,6 @@ export async function listCompensationQueue(db?: AppDatabase) {
   });
 }
 
-export async function listGroupCompensationQueue(db?: AppDatabase) {
-  return groupCompensationQueue(await listCompensationQueue(db));
+export async function listGroupCompensationQueue(db?: AppDatabase, sources: CompensationQueueSources = {}) {
+  return groupCompensationQueue(await listCompensationQueue(db, sources));
 }

@@ -164,16 +164,26 @@ export async function buildAgencyOwnerReport(
   };
 }
 
-export async function buildCompensationDirectory(db?: AppDatabase) {
+export type CompensationDirectorySources = {
+  groups?: Awaited<ReturnType<typeof listGroups>>;
+  allocations?: Awaited<ReturnType<typeof listAllocations>>;
+  evidence?: Awaited<ReturnType<typeof listGroupLineEvidence>>;
+  lines?: Awaited<ReturnType<typeof listLinesOfBusiness>>;
+  commissions?: Awaited<ReturnType<typeof listCommissions>>;
+  payouts?: Awaited<ReturnType<typeof listAllPayouts>>;
+  corrected?: Awaited<ReturnType<typeof listCorrectedCommissionIds>>;
+};
+
+export async function buildCompensationDirectory(db?: AppDatabase, sources: CompensationDirectorySources = {}) {
   const database = await resolveDb(db);
   const [groups, allocations, evidence, lines, commissions, payouts, corrected] = await Promise.all([
-    listGroups(database),
-    listAllocations(database),
-    listGroupLineEvidence(database),
-    listLinesOfBusiness(database),
-    listCommissions(database),
-    listAllPayouts(database),
-    listCorrectedCommissionIds(database),
+    sources.groups ? Promise.resolve(sources.groups) : listGroups(database),
+    sources.allocations ? Promise.resolve(sources.allocations) : listAllocations(database),
+    sources.evidence ? Promise.resolve(sources.evidence) : listGroupLineEvidence(database),
+    sources.lines ? Promise.resolve(sources.lines) : listLinesOfBusiness(database),
+    sources.commissions ? Promise.resolve(sources.commissions) : listCommissions(database),
+    sources.payouts ? Promise.resolve(sources.payouts) : listAllPayouts(database),
+    sources.corrected ? Promise.resolve(sources.corrected) : listCorrectedCommissionIds(database),
   ]);
   const payoutsByCommission = new Map<number, typeof payouts>();
   for (const payout of payouts) {

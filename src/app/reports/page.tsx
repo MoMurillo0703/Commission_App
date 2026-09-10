@@ -7,12 +7,23 @@ import { countUnassignedCommissions } from "@/data/commissions";
 import { listGroups } from "@/data/groups";
 import { listLinesOfBusiness } from "@/data/linesOfBusiness";
 import { listTeams } from "@/data/teams";
+import { getDb } from "@/db";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReportsPage() {
+  const db = await getDb();
+  const [reviewCount, groups, carriers, linesOfBusiness, agents, accountManagers, teams] = await Promise.all([
+    countUnassignedCommissions(db),
+    listGroups(db),
+    listCarriers(db),
+    listLinesOfBusiness(db),
+    listAgents(db),
+    listAccountManagers(db),
+    listTeams(db),
+  ]);
   return (
-    <AppShell active="reports" reviewCount={await countUnassignedCommissions()}>
+    <AppShell active="reports" reviewCount={reviewCount}>
       <header>
         <div>
           <p className="eyebrow">Reporting</p>
@@ -21,12 +32,12 @@ export default async function ReportsPage() {
         </div>
       </header>
       <ReportsWorkspace
-        groups={await listGroups()}
-        carriers={await listCarriers()}
-        linesOfBusiness={await listLinesOfBusiness()}
-        agents={await listAgents()}
-        accountManagers={await listAccountManagers()}
-        teams={await listTeams()}
+        groups={groups}
+        carriers={carriers}
+        linesOfBusiness={linesOfBusiness}
+        agents={agents}
+        accountManagers={accountManagers}
+        teams={teams}
       />
     </AppShell>
   );

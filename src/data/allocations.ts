@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import {
   closePriorAllocationEnd,
   overlappingActiveAllocations,
@@ -136,27 +136,22 @@ const allocationSelect = {
   updatedAt: compensationAllocations.updatedAt,
 };
 
-async function hydrateEntries(db: AppDatabase, allocationId: number, directory: Awaited<ReturnType<typeof recipientDirectory>>): Promise<AllocationEntryView[]> {
-  const rows = await db
-    .select()
-    .from(compensationAllocationEntries)
-    .where(eq(compensationAllocationEntries.allocationId, allocationId));
-  return rows
-    .sort((left, right) => left.sortOrder - right.sortOrder || left.id - right.id)
-    .map((row) => {
-      const labels = labelsFromDirectory(row, directory);
-      return {
-        id: row.id,
-        recipientType: row.recipientType as RecipientType,
-        personKind: (row.personKind as PersonKind | null) ?? null,
-        personId: row.personId,
-        personName: labels.personName,
-        teamId: row.teamId,
-        teamName: labels.teamName,
-        compensationBps: row.compensationBps,
-        sortOrder: row.sortOrder,
-      };
-    });
+function entryView(
+  row: typeof compensationAllocationEntries.$inferSelect,
+  directory: Awaited<ReturnType<typeof recipientDirectory>>,
+): AllocationEntryView {
+  const labels = labelsFromDirectory(row, directory);
+  return {
+    id: row.id,
+    recipientType: row.recipientType as RecipientType,
+    personKind: (row.personKind as PersonKind | null) ?? null,
+    personId: row.personId,
+    personName: labels.personName,
+    teamId: row.teamId,
+    teamName: labels.teamName,
+    compensationBps: row.compensationBps,
+    sortOrder: row.sortOrder,
+  };
 }
 
 type AllocationHeader = {
@@ -175,11 +170,25 @@ type AllocationHeader = {
 
 async function hydrateAllocationRows(db: AppDatabase, rows: AllocationHeader[]): Promise<AllocationView[]> {
   const directory = await recipientDirectory(db);
-  return Promise.all(rows.map(async (row) => ({
+  if (rows.length === 0) return [];
+  const entryRows = await db
+    .select()
+    .from(compensationAllocationEntries)
+    .where(inArray(compensationAllocationEntries.allocationId, rows.map((row) => row.id)));
+  const entriesByAllocation = new Map<number, AllocationEntryView[]>();
+  for (const row of entryRows) {
+    const list = entriesByAllocation.get(row.allocationId) ?? [];
+    list.push(entryView(row, directory));
+    entriesByAllocation.set(row.allocationId, list);
+  }
+  for (const list of entriesByAllocation.values()) {
+    list.sort((left, right) => left.sortOrder - right.sortOrder || left.id - right.id);
+  }
+  return rows.map((row) => ({
     ...row,
     status: asStatus(row.status),
-    entries: await hydrateEntries(db, row.id, directory),
-  })));
+    entries: entriesByAllocation.get(row.id) ?? [],
+  }));
 }
 
 export async function listAllocations(db?: AppDatabase): Promise<AllocationView[]> {

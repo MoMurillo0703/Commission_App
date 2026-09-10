@@ -450,4 +450,48 @@ describe("compensation allocations", () => {
     expect((await listGroupCompensationQueue(db)).some((item) => item.groupId === group.id)).toBe(false);
     expect((await listGroupCompensationQueue(db)).some((item) => item.groupId === nextGroup.id)).toBe(true);
   });
+
+  it("hydrates every listed allocation's entries in one pass", async () => {
+    const { db, john, laura, group, medical } = await seed();
+    const dental = await createLineOfBusiness(db, { name: "Dental" });
+    const medicalAllocation = await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: medical.id,
+      effectiveStart: "2026-01",
+      entries: [
+        { recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 7000 },
+        { recipientType: "agency", compensationBps: 3000 },
+      ],
+    });
+    const dentalAllocation = await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: dental.id,
+      effectiveStart: "2026-01",
+      entries: [
+        { recipientType: "person", personKind: "account_manager", personId: laura.id, compensationBps: 4000 },
+        { recipientType: "agency", compensationBps: 6000 },
+      ],
+    });
+    const listed = await listAllocations(db);
+    expect(listed.find((row) => row.id === medicalAllocation.id)?.entries.map((entry) => ({
+      recipientType: entry.recipientType,
+      personName: entry.personName,
+      compensationBps: entry.compensationBps,
+    }))).toEqual([
+      { recipientType: "person", personName: "John Elizando", compensationBps: 7000 },
+      { recipientType: "agency", personName: "Agency", compensationBps: 3000 },
+    ]);
+    expect(listed.find((row) => row.id === dentalAllocation.id)?.entries.map((entry) => ({
+      recipientType: entry.recipientType,
+      personName: entry.personName,
+      compensationBps: entry.compensationBps,
+    }))).toEqual([
+      { recipientType: "person", personName: "Laura Montoya", compensationBps: 4000 },
+      { recipientType: "agency", personName: "Agency", compensationBps: 6000 },
+    ]);
+    const teams = await listTeams(db);
+    expect(teams).toEqual([]);
+    const fromLoaded = await listGroupCompensationQueue(db, { allocations: listed });
+    expect(fromLoaded).toEqual(await listGroupCompensationQueue(db));
+  });
 });
