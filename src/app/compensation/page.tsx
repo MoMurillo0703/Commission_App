@@ -1,19 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { CompensationWorkspace } from "@/components/CompensationWorkspace";
-import { listAccountManagers } from "@/data/accountManagers";
-import { listAgents } from "@/data/agents";
-import { listAllocations } from "@/data/allocations";
-import { countUnassignedCommissions, listCommissions, listPostedGroupLobMonths } from "@/data/commissions";
-import { listCorrectedCommissionIds } from "@/data/compensationCorrections";
-import { listPostedCompensationExceptions } from "@/data/compensationExceptions";
-import { listGroupCompensationQueue } from "@/data/compensationQueue";
-import { listGroups } from "@/data/groups";
-import { listLinesOfBusiness } from "@/data/linesOfBusiness";
-import { listGroupLineEvidence } from "@/data/groupLineEvidence";
-import { listAllPayouts } from "@/data/payouts";
-import { listTeams } from "@/data/teams";
-import { getAgencyOwnerForPaidMonth } from "@/data/agencyOwner";
-import { buildCompensationDirectory, namedBusinessPeople } from "@/data/businessCompensation";
+import { loadCompensationWorkspaceData } from "@/data/compensationWorkspaceLoad";
 import { getDb } from "@/db";
 import { parseCommissionIds } from "@/domain/compensationExceptions";
 import { currentPaidMonth, isPaidMonth } from "@/domain/dates";
@@ -38,56 +25,14 @@ export default async function CompensationPage({
   const paidMonth = params.paidMonth ?? "";
   const ownerMonth = isPaidMonth(paidMonth) ? paidMonth : currentPaidMonth();
   const db = await getDb();
-  const [
-    agents,
-    accountManagers,
-    groups,
-    linesOfBusiness,
-    allocations,
-    teams,
-    evidence,
-    commissions,
-    payouts,
-    corrected,
-    posted,
-    agencyOwner,
-    reviewCount,
-    reviewCommissions,
-  ] = await Promise.all([
-    listAgents(db),
-    listAccountManagers(db),
-    listGroups(db),
-    listLinesOfBusiness(db),
-    listAllocations(db),
-    listTeams(db),
-    listGroupLineEvidence(db),
-    listCommissions(db),
-    listAllPayouts(db),
-    listCorrectedCommissionIds(db),
-    listPostedGroupLobMonths(db),
-    getAgencyOwnerForPaidMonth(db, ownerMonth),
-    countUnassignedCommissions(db),
-    params.review === "1" && paidMonth
-      ? listPostedCompensationExceptions(db, {
-        paidMonth,
-        commissionIds: parseCommissionIds(params.commissionIds),
-      })
-      : Promise.resolve([]),
-  ]);
-  const [directory, initialQueue] = await Promise.all([
-    buildCompensationDirectory(db, {
-      groups,
-      allocations,
-      evidence,
-      lines: linesOfBusiness,
-      commissions,
-      payouts,
-      corrected,
-    }),
-    listGroupCompensationQueue(db, { groups, linesOfBusiness, allocations, posted }),
-  ]);
+  const loaded = await loadCompensationWorkspaceData(db, {
+    ownerMonth,
+    review: params.review === "1" && paidMonth
+      ? { paidMonth, commissionIds: parseCommissionIds(params.commissionIds) }
+      : null,
+  });
   return (
-    <AppShell active="compensation" reviewCount={reviewCount}>
+    <AppShell active="compensation" reviewCount={loaded.reviewCount}>
       <header>
         <div>
           <p className="eyebrow">Compensation allocations</p>
@@ -96,23 +41,23 @@ export default async function CompensationPage({
         </div>
       </header>
       <CompensationWorkspace
-        groups={groups}
-        agents={agents}
-        accountManagers={accountManagers}
-        linesOfBusiness={linesOfBusiness}
-        initialAllocations={allocations}
-        initialTeams={teams}
-        initialQueue={initialQueue}
-        groupLineEvidence={evidence}
+        groups={loaded.groups}
+        agents={loaded.agents}
+        accountManagers={loaded.accountManagers}
+        linesOfBusiness={loaded.linesOfBusiness}
+        initialAllocations={loaded.allocations}
+        initialTeams={loaded.teams}
+        initialQueue={loaded.initialQueue}
+        groupLineEvidence={loaded.evidence}
         focusAllocationId={Number.isInteger(focusAllocationId) && focusAllocationId > 0 ? focusAllocationId : null}
-        reviewContext={reviewCommissions.length > 0 ? {
+        reviewContext={loaded.reviewCommissions.length > 0 ? {
           paidMonth,
           personName: params.personName ?? null,
-          commissions: reviewCommissions,
+          commissions: loaded.reviewCommissions,
         } : null}
-        agencyOwner={agencyOwner}
-        namedPeople={namedBusinessPeople(agents, accountManagers, agencyOwner)}
-        directory={directory}
+        agencyOwner={loaded.agencyOwner}
+        namedPeople={loaded.namedPeople}
+        directory={loaded.directory}
       />
     </AppShell>
   );
