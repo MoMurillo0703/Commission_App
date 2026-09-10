@@ -12,7 +12,7 @@ import {
 } from "./statementWorkflow";
 
 export const STATEMENT_INTAKE_LEAD =
-  "Upload a commission statement for the month the agency received payment. The app reads supported files automatically and shows the extracted commission data for confirmation.";
+  "Upload a commission statement for the month the agency received payment. The app reads supported files automatically, asks only about unmatched values, and posts into that paid month.";
 
 export const STATEMENT_INTAKE_FORMATS =
   "Supported formats: Excel, CSV, and readable PDF. Scanned or image-only PDFs cannot be read automatically.";
@@ -32,8 +32,18 @@ export type StatementActionSource = {
   } | null;
 };
 
+export function partitionStatementFiles(files: Iterable<File>) {
+  const accepted: File[] = [];
+  const rejected: File[] = [];
+  for (const file of files) {
+    if (supportedStatementName.test(file.name)) accepted.push(file);
+    else rejected.push(file);
+  }
+  return { accepted, rejected };
+}
+
 export function acceptedStatementFiles(files: Iterable<File>) {
-  return [...files].filter((file) => supportedStatementName.test(file.name));
+  return partitionStatementFiles(files).accepted;
 }
 
 export function statementHasExtractedPdfText(statement: StatementActionSource) {

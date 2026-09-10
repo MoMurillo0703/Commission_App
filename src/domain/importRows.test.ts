@@ -221,6 +221,24 @@ describe("statement compensation from agreements", () => {
     expect(ignored[0]?.exceptions.join(" ")).toMatch(/ignored/i);
   });
 
+  it("treats an ignored group as skipped instead of blocked", () => {
+    const unmatchedSheets = compensationSheets.map((sheet) => ({
+      ...sheet,
+      rows: sheet.rows.map((row) => ({
+        ...row,
+        values: { ...row.values, "Group Name": "Skip Me" },
+        group: { status: "new_group" as const, groupId: null, groupName: null, sourceName: "Skip Me", sourceNumber: null },
+      })),
+    }));
+    const ignored = validateMappedRows(unmatchedSheets, compensationMapping, "2026-08", {
+      ...compensationRefs,
+      groupResolutions: [{ key: "name:skip me", groupId: null, sourceName: "Skip Me", sourceNumber: null, action: "ignore" }],
+    });
+    expect(ignored[0]?.status).toBe("ignored");
+    expect(ignored[0]?.groupId).toBeNull();
+    expect(ignored[0]?.exceptions.join(" ")).toMatch(/ignored/i);
+  });
+
   it("uses the Group + Agent + LOB agreement selected by paid month, not premium month", () => {
     const agreements = [
       { id: 1, groupId: 1, agentId: 5, lineOfBusinessId: 3, compensationBps: 4000, effectiveStart: "2026-01", effectiveEnd: "2026-06", status: "active" as const },

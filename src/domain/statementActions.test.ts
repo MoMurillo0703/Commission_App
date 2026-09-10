@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   acceptedStatementFiles,
+  partitionStatementFiles,
   pdfNeedsLayoutConfirmation,
   STATEMENT_INTAKE_FORMATS,
   STATEMENT_INTAKE_LEAD,
@@ -27,6 +28,11 @@ describe("statement list actions and intake files", () => {
       file("image.png"),
     ]);
     expect(accepted.map((item) => item.name)).toEqual(["book.csv", "book.xlsx", "scan.pdf"]);
+    const partitioned = partitionStatementFiles([
+      file("book.csv"),
+      file("notes.txt"),
+    ]);
+    expect(partitioned.rejected.map((item) => item.name)).toEqual(["notes.txt"]);
   });
 
   it("exposes Delete on unposted statements and blocks hard delete after posting", () => {

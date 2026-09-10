@@ -31,6 +31,7 @@ export function StatementsWorkspace({
   agreements: AgreementView[];
 }) {
   const [paidMonth, setPaidMonth] = useState(initialPaidMonth);
+  const [commissionRefresh, setCommissionRefresh] = useState(0);
 
   return (
     <>
@@ -47,10 +48,13 @@ export function StatementsWorkspace({
         availablePaidMonths={availablePaidMonths}
         carriers={carriers}
         onPaidMonthChange={setPaidMonth}
+        onCommissionsChanged={() => setCommissionRefresh((value) => value + 1)}
       />
       <div className="recent">
         <CommissionsManager
           initial={commissions}
+          paidMonth={paidMonth}
+          refreshToken={commissionRefresh}
           groups={groups}
           carriers={carriers}
           linesOfBusiness={linesOfBusiness}

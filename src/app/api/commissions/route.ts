@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createCommission, listCommissions } from "@/data/commissions";
+import { paidMonthPattern } from "@/domain/dates";
 import { parseDollarsToCents } from "@/domain/money";
 import { getDb } from "@/db";
 import { toErrorResponse } from "@/lib/http";
@@ -8,8 +9,11 @@ import { commissionInputSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  return NextResponse.json(await listCommissions());
+export async function GET(request: Request) {
+  const paidMonth = new URL(request.url).searchParams.get("paidMonth")?.trim() ?? "";
+  return NextResponse.json(
+    await listCommissions(undefined, paidMonthPattern.test(paidMonth) ? { paidMonth } : undefined),
+  );
 }
 
 export async function POST(request: Request) {

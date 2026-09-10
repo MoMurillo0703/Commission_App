@@ -24,7 +24,7 @@ describe("statement workflow language", () => {
     expect(statementNextAction("unreadable", false, "pdf")).toBe("View original");
     expect(statementNextAction("ready_to_map", true, "pdf")).toBe("Confirm extracted data");
     expect(statementNextAction("needs_layout", false, "pdf")).toBe("Help the app read this statement");
-    expect(statementNextAction("mapped", true)).toBe("Continue Import");
+    expect(statementNextAction("mapped", true)).toBe("Continue review");
     expect(statementCanOpenReview("needs_layout", false, "pdf")).toBe(true);
     expect(statementNextAction("needs_profile", false, "pdf", { extractionPath: "statements/1-extraction.json" })).toBe("Help the app read this statement");
     expect(statementNextAction("needs_profile", false, "pdf")).toBe("View original");

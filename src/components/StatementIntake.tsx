@@ -1,13 +1,13 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { fetchWithDeadline, httpFailureMessage, readApiJson, requestFailureMessage, runBusyAction } from "@/lib/apiClient";
 import { currentPaidMonth, formatPaidMonthTitle, formatStatementMonth } from "@/domain/dates";
 import type { ImportStatementView } from "@/data/statements";
 import type { Carrier } from "@/db/schema";
 import type { StatementPreview } from "@/domain/workbook";
-import { acceptedStatementFiles, pdfNeedsLayoutConfirmation, STATEMENT_INTAKE_FORMATS, STATEMENT_INTAKE_LEAD, statementListActions } from "@/domain/statementActions";
+import { partitionStatementFiles, pdfNeedsLayoutConfirmation, STATEMENT_INTAKE_FORMATS, STATEMENT_INTAKE_LEAD, statementListActions } from "@/domain/statementActions";
 import { pdfShouldUseExtractedConfirmation } from "@/domain/pdfIntakeSurface";
 import { canReviewRows, isUnparsedStatement, statementCanBeDeleted, statementCanOpenReview, statementGuidance, statementHasExtractedText, statementStatusLabel } from "@/domain/statementWorkflow";
 import { ChangePaidMonthDialog } from "./ChangePaidMonthDialog";
@@ -33,14 +33,17 @@ export function StatementIntake({
   availablePaidMonths = [],
   carriers: initialCarriers = [],
   onPaidMonthChange,
+  onCommissionsChanged,
 }: {
   initialPaidMonth?: string;
   initialStatements?: ImportStatementView[];
   availablePaidMonths?: string[];
   carriers?: Carrier[];
   onPaidMonthChange?: (paidMonth: string) => void;
+  onCommissionsChanged?: () => void;
 }) {
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [paidMonth, setPaidMonth] = useState(initialPaidMonth);
   const [statements, setStatements] = useState(initialStatements);
   const [carriers, setCarriers] = useState(initialCarriers);
@@ -49,6 +52,8 @@ export function StatementIntake({
   const [result, setResult] = useState<IntakeResult | null>(null);
   const [batchResults, setBatchResults] = useState<IntakeResult[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [rejectedFiles, setRejectedFiles] = useState<string[]>([]);
+  const [uploadProgress, setUploadProgress] = useState("");
   const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<StatementPreview | null>(null);
   const [activeStatement, setActiveStatement] = useState<ImportStatementView | null>(null);
@@ -81,6 +86,21 @@ export function StatementIntake({
     if (match) return `Will use existing carrier ${match.name}. A duplicate will not be created.`;
     return `A new carrier “${typed}” will be created.`;
   }, [carrierId, carrierName, carriers]);
+  const hasCarrier = Boolean(carrierId || carrierName.trim());
+
+  function chooseFiles(files: Iterable<File>) {
+    const { accepted, rejected } = partitionStatementFiles(files);
+    setSelectedFiles(accepted);
+    setRejectedFiles(rejected.map((file) => file.name));
+  }
+
+  function openReviewable(item: IntakeResult) {
+    const statement = item.statement ?? item.existing ?? null;
+    setResult(item);
+    setPreview(item.preview ?? statement?.preview ?? null);
+    setActiveStatement(statement);
+    setManualReadHelp(false);
+  }
 
   async function changeMonth(value: string) {
     setPaidMonth(value);
@@ -98,11 +118,16 @@ export function StatementIntake({
       setResult({ status: "review", message: "Choose or drop at least one statement file." });
       return;
     }
+    if (!hasCarrier) {
+      setResult({ status: "review", message: "Select an existing carrier or enter a new carrier name." });
+      return;
+    }
     try {
       await runBusyAction(setBusy, async () => {
         const results: IntakeResult[] = [];
         let lastReviewable: IntakeResult | null = null;
-        for (const file of selectedFiles) {
+        for (const [index, file] of selectedFiles.entries()) {
+          setUploadProgress(`Reading ${index + 1} of ${selectedFiles.length}: ${file.name}`);
           const form = new FormData();
           form.set("statement", file);
           form.set("paidMonth", paidMonth);
@@ -126,15 +151,22 @@ export function StatementIntake({
           }
         }
         setBatchResults(results);
-        setResult(results.length === 1 ? results[0] : null);
-        setPreview(lastReviewable?.preview ?? lastReviewable?.statement?.preview ?? null);
-        setActiveStatement(lastReviewable?.statement ?? null);
-        setManualReadHelp(false);
+        if (lastReviewable) openReviewable(lastReviewable);
+        else {
+          setResult(results.length === 1 ? results[0] : null);
+          setPreview(null);
+          setActiveStatement(null);
+          setManualReadHelp(false);
+        }
         await Promise.all([loadStatements(paidMonth), refreshCarriers()]);
         setCarrierName("");
         setSelectedFiles([]);
+        setRejectedFiles([]);
+        setUploadProgress("");
+        if (fileInputRef.current) fileInputRef.current.value = "";
       });
     } catch (error) {
+      setUploadProgress("");
       setResult({
         status: "review",
         message: requestFailureMessage(error, "Unable to finish reading and saving that statement."),
@@ -238,6 +270,7 @@ export function StatementIntake({
             onChange={(event) => changeMonth(event.target.value)}
             required
           />
+          <small>This is when the agency received the carrier payment. Coverage or source months on the file do not replace it.</small>
         </label>
         <label>
           Carrier
@@ -268,29 +301,54 @@ export function StatementIntake({
           onDrop={(event) => {
             event.preventDefault();
             setDragging(false);
-            setSelectedFiles(acceptedStatementFiles(event.dataTransfer.files));
+            chooseFiles(event.dataTransfer.files);
           }}
         >
           <strong>Drop statement files here</strong>
           <span>or click to choose Excel, CSV, or readable PDF files</span>
           <input
             id="statement"
+            ref={fileInputRef}
             name="statement"
             type="file"
             accept=".csv,.xlsx,.xls,.pdf"
             multiple
-            onChange={(event) => setSelectedFiles(acceptedStatementFiles(event.target.files ?? []))}
+            onChange={(event) => chooseFiles(event.target.files ?? [])}
           />
           {selectedFiles.length > 0 && <small>{selectedFiles.map((file) => file.name).join(" · ")}</small>}
         </label>
-        <button disabled={busy}>{busy ? "Reading and saving…" : `Read ${selectedFiles.length || ""} statement${selectedFiles.length === 1 ? "" : "s"}`}</button>
+        {rejectedFiles.length > 0 && (
+          <p className="form-error">
+            Not a supported statement file{rejectedFiles.length === 1 ? "" : "s"}: {rejectedFiles.join(", ")}. Use CSV, XLSX, XLS, or PDF.
+          </p>
+        )}
+        {selectedFiles.length > 0 && !hasCarrier && (
+          <p className="form-error">Select an existing carrier or enter a new carrier name before reading.</p>
+        )}
+        <button disabled={busy || selectedFiles.length === 0 || !hasCarrier}>
+          {busy ? (uploadProgress || "Reading and saving…") : `Read ${selectedFiles.length || ""} statement${selectedFiles.length === 1 ? "" : "s"}`}
+        </button>
       </form>
       {batchResults.length > 1 && (
         <div className="result">
           <strong>Upload results</strong>
-          {batchResults.map((item, index) => (
-            <p key={`${item.fileName}-${index}`}><span className={`pill ${item.status}`}>{statementStatusLabel(item.status, item.fileType)}</span> {item.fileName}: {item.message}</p>
-          ))}
+          {batchResults.map((item, index) => {
+            const statement = item.statement ?? item.existing ?? null;
+            const canOpen = Boolean(statement && (canReviewRows(statement.preview ?? item.preview) || statement.status === "needs_layout"));
+            return (
+              <p key={`${item.fileName}-${index}`}>
+                <span className={`pill ${item.status}`}>{statementStatusLabel(item.status, item.fileType)}</span> {item.fileName}: {item.message}
+                {canOpen && (
+                  <>
+                    {" "}
+                    <button type="button" className="secondary" onClick={() => openReviewable(item)}>
+                      Open
+                    </button>
+                  </>
+                )}
+              </p>
+            );
+          })}
         </div>
       )}
       {result && (
@@ -392,9 +450,15 @@ export function StatementIntake({
       )}
       {activeStatement && preview && canReviewRows(preview) && statementCanOpenReview(activeStatement.status, true, activeStatement.sourceType) && (
         <StatementPosting
+          key={activeStatement.id}
           statement={activeStatement}
           preview={preview}
           variant={pdfShouldUseExtractedConfirmation(activeStatement) ? "extracted-confirm" : "spreadsheet"}
+          onPosted={async (next) => {
+            if (next) setActiveStatement(next);
+            await loadStatements(paidMonth);
+            onCommissionsChanged?.();
+          }}
         />
       )}
       {availablePaidMonths.length > 0 && (

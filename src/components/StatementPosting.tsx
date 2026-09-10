@@ -8,6 +8,7 @@ import type { UnmatchedImportGroup, GroupImportDecision } from "@/domain/importG
 import { partitionStatementGroupAssignments } from "@/domain/groupAssignment";
 import { defaultGroupImportAction, groupMatchesQuery, suggestGroupCandidates, type GroupSuggestion } from "@/domain/groupMatch";
 import type { ValidatedImportRow } from "@/domain/importRows";
+import { formatPaidMonthLong, formatStatementMonth } from "@/domain/dates";
 import { formatCents } from "@/domain/money";
 import type { NamedImportDecision, UnmatchedNamedImport } from "@/domain/namedImport";
 import { continueImportBlockedReason, isStatementFullyPosted, type StatementReadiness } from "@/domain/statementReadiness";
@@ -31,6 +32,7 @@ type PreviewResponse = {
   conflicts?: string[];
   remainingUnmatchedCount?: number;
   message?: string;
+  statement?: ImportStatementView | null;
 };
 
 function defaultNamedDecisions(items: UnmatchedNamedImport[]) {
@@ -51,10 +53,12 @@ export function StatementPosting({
   statement,
   preview,
   variant = "spreadsheet",
+  onPosted,
 }: {
   statement: ImportStatementView;
   preview: StatementPreview;
   variant?: "spreadsheet" | "extracted-confirm";
+  onPosted?: (next?: ImportStatementView | null) => void;
 }) {
   const headers = useMemo(() => collectPreviewHeaders(preview.sheets), [preview.sheets]);
   const [mapping, setMapping] = useState<ColumnMapping>(
@@ -70,6 +74,7 @@ export function StatementPosting({
   const [agentDecisions, setAgentDecisions] = useState<Record<string, NamedImportDecision>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [reviewLoading, setReviewLoading] = useState(true);
   const [layoutMessage, setLayoutMessage] = useState("");
   const extractedConfirm = variant === "extracted-confirm";
   const postingMapping = intakeMapping(mapping, extractedConfirm);
@@ -150,6 +155,8 @@ export function StatementPosting({
         applyReview(body);
       } catch (error) {
         if (!cancelled) setError(requestFailureMessage(error, "Unable to preview rows."));
+      } finally {
+        if (!cancelled) setReviewLoading(false);
       }
     })();
     return () => {
@@ -230,6 +237,7 @@ export function StatementPosting({
           return;
         }
         applyReview(body);
+        onPosted?.(body.statement ?? null);
       });
     } catch (error) {
       setError(requestFailureMessage(error, "Unable to post rows."));
@@ -264,18 +272,24 @@ export function StatementPosting({
   const readiness = review?.readiness ?? null;
   const continueBlocked = continueImportBlockedReason(readiness);
   const fullyPosted = isStatementFullyPosted(readiness) && unmatchedGroups.length + unmatchedLines.length + unmatchedAgents.length === 0;
+  const postedCount = readiness?.postedCount ?? review?.postedCount ?? 0;
+  const ignoredCount = review?.rows.filter((row) => row.status === "ignored").length ?? 0;
+  const postedGrossCents = review?.rows
+    .filter((row) => row.status === "posted")
+    .reduce((sum, row) => sum + (row.grossCommissionCents ?? 0), 0) ?? 0;
   const mappingFieldsToShow = mappingFields.filter((field) => !(field === "carrier" && statement.carrierName));
   const showCarrierMapping = extractedConfirm ? false : !statement.carrierName;
   const recognizedLayout = preview.pdf?.layoutName;
   const resolveActive = unmatchedGroups.length + unmatchedLines.length + unmatchedAgents.length > 0;
-  const workflowStep = fullyPosted || review?.postedCount ? "post" : review && !resolveActive && readiness?.canContinue ? "review" : review ? "resolve" : "read";
+  const workflowStep = fullyPosted || postedCount ? "post" : review && !resolveActive && readiness?.canContinue ? "review" : review ? "resolve" : "read";
+  const paidMonthLabel = formatPaidMonthLong(statement.paidMonth);
 
   return (
     <div className="result">
       <ol className="workflow-steps" aria-label="Statement workflow">
         <li className="done">Upload</li>
-        <li className={workflowStep === "read" ? "active" : "done"}>Automatically Read</li>
-        <li className={workflowStep === "resolve" ? "active" : resolveActive || review ? "done" : ""}>Confirm</li>
+        <li className={workflowStep === "read" ? "active" : "done"}>Read</li>
+        <li className={workflowStep === "resolve" ? "active" : resolveActive || review ? "done" : ""}>Review exceptions</li>
         <li className={workflowStep === "review" || workflowStep === "post" ? "active" : review && readiness?.canContinue ? "done" : ""}>Post</li>
       </ol>
       <strong>
@@ -284,12 +298,14 @@ export function StatementPosting({
           : "Confirm the extracted commission data, then post"}
       </strong>
       <p>
-        Paid month is {statement.paidMonth}
+        These rows will post into <strong>{paidMonthLabel}</strong>
         {statement.carrierName ? ` · statement carrier is ${statement.carrierName}` : ""}.
+        Source or coverage months stay on the row as context and do not replace that paid month.
         {extractedConfirm
           ? " Review what the app read. Correct only exceptions, then confirm and post. Compensation comes from the Group + line of business allocation for this paid month, not from this statement."
           : " The app already read this file and identified likely groups, coverage values, premium, and commission. Correct any field that looks wrong, then post. Recipient compensation comes from the Compensation allocation, not from statement columns."}
       </p>
+      {reviewLoading && <p>Reading extracted commission rows…</p>}
       {recognizedLayout && (
         <p><strong>Recognized carrier layout:</strong> {recognizedLayout}{preview.pdf?.layoutVersion ? ` · version ${preview.pdf.layoutVersion}` : ""}</p>
       )}
@@ -299,8 +315,9 @@ export function StatementPosting({
             <>
               <strong>Statement posted</strong>
               <p>
-                All rows from this file are already posted commission records. The original statement remains available.
-                Reopening this statement will not post them twice.
+                Posted {postedCount} commission record{postedCount === 1 ? "" : "s"} into {paidMonthLabel}
+                {postedGrossCents ? ` · ${formatCents(postedGrossCents)} gross` : ""}.
+                The original statement remains available. Reopening this statement will not post them twice.
               </p>
               <div className="form-actions">
                 <a className="secondary" href={`/api/imports/statements/${statement.id}/file`} style={{ display: "inline-block", textDecoration: "none" }}>
@@ -401,7 +418,9 @@ export function StatementPosting({
           </div>
         </>
       )}
-      {!fullyPosted && !readiness?.canContinue && continueBlocked && <p className="form-error">{continueBlocked}</p>}
+      {!fullyPosted && !readiness?.canContinue && continueBlocked && !readiness?.blockers.length && !reviewLoading && (
+        <p className="form-error">{continueBlocked}</p>
+      )}
       {error && <p className="form-error">{error}</p>}
       {layoutMessage && <p className="form-success">{layoutMessage}</p>}
       {review && unmatchedGroups.length > 0 && (
@@ -480,7 +499,7 @@ export function StatementPosting({
         <>
           {review.createdCount ? <p className="form-success">Saved {review.createdCount} confirmed record{review.createdCount === 1 ? "" : "s"}. No compensation was created.</p> : null}
           {review.conflicts?.map((conflict) => <p key={conflict} className="form-error">{conflict}</p>)}
-          {review.postedCount > 0 && !fullyPosted && <p className="form-success">Posted rows are now commission records. Reopening this statement will not post them twice.</p>}
+          {postedCount > 0 && !fullyPosted && <p className="form-success">Posted rows are now commission records in {paidMonthLabel}. Reopening this statement will not post them twice.</p>}
           <StatementGroupAssignment
             rows={review.rows}
             groups={groups}
@@ -493,8 +512,9 @@ export function StatementPosting({
           />
           <div id="statement-rows">
             <p>
-              {review.readyCount} ready · {review.blockedCount} {extractedConfirm ? "needs review" : "blocked"} · {review.postedCount} already posted
-              {" "}· paid month {statement.paidMonth}
+              {review.readyCount} ready · {review.blockedCount} {extractedConfirm ? "needs review" : "blocked"} · {postedCount} posted
+              {ignoredCount ? ` · ${ignoredCount} ignored` : ""}
+              {" "}· paid month {formatStatementMonth(statement.paidMonth)}
             </p>
             <table>
               <thead>
@@ -525,7 +545,10 @@ export function StatementPosting({
                       <td>{row.lineOfBusinessLabel || row.importedLineName || "—"}</td>
                       <td>{row.premiumCents == null ? "—" : formatCents(row.premiumCents)}</td>
                       <td>{row.grossCommissionCents == null ? "—" : formatCents(row.grossCommissionCents)}</td>
-                      <td>{row.premiumMonth || "—"}</td>
+                      <td>
+                        {row.premiumMonth || "—"}
+                        {!row.premiumMonth && row.importedSourcePeriod ? <small> · source {row.importedSourcePeriod}</small> : null}
+                      </td>
                       <td>
                         <span className={`pill ${row.status === "ready" ? "ready_to_map" : row.status === "posted" ? "posted" : row.status === "ignored" ? "review" : "review"}`}>
                           {statusLabel}

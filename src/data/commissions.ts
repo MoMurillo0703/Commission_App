@@ -396,8 +396,12 @@ function valuesFrom(input: CommissionWrite, settled: CompensationSnapshot, times
   };
 }
 
-export async function listCommissions(db?: AppDatabase): Promise<CommissionView[]> {
-  return commissionQuery(await resolveDb(db)).orderBy(desc(commissionRecords.statementMonth), desc(commissionRecords.id));
+export async function listCommissions(db?: AppDatabase, filters?: { paidMonth?: string }): Promise<CommissionView[]> {
+  const query = commissionQuery(await resolveDb(db));
+  const filtered = filters?.paidMonth
+    ? query.where(eq(commissionRecords.statementMonth, filters.paidMonth))
+    : query;
+  return filtered.orderBy(desc(commissionRecords.statementMonth), desc(commissionRecords.id));
 }
 
 export async function getCommission(db: AppDatabase | undefined, id: number): Promise<CommissionView | null> {

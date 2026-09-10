@@ -51,6 +51,7 @@ describe("statement readiness", () => {
     expect(reason).toBeTruthy();
     expect(reason).toMatch(/Group/);
     expect(reason).toMatch(/Line/);
+    expect(reason).not.toMatch(/Continue Import/);
   });
 
   it("does not treat missing group assignments as a posting blocker", () => {

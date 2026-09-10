@@ -20,7 +20,7 @@ export default async function StatementsPage({ searchParams }: { searchParams: P
     countUnassignedCommissions(db),
     listImportStatements(paidMonth, db),
     listImportPaidMonths(db),
-    listCommissions(db),
+    listCommissions(db, { paidMonth }),
     listGroups(db),
     listCarriers(db),
     listLinesOfBusiness(db),

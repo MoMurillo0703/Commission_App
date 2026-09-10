@@ -1,15 +1,18 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { AgreementView } from "@/data/agreements";
 import type { CommissionView } from "@/data/commissions";
 import type { Agent, Carrier, Group, LineOfBusiness } from "@/db/schema";
 import { resolveCompensationAgreement } from "@/domain/agreements";
-import { formatStatementMonth } from "@/domain/dates";
+import { formatPaidMonthLong, formatStatementMonth } from "@/domain/dates";
 import { bpsToPercentString, centsToDollarString, formatCents } from "@/domain/money";
+import { fetchWithDeadline, httpFailureMessage, readApiJson, requestFailureMessage, runBusyAction } from "@/lib/apiClient";
 
 type Props = {
   initial: CommissionView[];
+  paidMonth?: string;
+  refreshToken?: number;
   groups: Group[];
   carriers: Carrier[];
   linesOfBusiness: LineOfBusiness[];
@@ -30,12 +33,37 @@ const emptyForm = {
   notes: "",
 };
 
-export function CommissionsManager({ initial, groups, carriers, linesOfBusiness, agents, agreements }: Props) {
-  const [rows, setRows] = useState(initial);
+export function CommissionsManager({ initial, paidMonth, refreshToken = 0, groups, carriers, linesOfBusiness, agents, agreements }: Props) {
+  const [remoteRows, setRemoteRows] = useState<CommissionView[] | null>(null);
+  const [remoteMonth, setRemoteMonth] = useState<string | null>(null);
   const [editing, setEditing] = useState<CommissionView | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const rows = remoteMonth === (paidMonth ?? null) && remoteRows
+    ? remoteRows
+    : (paidMonth ? initial.filter((row) => row.statementMonth === paidMonth) : initial);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const query = paidMonth ? `?paidMonth=${encodeURIComponent(paidMonth)}` : "";
+        const response = await fetchWithDeadline(`/api/commissions${query}`);
+        if (!response.ok || cancelled) return;
+        const next = await readApiJson<CommissionView[]>(response);
+        if (!cancelled) {
+          setRemoteRows(next);
+          setRemoteMonth(paidMonth ?? null);
+        }
+      } catch {
+        // Keep the last visible month list if refresh fails.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshToken, paidMonth]);
   const ready = groups.length > 0 && carriers.length > 0 && linesOfBusiness.length > 0;
   const agreementCandidates = useMemo(
     () => agreements.map((agreement) => ({
@@ -102,43 +130,59 @@ export function CommissionsManager({ initial, groups, carriers, linesOfBusiness,
 
   async function save(event: FormEvent) {
     event.preventDefault();
-    setBusy(true);
     setError("");
-    const response = await fetch(editing ? `/api/commissions/${editing.id}` : "/api/commissions", {
-      method: editing ? "PATCH" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        statementMonth: form.statementMonth,
-        groupId: form.groupId,
-        carrierId: form.carrierId,
-        lineOfBusinessId: form.lineOfBusinessId,
-        agentId: form.agentId ? Number(form.agentId) : null,
-        premium: form.premium,
-        grossCommission: form.grossCommission,
-        compensationPercent: form.compensationPercent,
-        sourceReference: form.sourceReference,
-        notes: form.notes,
-      }),
-    });
-    const body = await response.json();
-    setBusy(false);
-    if (!response.ok) {
-      setError(body.message ?? "Unable to save.");
-      return;
+    try {
+      await runBusyAction(setBusy, async () => {
+        const response = await fetchWithDeadline(editing ? `/api/commissions/${editing.id}` : "/api/commissions", {
+          method: editing ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            statementMonth: form.statementMonth || paidMonth || "",
+            groupId: form.groupId,
+            carrierId: form.carrierId,
+            lineOfBusinessId: form.lineOfBusinessId,
+            agentId: form.agentId ? Number(form.agentId) : null,
+            premium: form.premium,
+            grossCommission: form.grossCommission,
+            compensationPercent: form.compensationPercent,
+            sourceReference: form.sourceReference,
+            notes: form.notes,
+          }),
+        });
+        const body = await readApiJson<{ message?: string }>(response);
+        if (!response.ok) {
+          setError(httpFailureMessage(response.status, body.message));
+          return;
+        }
+        const query = paidMonth ? `?paidMonth=${encodeURIComponent(paidMonth)}` : "";
+        const listed = await fetchWithDeadline(`/api/commissions${query}`);
+        if (listed.ok) {
+          setRemoteRows(await readApiJson<CommissionView[]>(listed));
+          setRemoteMonth(paidMonth ?? null);
+        }
+        reset();
+      });
+    } catch (error) {
+      setError(requestFailureMessage(error, "Unable to save."));
     }
-    setRows(await fetch("/api/commissions").then((res) => res.json()));
-    reset();
   }
 
   return (
     <section className="panel">
+      {paidMonth && (
+        <div>
+          <p className="eyebrow">Posted commissions</p>
+          <h2>{formatPaidMonthLong(paidMonth)}</h2>
+          <p>Commission records posted into this paid month. They appear here after a statement posts successfully.</p>
+        </div>
+      )}
       {!ready ? (
         <p className="empty">Add a group, carrier, and line of business before recording a commission.</p>
       ) : (
         <form className="form-grid form-grid-wide" onSubmit={save}>
           <label>
             Statement month
-            <input type="month" value={form.statementMonth} onChange={(event) => setField("statementMonth", event.target.value)} required />
+            <input type="month" value={form.statementMonth || paidMonth || ""} onChange={(event) => setField("statementMonth", event.target.value)} required />
           </label>
           <label>
             Group
@@ -216,7 +260,7 @@ export function CommissionsManager({ initial, groups, carriers, linesOfBusiness,
         </form>
       )}
       {rows.length === 0 ? (
-        <p className="empty">No commission records yet.</p>
+        <p className="empty">{paidMonth ? `No posted commissions for ${formatPaidMonthLong(paidMonth)} yet.` : "No commission records yet."}</p>
       ) : (
         <table>
           <thead>

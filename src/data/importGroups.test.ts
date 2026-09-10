@@ -275,10 +275,34 @@ describe("statement import group onboarding", () => {
     expect(confirmed.remainingUnmatchedCount).toBe(0);
     expect((await listGroups(db)).map((group) => group.name)).toEqual(["Acme Benefits"]);
     const preview = await previewImportPosting(db, statement.id, mapping);
-    expect(preview.rows[0]?.status).toBe("blocked");
+    expect(preview.rows[0]?.status).toBe("ignored");
+    expect(preview.blockedCount).toBe(0);
     expect(preview.rows[0]?.exceptions.join(" ")).toMatch(/ignored/i);
-    await expect(postImportStatement(db, statement.id, mapping)).rejects.toThrow(/blocked/);
+    await expect(postImportStatement(db, statement.id, mapping)).rejects.toThrow(/not posted|ready|blocked/i);
     expect((await listCommissions(db))).toHaveLength(0);
+  });
+
+  it("posts ready rows after an ignored group is skipped", async () => {
+    const { db, group } = await seed();
+    const statement = await savedStatement(db, [
+      ["Skip Me", "Z9", "Principal", "Dental", "Alex Morgan", "1000.00", "80.00", "", "2026-07"],
+      ["Acme Benefits", "A1", "Principal", "Dental", "Alex Morgan", "1000.00", "50.00", "", "2026-07"],
+    ]);
+    const review = await reviewImportGroups(db, statement.id, mapping);
+    const skip = review.unmatchedGroups.find((item) => item.sourceName === "Skip Me");
+    expect(skip).toBeTruthy();
+    await confirmImportGroups(db, statement.id, mapping, [
+      { key: skip!.key, action: "ignore" },
+    ]);
+    const preview = await previewImportPosting(db, statement.id, mapping);
+    expect(preview.rows.find((row) => row.importedGroupName === "Skip Me")?.status).toBe("ignored");
+    expect(preview.rows.find((row) => row.groupId === group.id)?.status).toBe("ready");
+    const posted = await postImportStatement(db, statement.id, mapping);
+    expect(posted.postedCount).toBe(1);
+    const commissions = await listCommissions(db);
+    expect(commissions).toHaveLength(1);
+    expect(commissions[0]?.groupId).toBe(group.id);
+    expect(commissions[0]?.grossCommissionCents).toBe(5000);
   });
 
   it("learns a carrier-scoped Group Number on explicit match and does not change groups.group_number", async () => {

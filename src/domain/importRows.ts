@@ -273,7 +273,7 @@ export function validateMappedRows(
       const ready = exceptions.length === 0 && group.groupId != null && carrier.id != null && line.id != null && grossCommissionCents != null;
       const status: ImportRowStatus = postedKeys.has(key)
         ? "posted"
-        : line.status === "ignored"
+        : group.status === "ignored" || line.status === "ignored"
           ? "ignored"
           : ready ? "ready" : "blocked";
 

@@ -128,6 +128,6 @@ export function continueImportBlockedReason(readiness: StatementReadiness | null
   if (!readiness) return "Review the statement first so the app can list anything that still needs a decision.";
   if (readiness.canContinue) return null;
   if (isStatementFullyPosted(readiness)) return null;
-  if (readiness.reasons.length === 0) return "Continue Import is unavailable until the statement is ready.";
-  return `Continue Import is unavailable: ${readiness.reasons.join(" ")}`;
+  if (readiness.reasons.length === 0) return "This statement is not ready to post yet.";
+  return readiness.reasons.join(" ");
 }
