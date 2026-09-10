@@ -142,3 +142,19 @@ a.secondary{display:inline-block;background:var(--color-action-secondary);color:
 .pdf-line-number{color:var(--color-text-muted);font-variant-numeric:tabular-nums}
 .pdf-extracted-line em{font-style:normal;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
 .pdf-layout-preview{margin-top:8px}
+.directory-toolbar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:16px}
+.directory-toolbar label{display:grid;gap:6px;font-size:13px;color:var(--color-text-muted)}
+.directory-toolbar input,.directory-toolbar select{border:1px solid var(--color-border);border-radius:8px;padding:10px 12px;font:inherit;background:var(--color-surface);color:var(--color-text)}
+.alpha-nav{display:flex;flex-wrap:wrap;gap:6px;margin:16px 0 8px}
+.alpha-nav button{padding:6px 10px}
+.directory-table th,.directory-table td{padding:10px 8px;vertical-align:top}
+.directory-table a{color:var(--color-brand-navy);text-decoration:none}
+.workspace-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}
+.detail-list{display:grid;grid-template-columns:1fr 1fr;gap:12px 24px;margin:16px 0}
+.detail-list dt{font-size:12px;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.04em}
+.detail-list dd{margin:4px 0 0;color:var(--color-text)}
+.lob-compensation-card{border:1px solid var(--color-border-subtle);border-radius:10px;padding:14px;margin-top:12px}
+.lob-compensation-card header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.checkbox-inline{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--color-text)}
+h3{font-family:Georgia,serif;font-size:20px;margin:24px 0 8px;font-weight:500;color:var(--color-brand-navy)}
+@media(max-width:900px){.directory-toolbar,.detail-list{grid-template-columns:1fr}}

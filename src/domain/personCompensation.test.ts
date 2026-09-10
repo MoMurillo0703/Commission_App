@@ -53,6 +53,26 @@ describe("person compensation relationships", () => {
       personId: 9,
     });
     expect(rows.map((row) => row.roleLabel)).toEqual(["Account manager", "Team member"]);
-    expect(rows.find((row) => row.recipientType === "team_member")?.allocationBps).toBe(1500);
+    expect(rows.find((row) => row.recipientType === "team_member")).toMatchObject({
+      teamAllocationBps: 2500,
+      memberShareBps: 6000,
+      allocationBps: 2500,
+    });
+  });
+
+  it("does not treat a team membership as current when it does not overlap the allocation period", () => {
+    const rows = personCompensationRows({
+      allocations: [allocation],
+      teams: [{
+        id: 3,
+        name: "Central Valley",
+        members: [
+          { personKind: "agent", personId: 2, shareBps: 10000, status: "active", effectiveStart: "2026-01", effectiveEnd: "2026-06" },
+        ],
+      }],
+      personKind: "agent",
+      personId: 2,
+    });
+    expect(rows.filter((row) => row.recipientType === "team_member")).toHaveLength(0);
   });
 });

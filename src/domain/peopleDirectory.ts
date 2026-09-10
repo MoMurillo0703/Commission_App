@@ -7,21 +7,35 @@ export type PersonDirectoryEntry = {
   agentId: number | null;
   accountManagerId: number | null;
   groupNames: string[];
+  primaryAgentGroupCount: number;
+  accountManagerGroupCount: number;
+  activeTeamCount: number;
+  href: string;
 };
 
 export function buildPeopleDirectory(input: {
   agents: Array<{ id: number; name: string }>;
   accountManagers: Array<{ id: number; name: string }>;
-  groups: Array<{ name: string; primaryAgentId: number | null; accountManagerId: number | null }>;
+  groups: Array<{ id?: number; name: string; primaryAgentId: number | null; accountManagerId: number | null }>;
   agreementGroupNamesByAgentId?: Record<number, string[]>;
+  activeTeamCountByPerson?: Record<string, number>;
 }): PersonDirectoryEntry[] {
   const people: PersonDirectoryEntry[] = [];
 
   for (const agent of input.agents) {
-    const person: PersonDirectoryEntry = { key: `agent:${agent.id}`, name: agent.name.trim(), roles: ["agent"], agentId: agent.id, accountManagerId: null, groupNames: [] };
-    for (const group of input.groups.filter((row) => row.primaryAgentId === agent.id)) {
-      if (!person.groupNames.includes(group.name)) person.groupNames.push(group.name);
-    }
+    const assigned = input.groups.filter((row) => row.primaryAgentId === agent.id);
+    const person: PersonDirectoryEntry = {
+      key: `agent:${agent.id}`,
+      name: agent.name.trim(),
+      roles: ["agent"],
+      agentId: agent.id,
+      accountManagerId: null,
+      groupNames: assigned.map((row) => row.name),
+      primaryAgentGroupCount: assigned.length,
+      accountManagerGroupCount: 0,
+      activeTeamCount: input.activeTeamCountByPerson?.[`agent:${agent.id}`] ?? 0,
+      href: `/people/agent/${agent.id}`,
+    };
     for (const groupName of input.agreementGroupNamesByAgentId?.[agent.id] ?? []) {
       if (!person.groupNames.includes(groupName)) person.groupNames.push(groupName);
     }
@@ -29,11 +43,19 @@ export function buildPeopleDirectory(input: {
   }
 
   for (const manager of input.accountManagers) {
-    const person: PersonDirectoryEntry = { key: `account-manager:${manager.id}`, name: manager.name.trim(), roles: ["account_manager"], agentId: null, accountManagerId: manager.id, groupNames: [] };
-    for (const group of input.groups.filter((row) => row.accountManagerId === manager.id)) {
-      if (!person.groupNames.includes(group.name)) person.groupNames.push(group.name);
-    }
-    people.push(person);
+    const assigned = input.groups.filter((row) => row.accountManagerId === manager.id);
+    people.push({
+      key: `account_manager:${manager.id}`,
+      name: manager.name.trim(),
+      roles: ["account_manager"],
+      agentId: null,
+      accountManagerId: manager.id,
+      groupNames: assigned.map((row) => row.name),
+      primaryAgentGroupCount: 0,
+      accountManagerGroupCount: assigned.length,
+      activeTeamCount: input.activeTeamCountByPerson?.[`account_manager:${manager.id}`] ?? 0,
+      href: `/people/account-manager/${manager.id}`,
+    });
   }
 
   return people.sort((left, right) => left.name.localeCompare(right.name) || left.key.localeCompare(right.key));

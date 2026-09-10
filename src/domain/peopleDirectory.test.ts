@@ -15,6 +15,8 @@ describe("people directory", () => {
     expect(people.map((person) => person.roles)).toEqual([["account_manager"], ["agent"]]);
     expect(people.map((person) => personRoleLabel(person.roles))).toEqual(["Account manager", "Agent"]);
     expect(people.map((person) => person.groupNames)).toEqual([["Acme Benefits", "Beta Co"], ["Acme Benefits"]]);
+    expect(people.map((person) => person.accountManagerGroupCount)).toEqual([2, 0]);
+    expect(people.map((person) => person.primaryAgentGroupCount)).toEqual([0, 1]);
   });
 
   it("does not treat account manager assignment as compensation eligibility", () => {

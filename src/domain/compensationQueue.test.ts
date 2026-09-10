@@ -37,7 +37,7 @@ describe("compensation work queue", () => {
     expect(items).toHaveLength(1);
     expect(items[0]?.reason).toBe("incomplete");
     expect(items[0]?.groupName).toBe("H R LABOR CONTRACTING");
-    expect(queueBannerLabel(items)).toBe("1 group needs compensation setup");
+    expect(queueBannerLabel(items)).toBe("1 group needs compensation attention");
   });
 
   it("keeps an incomplete legacy allocation in the queue and skips groups that already have 100%", () => {
@@ -69,6 +69,29 @@ describe("compensation work queue", () => {
       asOfMonth: "2026-09",
     });
     expect(missing[0]?.reason).toBe("missing");
+    expect(missing[0]?.reasonLabel).toMatch(/not explicitly configured/i);
+  });
+
+  it("does not treat a current 100% allocation as needing setup because older posted months used Agency default", () => {
+    const items = identifyCompensationQueue({
+      groups,
+      linesOfBusiness: lines,
+      allocations: [{
+        id: 9,
+        groupId: 1,
+        lineOfBusinessId: 10,
+        effectiveStart: "2026-09",
+        effectiveEnd: null,
+        status: "active",
+        entries: [{ recipientType: "agency", compensationBps: 10000 }],
+      }],
+      posted: [
+        { groupId: 1, lineOfBusinessId: 10, paidMonth: "2026-08" },
+        { groupId: 1, lineOfBusinessId: 10, paidMonth: "2026-09" },
+      ],
+      asOfMonth: "2026-09",
+    });
+    expect(items).toHaveLength(0);
   });
 
   it("supports Save & Next, Skip, and Close without fabricating allocations", () => {
@@ -120,7 +143,7 @@ describe("compensation work queue", () => {
       needingLineCount: 3,
     });
     expect(groupQueueNeedsLabel(grouped[0]!.needingLineCount)).toBe("3 Lines of Coverage need compensation");
-    expect(queueBannerLabel(grouped)).toBe("1 group needs compensation setup");
+    expect(queueBannerLabel(grouped)).toBe("1 group needs compensation attention");
     expect(afterGroupQueueRefresh(grouped, 1, 0).advance).toBe(false);
     expect(afterGroupQueueRefresh([], 1, 0)).toEqual({ items: [], index: 0, done: true, advance: true });
   });

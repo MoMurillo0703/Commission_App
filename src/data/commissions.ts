@@ -396,6 +396,31 @@ function valuesFrom(input: CommissionWrite, settled: CompensationSnapshot, times
   };
 }
 
+export async function listGroupCommissions(
+  db: AppDatabase | undefined,
+  groupId: number,
+  limit = 100,
+): Promise<CommissionView[]> {
+  return commissionQuery(await resolveDb(db))
+    .where(eq(commissionRecords.groupId, groupId))
+    .orderBy(desc(commissionRecords.statementMonth), desc(commissionRecords.id))
+    .limit(limit);
+}
+
+export async function listCommissionGroupCarriers(db?: AppDatabase) {
+  return (await resolveDb(db)).selectDistinct({
+    groupId: commissionRecords.groupId,
+    carrierId: commissionRecords.carrierId,
+  }).from(commissionRecords);
+}
+
+export async function listCommissionGroupLines(db?: AppDatabase) {
+  return (await resolveDb(db)).selectDistinct({
+    groupId: commissionRecords.groupId,
+    lineOfBusinessId: commissionRecords.lineOfBusinessId,
+  }).from(commissionRecords);
+}
+
 export async function listCommissions(db?: AppDatabase, filters?: { paidMonth?: string }): Promise<CommissionView[]> {
   const query = commissionQuery(await resolveDb(db));
   const filtered = filters?.paidMonth

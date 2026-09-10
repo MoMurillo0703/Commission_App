@@ -1,4 +1,4 @@
-import { formatStatementMonth } from "./dates";
+import { formatStatementMonth, paidMonthRangesOverlap } from "./dates";
 import type { AllocationStatus, PersonKind, RecipientType } from "./allocations";
 
 export type PersonCompensationRow = {
@@ -10,6 +10,8 @@ export type PersonCompensationRow = {
   recipientType: RecipientType | "team_member";
   roleLabel: string;
   allocationBps: number;
+  teamAllocationBps: number | null;
+  memberShareBps: number | null;
   effectiveStart: string;
   effectiveEnd: string | null;
   status: AllocationStatus;
@@ -43,6 +45,8 @@ export function personCompensationRows(input: {
       personId: number;
       shareBps: number;
       status: string;
+      effectiveStart?: string;
+      effectiveEnd?: string | null;
     }>;
   }>;
   personKind: PersonKind;
@@ -61,6 +65,8 @@ export function personCompensationRows(input: {
           recipientType: "person",
           roleLabel: input.personKind === "account_manager" ? "Account manager" : "Agent",
           allocationBps: entry.compensationBps,
+          teamAllocationBps: null,
+          memberShareBps: null,
           effectiveStart: allocation.effectiveStart,
           effectiveEnd: allocation.effectiveEnd,
           status: allocation.status,
@@ -70,7 +76,15 @@ export function personCompensationRows(input: {
       if (entry.recipientType === "team" && entry.teamId != null) {
         const team = input.teams?.find((item) => item.id === entry.teamId);
         const member = team?.members.find((item) => (
-          item.personKind === input.personKind && item.personId === input.personId && item.status === "active"
+          item.personKind === input.personKind
+          && item.personId === input.personId
+          && (item.status ?? "active") === "active"
+          && (!item.effectiveStart || paidMonthRangesOverlap(
+            allocation.effectiveStart,
+            allocation.effectiveEnd,
+            item.effectiveStart,
+            item.effectiveEnd ?? null,
+          ))
         ));
         if (member) {
           rows.push({
@@ -81,7 +95,9 @@ export function personCompensationRows(input: {
             lineOfBusinessName: allocation.lineOfBusinessName,
             recipientType: "team_member",
             roleLabel: "Team member",
-            allocationBps: Math.round((entry.compensationBps * member.shareBps) / 10000),
+            allocationBps: entry.compensationBps,
+            teamAllocationBps: entry.compensationBps,
+            memberShareBps: member.shareBps,
             effectiveStart: allocation.effectiveStart,
             effectiveEnd: allocation.effectiveEnd,
             status: allocation.status,
@@ -100,6 +116,13 @@ export function personCompensationRows(input: {
 
 export function personCompensationPeriod(row: Pick<PersonCompensationRow, "effectiveStart" | "effectiveEnd">) {
   return `${formatStatementMonth(row.effectiveStart)} → ${row.effectiveEnd ? formatStatementMonth(row.effectiveEnd) : ""}`.trim();
+}
+
+export function teamParticipationLabel(row: Pick<PersonCompensationRow, "teamAllocationBps" | "memberShareBps" | "allocationBps">) {
+  if (row.teamAllocationBps != null && row.memberShareBps != null) {
+    return `Team ${row.teamAllocationBps / 100}% · member share ${row.memberShareBps / 100}%`;
+  }
+  return `${row.allocationBps / 100}%`;
 }
 
 export function editAllocationHref(allocationId: number) {

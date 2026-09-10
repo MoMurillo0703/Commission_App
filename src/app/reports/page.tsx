@@ -8,11 +8,24 @@ import { listGroups } from "@/data/groups";
 import { listLinesOfBusiness } from "@/data/linesOfBusiness";
 import { listTeams } from "@/data/teams";
 import { getDb } from "@/db";
+import { parseReportsSearchParams } from "@/domain/reportDeepLink";
 
 export const dynamic = "force-dynamic";
 
-export default async function ReportsPage() {
+export default async function ReportsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{
+    kind?: string;
+    personKey?: string;
+    personKind?: string;
+    personId?: string;
+    paidMonth?: string;
+    groupId?: string;
+  }>;
+}) {
   const db = await getDb();
+  const params = searchParams ? await searchParams : {};
   const [reviewCount, groups, carriers, linesOfBusiness, agents, accountManagers, teams] = await Promise.all([
     countUnassignedCommissions(db),
     listGroups(db),
@@ -38,6 +51,7 @@ export default async function ReportsPage() {
         agents={agents}
         accountManagers={accountManagers}
         teams={teams}
+        initialFilters={parseReportsSearchParams(params)}
       />
     </AppShell>
   );

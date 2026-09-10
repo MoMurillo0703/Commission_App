@@ -1,6 +1,6 @@
 import { allocationTotals, resolveCompensationAllocation, type AllocationCandidate } from "./allocations";
 
-export type CompensationQueueReason = "missing" | "incomplete" | "inactive" | "not_covering";
+export type CompensationQueueReason = "missing" | "incomplete" | "inactive" | "not_covering" | "future";
 
 export type CompensationQueueItem = {
   key: string;
@@ -52,12 +52,13 @@ export function allocationNeedsReview(allocation: Pick<AllocationCandidate, "sta
 export function queueReasonLabel(reason: CompensationQueueReason) {
   if (reason === "incomplete") return "Incomplete / review required";
   if (reason === "inactive") return "Inactive allocation";
-  if (reason === "not_covering") return "No active 100% allocation for the posted paid months";
-  return "Missing compensation allocation";
+  if (reason === "not_covering") return "No active 100% allocation for the current paid month";
+  if (reason === "future") return "Future configuration — not current";
+  return "Not explicitly configured (Agency 100% default)";
 }
 
 function preferReason(current: CompensationQueueReason | null, next: CompensationQueueReason) {
-  const rank = { incomplete: 0, inactive: 1, not_covering: 2, missing: 3 };
+  const rank = { incomplete: 0, inactive: 1, not_covering: 2, future: 3, missing: 4 };
   if (!current) return next;
   return rank[next] < rank[current] ? next : current;
 }
@@ -88,6 +89,13 @@ export function identifyCompensationQueue(input: {
     const siblings = input.allocations.filter((allocation) => (
       allocation.groupId === pair.groupId && allocation.lineOfBusinessId === pair.lineOfBusinessId
     ));
+    const currentApplicable = resolveCompensationAllocation(siblings, {
+      groupId: pair.groupId,
+      lineOfBusinessId: pair.lineOfBusinessId,
+      paidMonth: input.asOfMonth,
+    });
+    if (currentApplicable && !allocationNeedsReview(currentApplicable)) continue;
+
     const months = pair.paidMonths.length > 0 ? pair.paidMonths : [input.asOfMonth];
     const allCovered = months.every((month) => {
       const applicable = resolveCompensationAllocation(siblings, {
@@ -100,6 +108,13 @@ export function identifyCompensationQueue(input: {
     if (allCovered) continue;
 
     let reason: CompensationQueueReason | null = siblings.length === 0 ? "missing" : "not_covering";
+    if (siblings.some((allocation) => (
+      allocation.status === "active"
+      && allocation.effectiveStart > input.asOfMonth
+      && !allocationNeedsReview(allocation)
+    ))) {
+      reason = "future";
+    }
     for (const allocation of siblings) {
       const review = allocationNeedsReview(allocation);
       if (review) reason = preferReason(reason, review);
@@ -195,7 +210,7 @@ export function queueGroupCount(items: Array<{ groupId: number }>) {
 export function queueBannerLabel(items: Array<{ groupId: number }>) {
   const count = queueGroupCount(items);
   if (count === 0) return "All groups have a complete allocation";
-  return count === 1 ? "1 group needs compensation setup" : `${count} groups need compensation setup`;
+  return count === 1 ? "1 group needs compensation attention" : `${count} groups need compensation attention`;
 }
 
 export function queueSessionProgressLabel(position: number, total: number) {

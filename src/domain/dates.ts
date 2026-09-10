@@ -76,6 +76,14 @@ export function previousPaidMonth(value: string) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
+export function nextPaidMonth(value: string) {
+  if (!isPaidMonth(value)) throw new Error("Enter a paid month as YYYY-MM.");
+  const [year, month] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, 1);
+  date.setMonth(date.getMonth() + 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
 export function paidMonthInRange(month: string, start: string, end: string | null) {
   return month >= start && (end == null || month <= end);
 }

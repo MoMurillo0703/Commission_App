@@ -58,6 +58,7 @@ export function ReportsWorkspace({
   accountManagers,
   teams,
   initialReport = null,
+  initialFilters = null,
 }: {
   groups: Group[];
   carriers: Carrier[];
@@ -66,16 +67,22 @@ export function ReportsWorkspace({
   accountManagers: AccountManager[];
   teams: TeamView[];
   initialReport?: ReportResponse | null;
+  initialFilters?: {
+    kind?: ReportKind;
+    personKey?: string;
+    paidMonth?: string;
+    groupId?: string;
+  } | null;
 }) {
-  const [kind, setKind] = useState<ReportKind>("individual");
-  const [paidMonth, setPaidMonth] = useState("");
+  const [kind, setKind] = useState<ReportKind>(initialFilters?.kind ?? "individual");
+  const [paidMonth, setPaidMonth] = useState(initialFilters?.paidMonth ?? "");
   const [startMonth, setStartMonth] = useState("");
   const [endMonth, setEndMonth] = useState("");
   const [ytd, setYtd] = useState(false);
-  const [groupId, setGroupId] = useState("");
+  const [groupId, setGroupId] = useState(initialFilters?.groupId ?? "");
   const [carrierId, setCarrierId] = useState("");
   const [lineOfBusinessId, setLineOfBusinessId] = useState("");
-  const [personKey, setPersonKey] = useState("");
+  const [personKey, setPersonKey] = useState(initialFilters?.personKey ?? "");
   const [teamId, setTeamId] = useState("");
   const [accountManagerId, setAccountManagerId] = useState("");
   const [primaryAgentId, setPrimaryAgentId] = useState("");

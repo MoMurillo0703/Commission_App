@@ -1,35 +1,30 @@
 import { AppShell } from "@/components/AppShell";
-import { GroupsManager } from "@/components/GroupsManager";
-import { listAccountManagers } from "@/data/accountManagers";
-import { listAgents } from "@/data/agents";
+import { GroupsDirectory } from "@/components/GroupsDirectory";
 import { countUnassignedCommissions } from "@/data/commissions";
-import { listGroups } from "@/data/groups";
+import { loadGroupDirectory } from "@/data/groupWorkspace";
 import { getDb } from "@/db";
 
 export const dynamic = "force-dynamic";
 
 export default async function GroupsPage() {
   const db = await getDb();
-  const [reviewCount, groups, accountManagers, agents] = await Promise.all([
-    countUnassignedCommissions(db),
-    listGroups(db),
-    listAccountManagers(db),
-    listAgents(db),
-  ]);
+  const directory = await loadGroupDirectory(db);
+  const reviewCount = await countUnassignedCommissions(db);
   return (
     <AppShell active="groups" reviewCount={reviewCount}>
       <header>
         <div>
-          <p className="eyebrow">Reference data</p>
+          <p className="eyebrow">Account management</p>
           <h1>Groups</h1>
-          <p>Maintain group names, identifiers, and primary assignments. Compensation terms are managed separately.</p>
+          <p>Find a Group, then open it to manage who is assigned, how compensation is configured, and what commissions were received.</p>
         </div>
       </header>
-      <GroupsManager
-        initial={groups}
-        accountManagers={accountManagers}
-        agents={agents}
-        selectedId={null}
+      <GroupsDirectory
+        rows={directory.rows}
+        agents={directory.lookups.agents}
+        accountManagers={directory.lookups.accountManagers}
+        carriers={directory.lookups.carriers}
+        linesOfBusiness={directory.lookups.linesOfBusiness}
       />
     </AppShell>
   );
