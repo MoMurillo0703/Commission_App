@@ -1,6 +1,7 @@
-import { allocationTotals, resolveCompensationAllocation, type AllocationCandidate } from "./allocations";
+import { allocationTotals, type AllocationCandidate } from "./allocations";
+import { classifyGroupLobCompensation, type GroupLobCompensationKind } from "./groupCompensationStatus";
 
-export type CompensationQueueReason = "missing" | "incomplete" | "inactive" | "not_covering" | "future";
+export type CompensationQueueReason = "missing" | "incomplete" | "inactive" | "not_covering" | "future" | "review_required";
 
 export type CompensationQueueItem = {
   key: string;
@@ -50,6 +51,7 @@ export function allocationNeedsReview(allocation: Pick<AllocationCandidate, "sta
 }
 
 export function queueReasonLabel(reason: CompensationQueueReason) {
+  if (reason === "review_required") return "Review required";
   if (reason === "incomplete") return "Incomplete / review required";
   if (reason === "inactive") return "Inactive allocation";
   if (reason === "not_covering") return "No active 100% allocation for the current paid month";
@@ -57,8 +59,17 @@ export function queueReasonLabel(reason: CompensationQueueReason) {
   return "Not explicitly configured (Agency 100% default)";
 }
 
+export function queueReasonFromCompensationKind(kind: GroupLobCompensationKind): CompensationQueueReason | null {
+  if (kind === "explicit_configured" || kind === "explicit_agency") return null;
+  if (kind === "review_required") return "review_required";
+  if (kind === "inactive") return "inactive";
+  if (kind === "future") return "future";
+  if (kind === "historical") return "not_covering";
+  return "missing";
+}
+
 function preferReason(current: CompensationQueueReason | null, next: CompensationQueueReason) {
-  const rank = { incomplete: 0, inactive: 1, not_covering: 2, future: 3, missing: 4 };
+  const rank = { review_required: 0, incomplete: 1, inactive: 2, not_covering: 3, future: 4, missing: 5 };
   if (!current) return next;
   return rank[next] < rank[current] ? next : current;
 }
@@ -72,16 +83,13 @@ export function identifyCompensationQueue(input: {
 }): CompensationQueueItem[] {
   const groupNames = new Map(input.groups.map((group) => [group.id, group.name]));
   const lineNames = new Map(input.linesOfBusiness.map((line) => [line.id, line.name]));
-  const pairs = new Map<string, { groupId: number; lineOfBusinessId: number; paidMonths: string[] }>();
+  const pairs = new Map<string, { groupId: number; lineOfBusinessId: number }>();
 
-  function addPair(groupId: number, lineOfBusinessId: number, paidMonth?: string) {
-    const key = queueKey(groupId, lineOfBusinessId);
-    const existing = pairs.get(key) ?? { groupId, lineOfBusinessId, paidMonths: [] };
-    if (paidMonth && !existing.paidMonths.includes(paidMonth)) existing.paidMonths.push(paidMonth);
-    pairs.set(key, existing);
+  function addPair(groupId: number, lineOfBusinessId: number) {
+    pairs.set(queueKey(groupId, lineOfBusinessId), { groupId, lineOfBusinessId });
   }
 
-  for (const row of input.posted) addPair(row.groupId, row.lineOfBusinessId, row.paidMonth);
+  for (const row of input.posted) addPair(row.groupId, row.lineOfBusinessId);
   for (const allocation of input.allocations) addPair(allocation.groupId, allocation.lineOfBusinessId);
 
   const items: CompensationQueueItem[] = [];
@@ -89,36 +97,19 @@ export function identifyCompensationQueue(input: {
     const siblings = input.allocations.filter((allocation) => (
       allocation.groupId === pair.groupId && allocation.lineOfBusinessId === pair.lineOfBusinessId
     ));
-    const currentApplicable = resolveCompensationAllocation(siblings, {
-      groupId: pair.groupId,
-      lineOfBusinessId: pair.lineOfBusinessId,
-      paidMonth: input.asOfMonth,
+    const classified = classifyGroupLobCompensation({
+      asOfMonth: input.asOfMonth,
+      allocations: siblings.map((allocation) => ({
+        id: allocation.id,
+        status: allocation.status,
+        effectiveStart: allocation.effectiveStart,
+        effectiveEnd: allocation.effectiveEnd,
+        entries: allocation.entries,
+      })),
     });
-    if (currentApplicable && !allocationNeedsReview(currentApplicable)) continue;
+    const reason = queueReasonFromCompensationKind(classified.kind);
+    if (!reason) continue;
 
-    const months = pair.paidMonths.length > 0 ? pair.paidMonths : [input.asOfMonth];
-    const allCovered = months.every((month) => {
-      const applicable = resolveCompensationAllocation(siblings, {
-        groupId: pair.groupId,
-        lineOfBusinessId: pair.lineOfBusinessId,
-        paidMonth: month,
-      });
-      return Boolean(applicable && !allocationNeedsReview(applicable));
-    });
-    if (allCovered) continue;
-
-    let reason: CompensationQueueReason | null = siblings.length === 0 ? "missing" : "not_covering";
-    if (siblings.some((allocation) => (
-      allocation.status === "active"
-      && allocation.effectiveStart > input.asOfMonth
-      && !allocationNeedsReview(allocation)
-    ))) {
-      reason = "future";
-    }
-    for (const allocation of siblings) {
-      const review = allocationNeedsReview(allocation);
-      if (review) reason = preferReason(reason, review);
-    }
     items.push({
       key: queueKey(pair.groupId, pair.lineOfBusinessId),
       groupId: pair.groupId,
@@ -127,7 +118,7 @@ export function identifyCompensationQueue(input: {
       lineOfBusinessName: lineNames.get(pair.lineOfBusinessId) ?? "Line of business",
       reason,
       reasonLabel: queueReasonLabel(reason),
-      suggestedEffectiveStart: (pair.paidMonths.slice().sort()[0] ?? input.asOfMonth),
+      suggestedEffectiveStart: input.asOfMonth,
     });
   }
 

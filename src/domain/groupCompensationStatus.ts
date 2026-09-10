@@ -10,6 +10,7 @@ export type GroupLobCompensationKind =
   | "default_unconfigured"
   | "future"
   | "historical"
+  | "inactive"
   | "review_required";
 
 export type GroupLobCompensationAllocation = {
@@ -66,24 +67,39 @@ function isCompleteActive(allocation: GroupLobCompensationAllocation) {
   return allocation.status === "active" && allocationTotals(allocation.entries).complete;
 }
 
+export function currentPeriodCoverings(
+  asOfMonth: string,
+  allocations: GroupLobCompensationAllocation[],
+) {
+  const covering = allocations
+    .filter((row) => isCompleteActive(row) && paidMonthInRange(asOfMonth, row.effectiveStart, row.effectiveEnd))
+    .sort((left, right) => right.effectiveStart.localeCompare(left.effectiveStart) || left.id - right.id);
+  const incompleteCovering = allocations.filter((row) => (
+    row.status === "active"
+    && paidMonthInRange(asOfMonth, row.effectiveStart, row.effectiveEnd)
+    && !allocationTotals(row.entries).complete
+  ));
+  const inactiveCovering = allocations.filter((row) => (
+    row.status !== "active"
+    && paidMonthInRange(asOfMonth, row.effectiveStart, row.effectiveEnd)
+  ));
+  const future = allocations
+    .filter((row) => isCompleteActive(row) && row.effectiveStart > asOfMonth)
+    .sort((left, right) => left.effectiveStart.localeCompare(right.effectiveStart) || left.id - right.id)[0] ?? null;
+  const historical = allocations
+    .filter((row) => row.effectiveEnd != null && row.effectiveEnd < asOfMonth)
+    .sort((left, right) => right.effectiveStart.localeCompare(left.effectiveStart) || left.id - right.id);
+  return { covering, incompleteCovering, inactiveCovering, future, historical };
+}
+
 export function classifyGroupLobCompensation(input: {
   asOfMonth: string;
   allocations: GroupLobCompensationAllocation[];
 }): GroupLobCompensationView {
-  const covering = input.allocations
-    .filter((row) => isCompleteActive(row) && paidMonthInRange(input.asOfMonth, row.effectiveStart, row.effectiveEnd))
-    .sort((left, right) => right.effectiveStart.localeCompare(left.effectiveStart) || left.id - right.id);
-  const incompleteCovering = input.allocations.filter((row) => (
-    row.status === "active"
-    && paidMonthInRange(input.asOfMonth, row.effectiveStart, row.effectiveEnd)
-    && !allocationTotals(row.entries).complete
-  ));
-  const future = input.allocations
-    .filter((row) => isCompleteActive(row) && row.effectiveStart > input.asOfMonth)
-    .sort((left, right) => left.effectiveStart.localeCompare(right.effectiveStart) || left.id - right.id)[0] ?? null;
-  const historical = input.allocations
-    .filter((row) => row.effectiveEnd != null && row.effectiveEnd < input.asOfMonth)
-    .sort((left, right) => right.effectiveStart.localeCompare(left.effectiveStart) || left.id - right.id);
+  const { covering, incompleteCovering, inactiveCovering, future, historical } = currentPeriodCoverings(
+    input.asOfMonth,
+    input.allocations,
+  );
 
   if (covering.length > 1 || incompleteCovering.length > 0) {
     const current = covering[0] ?? incompleteCovering[0] ?? null;
@@ -130,6 +146,20 @@ export function classifyGroupLobCompensation(input: {
       configured: true,
       invalid: false,
       setupOpportunity: false,
+    };
+  }
+  if (inactiveCovering.length > 0) {
+    return {
+      kind: "inactive",
+      label: `${AGENCY_OWNER_LABEL} 100% — Default / inactive allocation is not current`,
+      statusLabel: "Inactive",
+      recipientSummary: `${AGENCY_OWNER_LABEL} 100% — Default`,
+      current: null,
+      future,
+      historical,
+      configured: false,
+      invalid: false,
+      setupOpportunity: true,
     };
   }
   if (future) {
@@ -183,7 +213,12 @@ export function rollupGroupCompensationStatus(lines: Array<{ kind: GroupLobCompe
   if (lines.every((line) => line.kind === "explicit_configured" || line.kind === "explicit_agency")) {
     return { kind: "explicit_configured", label: "Configured" };
   }
-  if (lines.some((line) => line.kind === "default_unconfigured" || line.kind === "historical" || line.kind === "future")) {
+  if (lines.some((line) => (
+    line.kind === "default_unconfigured"
+    || line.kind === "historical"
+    || line.kind === "future"
+    || line.kind === "inactive"
+  ))) {
     return { kind: "default_unconfigured", label: "Default / not explicitly configured" };
   }
   return { kind: "explicit_configured", label: "Configured" };

@@ -33,7 +33,7 @@ export type GroupDirectoryRow = {
   carrierNames: string[];
   lineOfBusinessIds: number[];
   lineOfBusinessNames: string[];
-  compensationKind: "explicit_configured" | "explicit_agency" | "default_unconfigured" | "future" | "historical" | "review_required" | "none";
+  compensationKind: "explicit_configured" | "explicit_agency" | "default_unconfigured" | "future" | "historical" | "inactive" | "review_required" | "none";
   compensationLabel: string;
 };
 
@@ -74,7 +74,7 @@ function compensationMatchesFilter(
 ) {
   if (filter === "all") return true;
   if (filter === "configured") return kind === "explicit_configured" || kind === "explicit_agency";
-  if (filter === "default") return kind === "default_unconfigured" || kind === "historical" || kind === "future" || kind === "none";
+  if (filter === "default") return kind === "default_unconfigured" || kind === "historical" || kind === "future" || kind === "inactive" || kind === "none";
   return kind === "review_required";
 }
 

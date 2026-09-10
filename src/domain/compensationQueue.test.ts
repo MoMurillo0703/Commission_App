@@ -35,7 +35,7 @@ describe("compensation work queue", () => {
       asOfMonth: "2026-09",
     });
     expect(items).toHaveLength(1);
-    expect(items[0]?.reason).toBe("incomplete");
+    expect(items[0]?.reason).toBe("inactive");
     expect(items[0]?.groupName).toBe("H R LABOR CONTRACTING");
     expect(queueBannerLabel(items)).toBe("1 group needs compensation attention");
   });
@@ -146,5 +146,165 @@ describe("compensation work queue", () => {
     expect(queueBannerLabel(grouped)).toBe("1 group needs compensation attention");
     expect(afterGroupQueueRefresh(grouped, 1, 0).advance).toBe(false);
     expect(afterGroupQueueRefresh([], 1, 0)).toEqual({ items: [], index: 0, done: true, advance: true });
+  });
+});
+
+const completeAgency = {
+  id: 20,
+  groupId: 1,
+  lineOfBusinessId: 10,
+  effectiveStart: "2026-09",
+  effectiveEnd: null as string | null,
+  status: "active" as const,
+  entries: [{ recipientType: "agency" as const, compensationBps: 10000 }],
+};
+
+describe("current as-of month queue classification", () => {
+  it("omits one complete current allocation", () => {
+    const items = identifyCompensationQueue({
+      groups,
+      linesOfBusiness: lines,
+      allocations: [{
+        ...completeAgency,
+        effectiveStart: "2026-01",
+        entries: [
+          { recipientType: "person", personKind: "agent", personId: 1, compensationBps: 7000 },
+          { recipientType: "agency", compensationBps: 3000 },
+        ],
+      }],
+      posted: [{ groupId: 1, lineOfBusinessId: 10, paidMonth: "2026-09" }],
+      asOfMonth: "2026-09",
+    });
+    expect(items).toHaveLength(0);
+  });
+
+  it("omits explicit Agency 100% for the current month", () => {
+    const items = identifyCompensationQueue({
+      groups,
+      linesOfBusiness: lines,
+      allocations: [completeAgency],
+      posted: [{ groupId: 1, lineOfBusinessId: 10, paidMonth: "2026-09" }],
+      asOfMonth: "2026-09",
+    });
+    expect(items).toHaveLength(0);
+  });
+
+  it("queues ended-only history when the current month has no covering allocation", () => {
+    const items = identifyCompensationQueue({
+      groups,
+      linesOfBusiness: lines,
+      allocations: [{
+        ...completeAgency,
+        effectiveStart: "2026-01",
+        effectiveEnd: "2026-08",
+      }],
+      posted: [{ groupId: 1, lineOfBusinessId: 10, paidMonth: "2026-08" }],
+      asOfMonth: "2026-09",
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]?.reason).toBe("not_covering");
+  });
+
+  it("queues the current month when only historical and future allocations exist", () => {
+    const items = identifyCompensationQueue({
+      groups,
+      linesOfBusiness: lines,
+      allocations: [
+        { ...completeAgency, id: 21, effectiveStart: "2026-01", effectiveEnd: "2026-08" },
+        { ...completeAgency, id: 22, effectiveStart: "2026-11", effectiveEnd: null },
+      ],
+      posted: [{ groupId: 1, lineOfBusinessId: 10, paidMonth: "2026-08" }],
+      asOfMonth: "2026-09",
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]?.reason).toBe("future");
+  });
+
+  it("queues a future-only allocation because it does not cover the current month", () => {
+    const items = identifyCompensationQueue({
+      groups,
+      linesOfBusiness: lines,
+      allocations: [{ ...completeAgency, effectiveStart: "2026-11" }],
+      posted: [],
+      asOfMonth: "2026-09",
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]?.reason).toBe("future");
+  });
+
+  it("queues an inactive-only allocation that covers the current month", () => {
+    const items = identifyCompensationQueue({
+      groups,
+      linesOfBusiness: lines,
+      allocations: [{ ...completeAgency, status: "inactive", effectiveStart: "2026-01" }],
+      posted: [{ groupId: 1, lineOfBusinessId: 10, paidMonth: "2026-09" }],
+      asOfMonth: "2026-09",
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]?.reason).toBe("inactive");
+  });
+
+  it("queues multiple complete current covering allocations as Review Required", () => {
+    const items = identifyCompensationQueue({
+      groups,
+      linesOfBusiness: lines,
+      allocations: [
+        { ...completeAgency, id: 31, effectiveStart: "2026-01" },
+        { ...completeAgency, id: 32, effectiveStart: "2026-06" },
+      ],
+      posted: [{ groupId: 1, lineOfBusinessId: 10, paidMonth: "2026-09" }],
+      asOfMonth: "2026-09",
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]?.reason).toBe("review_required");
+    expect(items[0]?.reasonLabel).toBe("Review required");
+  });
+
+  it("queues an incomplete current covering allocation as Review Required", () => {
+    const items = identifyCompensationQueue({
+      groups,
+      linesOfBusiness: lines,
+      allocations: [{
+        ...completeAgency,
+        effectiveStart: "2026-01",
+        entries: [{ recipientType: "person", personKind: "agent", personId: 1, compensationBps: 7000 }],
+      }],
+      posted: [{ groupId: 1, lineOfBusinessId: 10, paidMonth: "2026-09" }],
+      asOfMonth: "2026-09",
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]?.reason).toBe("review_required");
+  });
+
+  it("still queues the current month when every historical posted month was covered", () => {
+    const items = identifyCompensationQueue({
+      groups,
+      linesOfBusiness: lines,
+      allocations: [{
+        ...completeAgency,
+        effectiveStart: "2026-01",
+        effectiveEnd: "2026-08",
+      }],
+      posted: [
+        { groupId: 1, lineOfBusinessId: 10, paidMonth: "2026-07" },
+        { groupId: 1, lineOfBusinessId: 10, paidMonth: "2026-08" },
+      ],
+      asOfMonth: "2026-09",
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]?.reason).toBe("not_covering");
+    expect(items[0]?.suggestedEffectiveStart).toBe("2026-09");
+  });
+
+  it("does not treat assignment as a configured allocation", () => {
+    const items = identifyCompensationQueue({
+      groups,
+      linesOfBusiness: lines,
+      allocations: [],
+      posted: [{ groupId: 1, lineOfBusinessId: 10, paidMonth: "2026-09" }],
+      asOfMonth: "2026-09",
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]?.reason).toBe("missing");
   });
 });

@@ -98,6 +98,34 @@ describe("group compensation status", () => {
     expect(view.invalid).toBe(true);
   });
 
+  it("marks multiple complete current covering allocations as review required", () => {
+    const view = classifyGroupLobCompensation({
+      asOfMonth: "2026-09",
+      allocations: [
+        { ...johnSplit, id: 14, effectiveStart: "2026-01" },
+        { ...johnSplit, id: 15, effectiveStart: "2026-06" },
+      ],
+    });
+    expect(view.kind).toBe("review_required");
+    expect(view.statusLabel).toMatch(/more than one/i);
+  });
+
+  it("does not treat an inactive covering allocation as current configuration", () => {
+    const view = classifyGroupLobCompensation({
+      asOfMonth: "2026-09",
+      allocations: [{
+        id: 6,
+        status: "inactive",
+        effectiveStart: "2026-01",
+        effectiveEnd: null,
+        entries: [{ recipientType: "agency", compensationBps: 10000 }],
+      }],
+    });
+    expect(view.kind).toBe("inactive");
+    expect(view.configured).toBe(false);
+    expect(view.invalid).toBe(false);
+  });
+
   it("explains an overlap instead of treating a valid current 100% as a failed save", () => {
     const message = compensationChangeConflictMessage({
       requestedStart: "2026-08",
