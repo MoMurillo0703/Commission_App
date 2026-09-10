@@ -1,7 +1,7 @@
 import { isImpossibleLobCandidate } from "./lobCandidates";
 import { matchNamedRecord, type NamedRecord, type NameMatch } from "./nameMatch";
 
-export type NamedImportAction = "create" | "match" | "ignore";
+export type NamedImportAction = "create" | "match" | "ignore" | "reopen";
 
 export type UnmatchedNamedImport = {
   key: string;

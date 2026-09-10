@@ -72,12 +72,11 @@ export function statementNextAction(
 ) {
   const statement = { status, sourceType, ...context };
   if (isUnparsedStatement(statement, hasReadableRows)) return "View original";
-  if (hasReadableRows && (status === "mapped" || status === "partially_posted")) return "Continue review";
-  if (hasReadableRows) return "Confirm extracted data";
+  if (status === "posted") return "View statement";
+  if (hasReadableRows) return "Continue Import";
   if (status === "needs_layout" || (sourceType === "pdf" && statementHasExtractedText(statement))) {
     return "Help the app read this statement";
   }
-  if (status === "posted") return "View statement";
   return "Open statement";
 }
 
@@ -88,9 +87,8 @@ export function statementKeepViewOriginal(
   context?: StatementExtractionContext,
 ) {
   const action = statementNextAction(status, hasReadableRows, sourceType, context);
-  return action === "Confirm extracted data"
-    || action === "Help the app read this statement"
-    || action === "Continue review";
+  return action === "Continue Import"
+    || action === "Help the app read this statement";
 }
 
 export function statementNeedsUserInput(status: string) {

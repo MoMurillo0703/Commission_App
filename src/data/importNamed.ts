@@ -14,6 +14,7 @@ import {
   findNormalizedNamedRecord,
   type NamedImportDecision,
   type NamedImportResolution,
+  type UnmatchedNamedImport,
 } from "@/domain/namedImport";
 import { ValidationError } from "@/lib/errors";
 
@@ -74,34 +75,46 @@ async function confirmNamedImports(
   const unmatched = kind === "line"
     ? collectUnmatchedImportLines(preview.rows.map((row) => ({ exceptions: row.exceptions, importedName: row.importedLineName })))
     : collectUnmatchedImportAgents(preview.rows.map((row) => ({ exceptions: row.exceptions, importedName: row.importedAgentName })));
-  const decisionsByKey = new Map(decisions.map((item) => [item.key, item]));
+  const unmatchedByKey = new Map(unmatched.map((item) => [item.key, item]));
+  const existingResolutions = kind === "line"
+    ? preview.statement.preview?.lineResolutions ?? []
+    : preview.statement.preview?.agentResolutions ?? [];
+  const existingByKey = new Map(existingResolutions.map((item) => [item.key, item]));
+  const explicit = decisions.filter((item) => item.action === "create" || item.action === "match" || item.action === "ignore" || item.action === "reopen");
+  const targets: Array<{ proposed: UnmatchedNamedImport; decision: NamedImportDecision }> = [];
+  for (const decision of explicit) {
+    const saved = existingByKey.get(decision.key);
+    const proposed = unmatchedByKey.get(decision.key) ?? (saved ? { key: saved.key, sourceName: saved.sourceName, rowCount: 0 } : null);
+    if (!proposed) continue;
+    targets.push({ proposed, decision });
+  }
 
-  for (const proposed of unmatched) {
-    const decision = decisionsByKey.get(proposed.key) ?? { key: proposed.key, action: "create" as const };
+  for (const { proposed, decision } of targets) {
+    if (decision.action === "reopen") continue;
     if (decision.action === "ignore") {
       if (kind === "agent") throw new ValidationError("Agents cannot be ignored.");
       continue;
     }
     if (decision.action === "match" && !decision.existingId) {
-        throw new ValidationError(`Select an existing ${kind === "line" ? "line of business" : "agent"} for ${proposed.sourceName}.`);
-      }
-      if (decision.action === "create" && !proposed.sourceName) {
-        throw new ValidationError(`A new ${kind === "line" ? "line of business" : "agent"} needs a name.`);
-      }
+      throw new ValidationError(`Select an existing ${kind === "line" ? "line of business" : "agent"} for ${proposed.sourceName}.`);
+    }
+    if (decision.action === "create" && !proposed.sourceName) {
+      throw new ValidationError(`A new ${kind === "line" ? "line of business" : "agent"} needs a name.`);
+    }
   }
 
   const createdIds: number[] = [];
   const reusedIds: number[] = [];
   const matchedIds: number[] = [];
-  const existingResolutions = kind === "line"
-    ? preview.statement.preview?.lineResolutions ?? []
-    : preview.statement.preview?.agentResolutions ?? [];
   const resolutions = new Map<string, NamedImportResolution>(existingResolutions.map((item) => [item.key, item]));
 
   const run = async (tx: AppDatabase) => {
     let records = kind === "line" ? await listLinesOfBusiness(tx) : await listAgents(tx);
-    for (const proposed of unmatched) {
-      const decision = decisionsByKey.get(proposed.key) ?? { key: proposed.key, action: "create" as const };
+    for (const { proposed, decision } of targets) {
+      if (decision.action === "reopen") {
+        resolutions.delete(proposed.key);
+        continue;
+      }
       if (decision.action === "ignore") {
         if (kind === "agent") throw new ValidationError("Agents cannot be ignored.");
         resolutions.set(proposed.key, {

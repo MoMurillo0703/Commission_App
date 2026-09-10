@@ -39,6 +39,8 @@ describe("statement list actions and intake files", () => {
     const unposted = statementListActions({ status: "ready_to_map", sourceType: "csv", postedRowCount: 0, rowCount: 4, storedPath: "statements/1-a.csv" });
     expect(unposted.showDelete).toBe(true);
     expect(unposted.reviewLabel).not.toBe("Inspect");
+    expect(unposted.reviewLabel).toBe("Continue Import");
+    expect(unposted.reviewLabel).toBe("Continue Import");
     const posted = statementListActions({ status: "posted", sourceType: "csv", postedRowCount: 2, rowCount: 2, storedPath: "statements/2-a.csv" });
     expect(posted.showDelete).toBe(false);
     expect(posted.canChangePaidMonth).toBe(true);

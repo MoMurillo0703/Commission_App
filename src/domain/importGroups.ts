@@ -2,7 +2,7 @@ import { isCoverageLabel } from "./coverageLabels";
 import { displayGroupText, unmatchedGroupIdentity, type GroupCandidate } from "./groupMatch";
 import type { ValidatedImportRow } from "./importRows";
 
-export type GroupImportAction = "create" | "match" | "ignore";
+export type GroupImportAction = "create" | "match" | "ignore" | "reopen";
 
 export type UnmatchedImportGroup = {
   key: string;

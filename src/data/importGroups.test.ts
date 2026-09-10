@@ -305,6 +305,43 @@ describe("statement import group onboarding", () => {
     expect(commissions[0]?.grossCommissionCents).toBe(5000);
   });
 
+  it("saves only the Groups explicitly confirmed and leaves later sections unresolved", async () => {
+    const { db } = await seed();
+    const statement = await savedStatement(db, [
+      ["Empower Speech", "ES-9", "Principal", "Dental", "Alex Morgan", "1000.00", "80.00", "", "2026-07"],
+      ["Gamma LLC", "G3", "Principal", "Dental", "Alex Morgan", "200.00", "20.00", "", "2026-07"],
+    ]);
+    const review = await reviewImportGroups(db, statement.id, mapping);
+    const empower = review.unmatchedGroups.find((group) => group.sourceName === "Empower Speech");
+    expect(review.unmatchedGroups).toHaveLength(2);
+    const confirmed = await confirmImportGroups(db, statement.id, mapping, [
+      { key: empower!.key, action: "create" },
+    ]);
+    expect(confirmed.createdCount).toBe(1);
+    expect(confirmed.remainingUnmatchedCount).toBe(1);
+    expect(confirmed.unmatchedGroups.map((group) => group.sourceName)).toEqual(["Gamma LLC"]);
+    expect((await listGroups(db)).map((group) => group.name).sort()).toEqual(["Acme Benefits", "Empower Speech"]);
+    expect((await listCommissions(db))).toHaveLength(0);
+    expect(confirmed.readiness.canContinue).toBe(false);
+  });
+
+  it("lets a saved Group decision be cleared before posting", async () => {
+    const { db } = await seed();
+    const statement = await savedStatement(db, [
+      ["Skip Me", "Z9", "Principal", "Dental", "Alex Morgan", "1000.00", "80.00", "", "2026-07"],
+    ]);
+    const review = await reviewImportGroups(db, statement.id, mapping);
+    const key = review.unmatchedGroups[0]!.key;
+    await confirmImportGroups(db, statement.id, mapping, [{ key, action: "ignore" }]);
+    expect((await previewImportPosting(db, statement.id, mapping)).rows[0]?.status).toBe("ignored");
+    const reopened = await confirmImportGroups(db, statement.id, mapping, [{ key, action: "reopen" }]);
+    expect(reopened.unmatchedGroups).toHaveLength(1);
+    expect(reopened.rows[0]?.status).toBe("blocked");
+    expect((await listCommissions(db))).toHaveLength(0);
+    await confirmImportGroups(db, statement.id, mapping, [{ key, action: "create" }]);
+    expect((await postImportStatement(db, statement.id, mapping)).postedCount).toBe(1);
+  });
+
   it("learns a carrier-scoped Group Number on explicit match and does not change groups.group_number", async () => {
     const { db } = await seed();
     const chimay = await createGroup(db, { name: "Chimay Enterprise" });

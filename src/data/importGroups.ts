@@ -7,7 +7,7 @@ import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import type { ColumnMapping } from "@/domain/columnMapping";
 import { findNormalizedGroup, type GroupImportResolution } from "@/domain/groupMatch";
-import { collectUnmatchedImportGroups, groupNumberConflict, proposedGroupName, type GroupImportDecision } from "@/domain/importGroups";
+import { collectUnmatchedImportGroups, groupNumberConflict, proposedGroupName, type GroupImportDecision, type UnmatchedImportGroup } from "@/domain/importGroups";
 import { ValidationError } from "@/lib/errors";
 
 export async function reviewImportGroups(db: AppDatabase | undefined, statementId: number, mapping: ColumnMapping) {
@@ -15,6 +15,15 @@ export async function reviewImportGroups(db: AppDatabase | undefined, statementI
   return {
     ...preview,
     unmatchedGroups: collectUnmatchedImportGroups(preview.rows),
+  };
+}
+
+function proposedFromResolution(resolution: GroupImportResolution): UnmatchedImportGroup {
+  return {
+    key: resolution.key,
+    sourceName: resolution.sourceName,
+    sourceNumber: resolution.sourceNumber,
+    rowCount: 0,
   };
 }
 
@@ -28,11 +37,21 @@ export async function confirmImportGroups(
   const review = await reviewImportGroups(database, statementId, mapping);
   const agreementsBefore = (await listAgreements(database)).length;
   const groups = await listGroups(database);
-  const decisionsByKey = new Map(decisions.map((item) => [item.key, item]));
+  const unmatchedByKey = new Map(review.unmatchedGroups.map((item) => [item.key, item]));
+  const existingResolutions = new Map((review.statement.preview?.groupResolutions ?? []).map((item) => [item.key, item]));
+  const explicit = decisions.filter((item) => item.action === "create" || item.action === "match" || item.action === "ignore" || item.action === "reopen");
 
-  for (const proposed of review.unmatchedGroups) {
-    const decision = decisionsByKey.get(proposed.key) ?? { key: proposed.key, action: "create" as const };
-    if (decision.action === "ignore") continue;
+  const targets: Array<{ proposed: UnmatchedImportGroup; decision: GroupImportDecision }> = [];
+  for (const decision of explicit) {
+    const proposed = unmatchedByKey.get(decision.key) ?? (
+      existingResolutions.get(decision.key) ? proposedFromResolution(existingResolutions.get(decision.key)!) : null
+    );
+    if (!proposed) continue;
+    targets.push({ proposed, decision });
+  }
+
+  for (const { proposed, decision } of targets) {
+    if (decision.action === "ignore" || decision.action === "reopen") continue;
     if (decision.action === "match") {
       if (!groups.find((group) => group.id === decision.existingGroupId)) {
         throw new ValidationError(`Select an existing group for ${proposed.sourceName || proposed.sourceNumber}.`);
@@ -48,14 +67,15 @@ export async function confirmImportGroups(
   const reusedIds: number[] = [];
   const matchedIds: number[] = [];
   const conflicts: string[] = [];
-  const resolutions = new Map<string, GroupImportResolution>(
-    (review.statement.preview?.groupResolutions ?? []).map((item) => [item.key, item]),
-  );
+  const resolutions = new Map<string, GroupImportResolution>(existingResolutions);
 
   const run = async (tx: AppDatabase) => {
     let currentGroups = await listGroups(tx);
-    for (const proposed of review.unmatchedGroups) {
-      const decision = decisionsByKey.get(proposed.key) ?? { key: proposed.key, action: "create" as const };
+    for (const { proposed, decision } of targets) {
+      if (decision.action === "reopen") {
+        resolutions.delete(proposed.key);
+        continue;
+      }
       if (decision.action === "ignore") {
         resolutions.set(proposed.key, {
           key: proposed.key,
@@ -133,7 +153,8 @@ export async function confirmImportGroups(
       });
     }
 
-    await saveImportGroupResolutions(tx, statementId, [...resolutions.values()], 0);
+    const remaining = review.unmatchedGroups.filter((group) => !resolutions.has(group.key)).length;
+    await saveImportGroupResolutions(tx, statementId, [...resolutions.values()], remaining);
   };
 
   if (typeof database.transaction === "function") {

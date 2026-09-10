@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveImportedCarrier, validateMappedRows } from "./importRows";
+import { importRowReviewLabel, resolveImportedCarrier, validateMappedRows } from "./importRows";
 import type { PreviewSheet } from "./workbook";
 
 const mapping = {
@@ -351,5 +351,31 @@ describe("statement compensation from agreements", () => {
     expect(row?.groupId).toBe(9);
     expect(row?.grossCommissionCents).toBe(23881);
     expect(row?.exceptions.join(" ")).not.toMatch(/coverage month/i);
+  });
+
+  it("keeps ignored, needs-review, and blocked labels distinct", () => {
+    expect(importRowReviewLabel({ status: "ignored", exceptions: ["Group ignored. It will not be posted."] })).toBe("IGNORED");
+    expect(importRowReviewLabel({ status: "blocked", exceptions: ["Unmatched group: Example Law. Confirm it as a new group or match an existing group."] })).toBe("NEEDS REVIEW");
+    expect(importRowReviewLabel({ status: "blocked", exceptions: ["Gross commission is missing."] })).toBe("BLOCKED");
+    expect(importRowReviewLabel({ status: "ready", exceptions: [] })).toBe("READY");
+  });
+
+  it("does not keep unrelated mapping exceptions on an ignored group row", () => {
+    const unmatchedSheets = compensationSheets.map((sheet) => ({
+      ...sheet,
+      rows: sheet.rows.map((row) => ({
+        ...row,
+        values: { ...row.values, "Group Name": "Skip Me", LOB: "Unknown Plan" },
+        group: { status: "new_group" as const, groupId: null, groupName: null, sourceName: "Skip Me", sourceNumber: null },
+      })),
+    }));
+    const ignored = validateMappedRows(unmatchedSheets, compensationMapping, "2026-08", {
+      ...compensationRefs,
+      groupResolutions: [{ key: "name:skip me", groupId: null, sourceName: "Skip Me", sourceNumber: null, action: "ignore" }],
+    });
+    expect(ignored[0]?.status).toBe("ignored");
+    expect(importRowReviewLabel(ignored[0]!)).toBe("IGNORED");
+    expect(ignored[0]?.exceptions.join(" ")).toMatch(/ignored/i);
+    expect(ignored[0]?.exceptions.join(" ")).not.toMatch(/Unmatched line/i);
   });
 });

@@ -183,25 +183,42 @@ export function StatementIntake({
           setResult({ status: "review", message: httpFailureMessage(response.status, body.message) });
           return;
         }
-        setPreview(body.preview ?? null);
+        const resumedPreview = body.preview ?? null;
+        const hasRows = canReviewRows(resumedPreview);
+        const needsLayout = pdfNeedsLayoutConfirmation(body, resumedPreview);
+        setPreview(resumedPreview);
         setActiveStatement(body);
         setManualReadHelp(false);
-        setResult({
-          fileName: body.originalFilename,
-          fileType: body.sourceType,
-          status: body.status,
-          preview: body.preview,
-          statement: body,
-          message: statementGuidance({
+        if (!hasRows && !needsLayout) {
+          setResult({
+            fileName: body.originalFilename,
+            fileType: body.sourceType,
             status: body.status,
-            sourceType: body.sourceType,
-            unmatchedGroupCount: body.preview?.newGroupCount,
-            hasReadableRows: canReviewRows(body.preview),
-            hasExtractedText: statementHasExtractedText(body),
-            pdfClassification: body.preview?.pdf?.classification,
-          }).next,
-        });
+            preview: resumedPreview,
+            statement: body,
+            message: "Continue Import could not resume this statement. The file is on file, but no commission rows are available to review. Nothing was posted. Use Help the app read this statement if extracted text exists, or upload the file again.",
+          });
+        } else {
+          setResult({
+            fileName: body.originalFilename,
+            fileType: body.sourceType,
+            status: body.status,
+            preview: resumedPreview,
+            statement: body,
+            message: statementGuidance({
+              status: body.status,
+              sourceType: body.sourceType,
+              unmatchedGroupCount: body.preview?.newGroupCount,
+              hasReadableRows: hasRows,
+              hasExtractedText: statementHasExtractedText(body),
+              pdfClassification: body.preview?.pdf?.classification,
+            }).next,
+          });
+        }
         await loadStatements(paidMonth);
+        requestAnimationFrame(() => {
+          document.getElementById("statement-review")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
       });
     } catch (error) {
       setResult({
@@ -394,6 +411,7 @@ export function StatementIntake({
           )}
         </div>
       )}
+      <div id="statement-review">
       {preview && !isUnparsedStatement(activeStatement ?? {}, canReviewRows(preview)) && canReviewRows(preview) && (
         <div className="result">
           <strong>We found {preview.rowCount} commission record{preview.rowCount === 1 ? "" : "s"}</strong>
@@ -461,6 +479,7 @@ export function StatementIntake({
           }}
         />
       )}
+      </div>
       {availablePaidMonths.length > 0 && (
         <div className="month-links" aria-label="Statement paid months">
           <strong>Open paid month:</strong>

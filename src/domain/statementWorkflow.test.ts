@@ -22,14 +22,16 @@ describe("statement workflow language", () => {
     expect(statementStatusLabel("needs_conversion")).toBe("XLS reading not supported yet");
     expect(statementStatusLabel("ready_to_map", "pdf", true)).toBe("Text-based PDF successfully read");
     expect(statementNextAction("unreadable", false, "pdf")).toBe("View original");
-    expect(statementNextAction("ready_to_map", true, "pdf")).toBe("Confirm extracted data");
+    expect(statementNextAction("ready_to_map", true, "pdf")).toBe("Continue Import");
     expect(statementNextAction("needs_layout", false, "pdf")).toBe("Help the app read this statement");
-    expect(statementNextAction("mapped", true)).toBe("Continue review");
+    expect(statementNextAction("mapped", true)).toBe("Continue Import");
+    expect(statementNextAction("posted", true, "pdf")).toBe("View statement");
     expect(statementCanOpenReview("needs_layout", false, "pdf")).toBe(true);
     expect(statementNextAction("needs_profile", false, "pdf", { extractionPath: "statements/1-extraction.json" })).toBe("Help the app read this statement");
     expect(statementNextAction("needs_profile", false, "pdf")).toBe("View original");
     expect(statementNextAction("needs_layout", false, "pdf")).not.toBe("Inspect");
     expect(statementKeepViewOriginal("needs_layout", false, "pdf")).toBe(true);
+    expect(statementKeepViewOriginal("ready_to_map", true, "pdf")).toBe(true);
   });
 
   it("lets readable PDFs enter review and keeps scanned PDFs unparsed", () => {

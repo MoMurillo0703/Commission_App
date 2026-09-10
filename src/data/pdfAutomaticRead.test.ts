@@ -9,6 +9,7 @@ import { fingerprintBuffer } from "@/domain/fingerprint";
 import { storeStatementFile } from "@/lib/storage";
 import { pdfIntakeSurface } from "@/domain/pdfIntakeSurface";
 import { choiceBuilderStatementLines, readableHiddenTablePdf, imageOnlyPdf, textCommissionPdf } from "../../tests/helpers/pdfFixtures";
+import { beamStatementLayoutLines } from "../../tests/helpers/beamStatementLines";
 
 describe("automatic PDF read recovery and intake", () => {
   it("recovers an old needs_layout Choice Builder extraction into confirmation rows", async () => {
@@ -112,6 +113,69 @@ describe("automatic PDF read recovery and intake", () => {
     }, db);
     expect(["ready_to_map", "mapped"]).toContain(readableResult.body.status);
     expect((readableResult.body.preview as { rowCount?: number }).rowCount).toBeGreaterThan(0);
+    expect(await listCommissions(db)).toHaveLength(0);
+  });
+
+  it("recovers a Beam misread so CA##### is not a standalone Group", async () => {
+    const db = await createTestDb();
+    const carrier = await createCarrier(db, { name: "Beam" });
+    const leftover = await createImportStatement(db, {
+      originalFilename: "Beam 09 2026 Commission Report.pdf",
+      paidMonth: "2026-09",
+      carrierId: carrier.id,
+      sourceType: "pdf",
+      status: "mapped",
+      fingerprint: fingerprintBuffer(new TextEncoder().encode("beam-misread-ca-groups")),
+      preview: {
+        sheets: [{
+          name: "Page 1",
+          headerRowNumber: 1,
+          rowCount: 2,
+          headers: ["Company name", "Comm. amt."],
+          groupNameHeader: "Company name",
+          groupNumberHeader: null,
+          premiumMonthHeader: null,
+          rows: [
+            {
+              rowNumber: 1,
+              values: { "Company name": "CA02483", "Comm. amt.": "$45.37" },
+              premiumMonth: null,
+              group: { status: "new_group", groupId: null, groupName: null, sourceName: "CA02483", sourceNumber: null },
+            },
+            {
+              rowNumber: 2,
+              values: { "Company name": "Example Law", "Comm. amt.": "$45.37" },
+              premiumMonth: null,
+              group: { status: "new_group", groupId: null, groupName: null, sourceName: "Example Law", sourceNumber: null },
+            },
+          ],
+        }],
+        unmatchedGroups: [
+          { sourceName: "CA02483", sourceNumber: null, rowCount: 1 },
+          { sourceName: "Example Law", sourceNumber: null, rowCount: 1 },
+        ],
+        rowCount: 2,
+        newGroupCount: 2,
+        pdf: { classification: "readable", pageCount: 1 },
+      },
+    });
+    const extractionPath = await storeStatementFile(leftover.id, "extraction.json", new TextEncoder().encode(JSON.stringify({
+      classification: "readable",
+      pageCount: 1,
+      pages: [{
+        pageNumber: 1,
+        lines: beamStatementLayoutLines,
+      }],
+    })));
+    const stored = await saveImportExtractionPath(db, leftover.id, extractionPath);
+    stored.preview = leftover.preview;
+    const recovered = await recoverAutomaticPdfRead(db, stored);
+    const names = recovered.preview?.sheets.flatMap((sheet) => sheet.rows.map((row) => row.values["Company Name"] || row.values["Company name"])) ?? [];
+    expect(recovered.id).toBe(leftover.id);
+    expect(recovered.preview?.pdf?.groupMatchStrategy).toBe("carrier_group_identity");
+    expect(names.some((name) => /^CA\d{5}$/i.test(name ?? ""))).toBe(false);
+    expect(names).toContain("Example Law");
+    expect(recovered.preview?.groupResolutions).toBeUndefined();
     expect(await listCommissions(db)).toHaveLength(0);
   });
 });

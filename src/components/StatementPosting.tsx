@@ -6,8 +6,9 @@ import { fetchWithDeadline, httpFailureMessage, readApiJson, requestFailureMessa
 import { collectPreviewHeaders, mappingFieldLabels, mappingFields, mappingLooksAutomatic, omitStatementCompensationMapping, suggestColumnMapping, type ColumnMapping } from "@/domain/columnMapping";
 import type { UnmatchedImportGroup, GroupImportDecision } from "@/domain/importGroups";
 import { partitionStatementGroupAssignments } from "@/domain/groupAssignment";
-import { defaultGroupImportAction, groupMatchesQuery, suggestGroupCandidates, type GroupSuggestion } from "@/domain/groupMatch";
+import { groupMatchesQuery, suggestGroupCandidates, type GroupSuggestion } from "@/domain/groupMatch";
 import type { ValidatedImportRow } from "@/domain/importRows";
+import { importRowReviewLabel } from "@/domain/importRows";
 import { formatPaidMonthLong, formatStatementMonth } from "@/domain/dates";
 import { formatCents } from "@/domain/money";
 import type { NamedImportDecision, UnmatchedNamedImport } from "@/domain/namedImport";
@@ -35,8 +36,8 @@ type PreviewResponse = {
   statement?: ImportStatementView | null;
 };
 
-function defaultNamedDecisions(items: UnmatchedNamedImport[]) {
-  return Object.fromEntries(items.map((item) => [item.key, { key: item.key, action: "create" as const }]));
+function defaultPendingNamedDecisions(items: UnmatchedNamedImport[]) {
+  return Object.fromEntries(items.map((item) => [item.key, { key: item.key, action: "" as const }]));
 }
 
 function intakeMapping(mapping: ColumnMapping, extractedConfirm: boolean): ColumnMapping {
@@ -70,8 +71,8 @@ export function StatementPosting({
   const [lines, setLines] = useState<NamedOption[]>([]);
   const [agents, setAgents] = useState<NamedOption[]>([]);
   const [userGroupDecisions, setUserGroupDecisions] = useState<Record<string, GroupImportDecision>>({});
-  const [lineDecisions, setLineDecisions] = useState<Record<string, NamedImportDecision>>({});
-  const [agentDecisions, setAgentDecisions] = useState<Record<string, NamedImportDecision>>({});
+  const [lineDecisions, setLineDecisions] = useState<Record<string, NamedImportDecision | { key: string; action: "" }>>({});
+  const [agentDecisions, setAgentDecisions] = useState<Record<string, NamedImportDecision | { key: string; action: "" }>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(true);
@@ -96,21 +97,14 @@ export function StatementPosting({
   const groupDecisions = useMemo(() => Object.fromEntries((review?.unmatchedGroups ?? []).map((group) => {
     const user = userGroupDecisions[group.key];
     if (user) return [group.key, user];
-    const suggested = groups.length > 0
-      ? defaultGroupImportAction(groups, group.sourceName, group.sourceNumber)
-      : { action: "create" as const, existingGroupId: undefined };
-    return [group.key, {
-      key: group.key,
-      action: suggested.action,
-      existingGroupId: suggested.existingGroupId,
-    }];
-  })), [review, groups, userGroupDecisions]);
+    return [group.key, { key: group.key, action: "" as const }];
+  })), [review, userGroupDecisions]);
 
   function applyReview(body: PreviewResponse) {
     setReview(body);
     setUserGroupDecisions({});
-    setLineDecisions(defaultNamedDecisions(body.unmatchedLines ?? []));
-    setAgentDecisions(defaultNamedDecisions(body.unmatchedAgents ?? []));
+    setLineDecisions(defaultPendingNamedDecisions(body.unmatchedLines ?? []));
+    setAgentDecisions(defaultPendingNamedDecisions(body.unmatchedAgents ?? []));
     if (variant !== "extracted-confirm" && body.readiness?.blockers.some((blocker) => blocker.kind === "mapping")) {
       setShowMappingHelp(true);
     }
@@ -171,10 +165,15 @@ export function StatementPosting({
     setReview(null);
   }
 
-  function setGroupDecision(key: string, patch: Partial<GroupImportDecision>) {
+  function setGroupDecision(key: string, patch: Partial<GroupImportDecision> & { action?: GroupImportDecision["action"] | "" }) {
     setUserGroupDecisions((current) => {
       const previous = current[key] ?? groupDecisions[key] ?? { key, action: "create" as const };
-      return { ...current, [key]: { ...previous, ...patch, key } };
+      if (!patch.action) {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      }
+      return { ...current, [key]: { ...previous, ...patch, key, action: patch.action } };
     });
   }
 
@@ -184,6 +183,9 @@ export function StatementPosting({
     patch: Partial<NamedImportDecision>,
   ) {
     setter((current) => {
+      if (!patch.action) {
+        return { ...current, [key]: { key, action: "" as const } };
+      }
       const previous = current[key] ?? { key, action: "create" as const };
       return { ...current, [key]: { ...previous, ...patch, key } };
     });
@@ -269,6 +271,11 @@ export function StatementPosting({
   const unmatchedGroups = review?.unmatchedGroups ?? [];
   const unmatchedLines = review?.unmatchedLines ?? [];
   const unmatchedAgents = review?.unmatchedAgents ?? [];
+  const savedGroupResolutions = (review?.statement?.preview?.groupResolutions ?? []).filter((item) => !unmatchedGroups.some((group) => group.key === item.key));
+  const savedLineResolutions = (review?.statement?.preview?.lineResolutions ?? []).filter((item) => !unmatchedLines.some((line) => line.key === item.key));
+  const explicitGroupDecisions = Object.values(userGroupDecisions).filter((item) => item.action);
+  const explicitLineDecisions = Object.values(lineDecisions).filter((item): item is NamedImportDecision => Boolean(item.action));
+  const explicitAgentDecisions = Object.values(agentDecisions).filter((item): item is NamedImportDecision => Boolean(item.action));
   const readiness = review?.readiness ?? null;
   const continueBlocked = continueImportBlockedReason(readiness);
   const fullyPosted = isStatementFullyPosted(readiness) && unmatchedGroups.length + unmatchedLines.length + unmatchedAgents.length === 0;
@@ -333,8 +340,8 @@ export function StatementPosting({
             </>
           ) : readiness?.canContinue ? (
             <>
-              <strong>{extractedConfirm ? "Ready to confirm" : "Ready to continue"}</strong>
-              <p>{extractedConfirm ? "The extracted records are ready. Confirm and post the ready rows." : "Required mappings and unmatched items are resolved. Review the financial rows below, then post the ready rows."}</p>
+              <strong>{extractedConfirm ? "Ready to post" : "Ready to continue"}</strong>
+              <p>{extractedConfirm ? "Review the financial rows below, then Post Statement. Earlier section decisions stay editable until this post. Posting creates commission records; saving a review section does not." : "Required mappings and unmatched items are resolved. Review the financial rows below, then post the ready rows."}</p>
             </>
           ) : (
             <>
@@ -370,7 +377,7 @@ export function StatementPosting({
             Help the app read this statement
           </button>
           <button type="button" disabled={busy || !readiness?.canContinue} onClick={postReady}>
-            {review ? `Confirm & Post ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Confirm & Post"}
+            {review ? `Post Statement · ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Post Statement"}
           </button>
         </div>
       )}
@@ -412,7 +419,7 @@ export function StatementPosting({
             )}
             {!fullyPosted && (
               <button type="button" disabled={busy || !readiness?.canContinue} onClick={postReady}>
-                {review ? `Confirm & Post ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Confirm & Post"}
+                {review ? `Post Statement · ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Post Statement"}
               </button>
             )}
           </div>
@@ -427,48 +434,106 @@ export function StatementPosting({
         <ResolveTable
           id="resolve-groups"
           title={`${unmatchedGroups.length} Group${unmatchedGroups.length === 1 ? "" : "s"} need review`}
-          help="These names are not on file. Search to match an existing group, create a new group, or ignore. A suggested match is never applied until you confirm. Ignore skips posting those rows and does not create a group. Creating a group does not create compensation or assignments."
+          help="Choose a decision for each Group you are ready to save. Confirming this section saves only these Group decisions and does not post commissions or approve coverage mapping. A suggested match is never applied until you confirm. Ignore skips posting those rows and does not create a group."
           rows={unmatchedGroups.map((group) => ({
             key: group.key,
             label: group.sourceName || group.sourceNumber || group.key,
             detail: group.sourceName && group.sourceNumber ? group.sourceNumber : null,
             rowCount: group.rowCount,
-            decision: groupDecisions[group.key] ?? { key: group.key, action: "create" as const },
+            decision: groupDecisions[group.key] ?? { key: group.key, action: "" as const },
             suggestions: suggestGroupCandidates(groups, group.sourceName, group.sourceNumber),
           }))}
           options={groups.map((option) => ({ id: option.id, label: `${option.name}${option.groupNumber ? ` · ${option.groupNumber}` : ""}`, name: option.name, groupNumber: option.groupNumber }))}
           createLabel="Create new group"
           matchLabel="Match existing group"
           ignoreLabel="Ignore"
-          confirmLabel="Confirm group decisions"
+          confirmLabel="Save group decisions and continue"
           searchable
           busy={busy}
-          onDecision={(key, action, existingId) => setGroupDecision(key, { action: action as "create" | "match" | "ignore", existingGroupId: existingId ?? null })}
-          onConfirm={() => confirm("groups", Object.values(groupDecisions))}
+          confirmDisabled={explicitGroupDecisions.length === 0}
+          onDecision={(key, action, existingId) => setGroupDecision(key, { action: action as GroupImportDecision["action"], existingGroupId: existingId ?? null })}
+          onConfirm={() => confirm("groups", explicitGroupDecisions)}
+        />
+      )}
+      {review && savedGroupResolutions.length > 0 && !fullyPosted && (
+        <ResolveTable
+          id="saved-groups"
+          title="Saved group decisions"
+          help="These Group decisions are saved for this statement and stay editable until you Post Statement. Changing them does not post commissions."
+          rows={savedGroupResolutions.map((item) => ({
+            key: item.key,
+            label: item.sourceName || item.sourceNumber || item.key,
+            detail: item.sourceName && item.sourceNumber ? item.sourceNumber : item.action ?? null,
+            rowCount: 0,
+            decision: userGroupDecisions[item.key] ?? {
+              key: item.key,
+              action: item.action ?? "create",
+              existingGroupId: item.groupId,
+            },
+            suggestions: suggestGroupCandidates(groups, item.sourceName, item.sourceNumber),
+          }))}
+          options={groups.map((option) => ({ id: option.id, label: `${option.name}${option.groupNumber ? ` · ${option.groupNumber}` : ""}`, name: option.name, groupNumber: option.groupNumber }))}
+          createLabel="Create new group"
+          matchLabel="Match existing group"
+          ignoreLabel="Ignore"
+          reopenLabel="Clear this decision"
+          confirmLabel="Save group decision changes"
+          searchable
+          busy={busy}
+          confirmDisabled={explicitGroupDecisions.length === 0}
+          onDecision={(key, action, existingId) => setGroupDecision(key, { action: action as GroupImportDecision["action"], existingGroupId: existingId ?? null })}
+          onConfirm={() => confirm("groups", explicitGroupDecisions)}
         />
       )}
       {review && unmatchedLines.length > 0 && (
         <ResolveTable
           id="resolve-lines"
           title={`${unmatchedLines.length} Line${unmatchedLines.length === 1 ? "" : "s"} of Business need review`}
-          help="Carrier product labels that do not match a line of business stay unmatched until you confirm. Match or create a line of business, or ignore. Ignore skips posting those rows and does not create a line of business or compensation. Confirming a coverage value for this carrier is reused on later statements from the same carrier only. Changing it later does not rewrite posted commissions."
+          help="Choose coverage mapping for this section only. Confirming does not post commissions or approve remaining review sections. Ignore skips posting those rows."
           rows={unmatchedLines.map((line) => ({
             key: line.key,
             label: line.sourceName,
             detail: null,
             rowCount: line.rowCount,
-            decision: lineDecisions[line.key] ?? { key: line.key, action: "create" as const },
+            decision: lineDecisions[line.key] ?? { key: line.key, action: "" as const },
           }))}
           options={lines.map((option) => ({ id: option.id, label: option.name }))}
           createLabel="Create new line of business"
           matchLabel="Match existing line of business"
           ignoreLabel="Ignore"
-          confirmLabel="Confirm line of business decisions"
+          confirmLabel="Save coverage decisions and continue"
           busy={busy}
+          confirmDisabled={explicitLineDecisions.length === 0}
           onDecision={(key, action, existingId) => {
-            setNamedDecision(setLineDecisions, key, { action, existingId: existingId ?? null });
+            setNamedDecision(setLineDecisions, key, { action: action as NamedImportDecision["action"], existingId: existingId ?? null });
           }}
-          onConfirm={() => confirm("lines", Object.values(lineDecisions))}
+          onConfirm={() => confirm("lines", explicitLineDecisions)}
+        />
+      )}
+      {review && savedLineResolutions.length > 0 && !fullyPosted && (
+        <ResolveTable
+          id="saved-lines"
+          title="Saved coverage decisions"
+          help="These line of business decisions stay editable until you Post Statement."
+          rows={savedLineResolutions.map((item) => ({
+            key: item.key,
+            label: item.sourceName,
+            detail: item.action ?? null,
+            rowCount: 0,
+            decision: lineDecisions[item.key] ?? { key: item.key, action: item.action ?? "create", existingId: item.entityId },
+          }))}
+          options={lines.map((option) => ({ id: option.id, label: option.name }))}
+          createLabel="Create new line of business"
+          matchLabel="Match existing line of business"
+          ignoreLabel="Ignore"
+          reopenLabel="Clear this decision"
+          confirmLabel="Save coverage decision changes"
+          busy={busy}
+          confirmDisabled={explicitLineDecisions.length === 0}
+          onDecision={(key, action, existingId) => {
+            setNamedDecision(setLineDecisions, key, { action: action as NamedImportDecision["action"], existingId: existingId ?? null });
+          }}
+          onConfirm={() => confirm("lines", explicitLineDecisions)}
         />
       )}
       {review && !extractedConfirm && unmatchedAgents.length > 0 && (
@@ -481,18 +546,19 @@ export function StatementPosting({
             label: agent.sourceName,
             detail: null,
             rowCount: agent.rowCount,
-            decision: agentDecisions[agent.key] ?? { key: agent.key, action: "create" as const },
+            decision: agentDecisions[agent.key] ?? { key: agent.key, action: "" as const },
           }))}
           options={agents.map((option) => ({ id: option.id, label: option.name }))}
           createLabel="Create agent"
           matchLabel="Match existing agent"
-          confirmLabel="Confirm agent decisions"
+          confirmLabel="Save agent decisions and continue"
           busy={busy}
+          confirmDisabled={explicitAgentDecisions.length === 0}
           onDecision={(key, action, existingId) => {
-            if (action === "ignore") return;
-            setNamedDecision(setAgentDecisions, key, { action, existingId: existingId ?? null });
+            if (action === "ignore" || action === "reopen") return;
+            setNamedDecision(setAgentDecisions, key, { action: action as NamedImportDecision["action"], existingId: existingId ?? null });
           }}
-          onConfirm={() => confirm("agents", Object.values(agentDecisions))}
+          onConfirm={() => confirm("agents", explicitAgentDecisions)}
         />
       )}
       {review && (
@@ -531,7 +597,7 @@ export function StatementPosting({
               </thead>
               <tbody>
                 {review.rows.map((row) => {
-                  const statusLabel = row.status === "ready" ? "READY" : row.status === "posted" ? "POSTED" : row.status === "ignored" ? "IGNORED" : row.exceptions.some((item) => /Unmatched|Ambiguous/.test(item)) ? "NEEDS REVIEW" : "BLOCKED";
+                  const statusLabel = importRowReviewLabel(row);
                   return (
                     <tr key={row.sourceRowKey}>
                       <td>{row.groupLabel || row.importedGroupName || "—"}</td>
@@ -787,9 +853,11 @@ function ResolveTable({
   createLabel,
   matchLabel,
   ignoreLabel,
+  reopenLabel,
   confirmLabel,
   searchable,
   busy,
+  confirmDisabled,
   onDecision,
   onConfirm,
 }: {
@@ -801,17 +869,19 @@ function ResolveTable({
     label: string;
     detail: string | null;
     rowCount: number;
-    decision: { action: "create" | "match" | "ignore" };
+    decision: { action: "create" | "match" | "ignore" | "reopen" | "" };
     suggestions?: GroupSuggestion[];
   }>;
   options: Array<{ id: number; label: string; name?: string; groupNumber?: string | null }>;
   createLabel: string;
   matchLabel: string;
   ignoreLabel?: string;
+  reopenLabel?: string;
   confirmLabel: string;
   searchable?: boolean;
   busy: boolean;
-  onDecision: (key: string, action: "create" | "match" | "ignore", existingId?: number | null) => void;
+  confirmDisabled?: boolean;
+  onDecision: (key: string, action: "create" | "match" | "ignore" | "reopen" | "", existingId?: number | null) => void;
   onConfirm: () => void;
 }) {
   const [queries, setQueries] = useState<Record<string, string>>({});
@@ -849,17 +919,19 @@ function ResolveTable({
                     </div>
                   ))}
                 </td>
-                <td>{row.rowCount}</td>
+                <td>{row.rowCount || "—"}</td>
                 <td>
                   <div className="form-actions" style={{ flexWrap: "wrap" }}>
                     <select
                       aria-label={`Decision for ${row.label}`}
                       value={decision.action}
-                      onChange={(event) => onDecision(row.key, event.target.value as "create" | "match" | "ignore", null)}
+                      onChange={(event) => onDecision(row.key, event.target.value as "create" | "match" | "ignore" | "reopen" | "", null)}
                     >
+                      <option value="">Choose a decision</option>
                       <option value="create">{createLabel}</option>
                       <option value="match">{matchLabel}</option>
                       {ignoreLabel && <option value="ignore">{ignoreLabel}</option>}
+                      {reopenLabel && <option value="reopen">{reopenLabel}</option>}
                     </select>
                     {decision.action === "match" && (
                       <>
@@ -900,7 +972,7 @@ function ResolveTable({
         </tbody>
       </table>
       <div className="form-actions" style={{ marginTop: 12 }}>
-        <button type="button" disabled={busy} onClick={onConfirm}>
+        <button type="button" disabled={busy || confirmDisabled} onClick={onConfirm}>
           {busy ? "Saving…" : confirmLabel}
         </button>
       </div>

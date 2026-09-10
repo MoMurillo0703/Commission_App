@@ -56,7 +56,8 @@ export function pdfNeedsLayoutConfirmation(statement: StatementActionSource, pre
   if (canReviewRows(current.preview)) return false;
   if (current.status === "unreadable" || current.status === "extraction_failed") return false;
   if (current.status === "needs_layout") return true;
-  return current.status === "needs_profile" && statementHasExtractedPdfText(current);
+  if (current.status === "needs_profile" && statementHasExtractedPdfText(current)) return true;
+  return current.sourceType === "pdf" && statementHasExtractedPdfText(current);
 }
 
 export function statementListActions(statement: StatementActionSource) {

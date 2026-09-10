@@ -3,12 +3,13 @@ import { listGroups } from "./groups";
 import { loadStatementExtractionPages } from "./pdfLayoutConfirm";
 import { saveConfirmedPdfPreview, saveImportColumnMapping, type ImportStatementView } from "./statements";
 import type { AppDatabase } from "@/db";
+import { looksLikeBeamStatement, previewLooksLikeMisreadBeam } from "@/domain/beamStatement";
 import { omitStatementCompensationMapping } from "@/domain/columnMapping";
 import { looksLikeCaliforniaChoice } from "@/domain/californiaChoice";
 import { interpretExtractedPdfPages } from "@/domain/pdfStructureInference";
 import { canReviewRows } from "@/domain/statementWorkflow";
 
-function californiaChoiceSourceHint(statement: ImportStatementView) {
+function pdfSourceHint(statement: ImportStatementView) {
   return [statement.originalFilename, statement.carrierName].filter(Boolean).join("\n");
 }
 
@@ -21,17 +22,22 @@ export async function recoverAutomaticPdfRead(
   if (statement.status === "unreadable" || statement.status === "extraction_failed") return statement;
   try {
     const pages = await loadStatementExtractionPages(db, statement);
-    const sourceHint = californiaChoiceSourceHint(statement);
+    const sourceHint = pdfSourceHint(statement);
     const misreadCaliforniaChoice = looksLikeCaliforniaChoice(pages, sourceHint)
       && statement.preview?.pdf?.groupMatchStrategy !== "carrier_group_identity";
-    if (canReviewRows(statement.preview) && !misreadCaliforniaChoice) return statement;
+    const misreadBeam = looksLikeBeamStatement(pages, sourceHint)
+      && (
+        statement.preview?.pdf?.groupMatchStrategy !== "carrier_group_identity"
+        || previewLooksLikeMisreadBeam(statement.preview)
+      );
+    if (canReviewRows(statement.preview) && !misreadCaliforniaChoice && !misreadBeam) return statement;
     const interpreted = interpretExtractedPdfPages(pages, await listGroups(db), {
       carrierId: statement.carrierId,
       identities: await listCarrierGroupIdentities(db, statement.carrierId),
       sourceHint,
     });
     if (!interpreted || interpreted.preview.rowCount === 0) return statement;
-    if (misreadCaliforniaChoice && interpreted.preview.pdf?.groupMatchStrategy !== "carrier_group_identity") {
+    if ((misreadCaliforniaChoice || misreadBeam) && interpreted.preview.pdf?.groupMatchStrategy !== "carrier_group_identity") {
       return statement;
     }
     await saveConfirmedPdfPreview(db, statement.id, {

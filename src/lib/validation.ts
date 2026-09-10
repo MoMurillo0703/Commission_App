@@ -189,7 +189,7 @@ export const importMappingSchema = z.object({
 
 export const importGroupDecisionSchema = z.object({
   key: z.string().min(1),
-  action: z.enum(["create", "match", "ignore"]),
+  action: z.enum(["create", "match", "ignore", "reopen"]),
   existingGroupId: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
 });
 
@@ -200,7 +200,7 @@ export const importGroupConfirmSchema = z.object({
 
 export const importNamedDecisionSchema = z.object({
   key: z.string().min(1),
-  action: z.enum(["create", "match", "ignore"]),
+  action: z.enum(["create", "match", "ignore", "reopen"]),
   existingId: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
 });
 

@@ -53,6 +53,14 @@ export type ValidatedImportRow = {
   exceptions: string[];
 };
 
+export function importRowReviewLabel(row: Pick<ValidatedImportRow, "status" | "exceptions">) {
+  if (row.status === "ready") return "READY";
+  if (row.status === "posted") return "POSTED";
+  if (row.status === "ignored") return "IGNORED";
+  if (row.exceptions.some((item) => /Unmatched|Ambiguous/.test(item))) return "NEEDS REVIEW";
+  return "BLOCKED";
+}
+
 export type ImportReferenceData = {
   groups: GroupCandidate[];
   carriers: NamedRecord[];
@@ -271,11 +279,17 @@ export function validateMappedRows(
       }
 
       const ready = exceptions.length === 0 && group.groupId != null && carrier.id != null && line.id != null && grossCommissionCents != null;
+      const ignored = group.status === "ignored" || line.status === "ignored";
       const status: ImportRowStatus = postedKeys.has(key)
         ? "posted"
-        : group.status === "ignored" || line.status === "ignored"
+        : ignored
           ? "ignored"
           : ready ? "ready" : "blocked";
+      const visibleExceptions = postedKeys.has(key)
+        ? ["Already posted from this statement."]
+        : ignored
+          ? exceptions.filter((item) => /ignored/i.test(item))
+          : exceptions;
 
       return {
         sourceRowKey: key,
@@ -304,7 +318,7 @@ export function validateMappedRows(
         importedLineName,
         importedAgentName,
         importedSourcePeriod,
-        exceptions: postedKeys.has(key) ? ["Already posted from this statement."] : exceptions,
+        exceptions: visibleExceptions,
       };
     }),
   );

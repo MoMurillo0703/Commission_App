@@ -1,3 +1,4 @@
+import { interpretBeamStatement } from "./beamStatement";
 import { interpretCaliforniaChoiceStatement } from "./californiaChoice";
 import { detectGroupHeaders, matchImportedGroup, type GroupCandidate } from "./groupMatch";
 import { isIgnoredPdfLine, lineCells, type ExtractedPdfPage } from "./pdfExtraction";
@@ -87,6 +88,16 @@ export function previewFromConfirmedPdfLayout(
       preview: californiaChoice.preview,
       headerCells: californiaChoice.preview.sheets[0]?.headers ?? [],
       selectedLineCount: californiaChoice.preview.rowCount,
+      ignoredLineCount: 0,
+    };
+  }
+
+  const beam = interpretBeamStatement(pages, groups);
+  if (beam) {
+    return {
+      preview: beam.preview,
+      headerCells: beam.preview.sheets[0]?.headers ?? [],
+      selectedLineCount: beam.preview.rowCount,
       ignoredLineCount: 0,
     };
   }

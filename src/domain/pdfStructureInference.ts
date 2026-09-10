@@ -1,3 +1,4 @@
+import { interpretBeamStatement } from "./beamStatement";
 import { interpretCaliforniaChoiceStatement, type CaliforniaChoiceMatchContext } from "./californiaChoice";
 import { isCoverageLabel } from "./coverageLabels";
 import { parseFlexibleMonth } from "./dates";
@@ -361,6 +362,8 @@ export function interpretExtractedPdfPages(
 ) {
   const californiaChoice = interpretCaliforniaChoiceStatement(pages, groups, context);
   if (californiaChoice) return californiaChoice;
+  const beam = interpretBeamStatement(pages, groups, context);
+  if (beam) return beam;
   const firstPass = candidateRowsFromPdfPages(pages, groups);
   const inferred = inferPdfStatementStructure(pages, groups);
   if (

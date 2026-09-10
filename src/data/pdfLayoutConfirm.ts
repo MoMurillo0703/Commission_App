@@ -4,6 +4,7 @@ import { extractPdfPages } from "@/data/pdfStatements";
 import { getImportStatement, saveConfirmedPdfPreview, saveImportColumnMapping, type ImportStatementView } from "@/data/statements";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
+import { interpretBeamStatement } from "@/domain/beamStatement";
 import { interpretCaliforniaChoiceStatement } from "@/domain/californiaChoice";
 import { omitStatementCompensationMapping } from "@/domain/columnMapping";
 import {
@@ -174,6 +175,33 @@ export async function confirmPdfStatementLayout(
     };
     await saveConfirmedPdfPreview(database, id, preview);
     return saveImportColumnMapping(database, id, omitStatementCompensationMapping(californiaChoice.mapping));
+  }
+
+  const beam = interpretBeamStatement(pages, groups, {
+    carrierId: statement.carrierId,
+    identities: await listCarrierGroupIdentities(database, statement.carrierId),
+    sourceHint: [statement.originalFilename, statement.carrierName].filter(Boolean).join("\n"),
+  });
+  if (beam) {
+    const preview = {
+      ...beam.preview,
+      groupResolutions: statement.preview?.groupResolutions,
+      lineResolutions: statement.preview?.lineResolutions,
+      agentResolutions: statement.preview?.agentResolutions,
+      pdf: {
+        classification: "readable" as const,
+        pageCount: beam.preview.pdf?.pageCount ?? pages.length,
+        ...beam.preview.pdf,
+        extractionPath: statement.extractionPath ?? statement.preview?.pdf?.extractionPath ?? null,
+        layoutId: statement.preview?.pdf?.layoutId ?? statement.layoutId ?? null,
+        layoutVersion: statement.preview?.pdf?.layoutVersion ?? statement.layoutVersion ?? null,
+        layoutName: beam.preview.pdf?.layoutName ?? statement.preview?.pdf?.layoutName ?? null,
+        layoutConfirmed: true,
+        confirmedLayout: selection,
+      },
+    };
+    await saveConfirmedPdfPreview(database, id, preview);
+    return saveImportColumnMapping(database, id, omitStatementCompensationMapping(beam.mapping));
   }
 
   const generated = previewFromConfirmedPdfLayout(pages, selection, groups);
