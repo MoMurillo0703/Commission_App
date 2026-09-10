@@ -21,6 +21,10 @@ describe("statement workflow language", () => {
     expect(statementStatusLabel("needs_layout")).toBe("Needs help reading");
     expect(statementStatusLabel("needs_conversion")).toBe("XLS reading not supported yet");
     expect(statementStatusLabel("ready_to_map", "pdf", true)).toBe("Text-based PDF successfully read");
+    expect(statementStatusLabel("mapped", "pdf", true)).toBe("Text-based PDF successfully read");
+    expect(statementStatusLabel("mapped", "pdf", true)).not.toMatch(/posted/i);
+    expect(statementStatusLabel("posted", "pdf", true)).toBe("Posted");
+    expect(statementStatusLabel("partially_posted", "pdf", true)).toBe("Partially posted");
     expect(statementNextAction("unreadable", false, "pdf")).toBe("View original");
     expect(statementNextAction("ready_to_map", true, "pdf")).toBe("Continue Import");
     expect(statementNextAction("needs_layout", false, "pdf")).toBe("Help the app read this statement");

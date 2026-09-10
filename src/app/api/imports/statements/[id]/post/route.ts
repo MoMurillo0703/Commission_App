@@ -11,7 +11,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const id = parseId((await context.params).id);
     if (!id) return NextResponse.json({ message: "Statement not found." }, { status: 404 });
     const body = importMappingSchema.parse(await request.json());
-    return NextResponse.json(await postImportStatement(await getDb(), id, body.columnMapping));
+    const result = await postImportStatement(await getDb(), id, body.columnMapping);
+    return NextResponse.json(result);
   } catch (error) {
     return toErrorResponse(error);
   }

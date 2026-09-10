@@ -12,7 +12,15 @@ import { importRowReviewLabel } from "@/domain/importRows";
 import { formatPaidMonthLong, formatStatementMonth } from "@/domain/dates";
 import { formatCents } from "@/domain/money";
 import type { NamedImportDecision, UnmatchedNamedImport } from "@/domain/namedImport";
-import { continueImportBlockedReason, isStatementFullyPosted, type StatementReadiness } from "@/domain/statementReadiness";
+import { continueImportBlockedReason, type StatementReadiness } from "@/domain/statementReadiness";
+import {
+  acceptedPostHttpBody,
+  isPersistedStatementFullyPosted,
+  postButtonBlockedReason,
+  postRejectionUserMessage,
+  sectionConfirmSuccessMessage,
+  statementPostBannerKind,
+} from "@/domain/statementPostPersistence";
 import type { StatementPreview } from "@/domain/workbook";
 
 type NamedOption = { id: number; name: string; groupNumber?: string | null; accountManagerId?: number | null; primaryAgentId?: number | null };
@@ -23,6 +31,9 @@ type PreviewResponse = {
   readyCount: number;
   blockedCount: number;
   postedCount: number;
+  posted?: boolean;
+  postedGrossCents?: number;
+  alreadyPostedCount?: number;
   unmatchedGroups?: UnmatchedImportGroup[];
   unmatchedLines?: UnmatchedNamedImport[];
   unmatchedAgents?: UnmatchedNamedImport[];
@@ -33,6 +44,7 @@ type PreviewResponse = {
   conflicts?: string[];
   remainingUnmatchedCount?: number;
   message?: string;
+  blockers?: StatementReadiness["blockers"];
   statement?: ImportStatementView | null;
 };
 
@@ -235,14 +247,19 @@ export function StatementPosting({
         });
         const body = await readApiJson<PreviewResponse>(response);
         if (!response.ok) {
-          setError(httpFailureMessage(response.status, body.message));
+          setError(postRejectionUserMessage(httpFailureMessage(response.status, body.message), body.blockers));
+          setReview((current) => current ? { ...current, createdCount: undefined, matchedCount: undefined, reusedCount: undefined } : current);
+          return;
+        }
+        if (!acceptedPostHttpBody(body)) {
+          setError(postRejectionUserMessage(body.message ?? "Posting did not persist.", body.blockers));
           return;
         }
         applyReview(body);
         onPosted?.(body.statement ?? null);
       });
     } catch (error) {
-      setError(requestFailureMessage(error, "Unable to post rows."));
+      setError(postRejectionUserMessage(requestFailureMessage(error, "Unable to post rows.")));
     }
   }
 
@@ -278,18 +295,34 @@ export function StatementPosting({
   const explicitAgentDecisions = Object.values(agentDecisions).filter((item): item is NamedImportDecision => Boolean(item.action));
   const readiness = review?.readiness ?? null;
   const continueBlocked = continueImportBlockedReason(readiness);
-  const fullyPosted = isStatementFullyPosted(readiness) && unmatchedGroups.length + unmatchedLines.length + unmatchedAgents.length === 0;
-  const postedCount = readiness?.postedCount ?? review?.postedCount ?? 0;
+  const persistedStatement = review?.statement ?? statement;
+  const unmatchedCount = unmatchedGroups.length + unmatchedLines.length + unmatchedAgents.length;
+  const fullyPosted = isPersistedStatementFullyPosted({
+    readiness,
+    statement: persistedStatement,
+    unmatchedCount,
+  });
+  const bannerKind = statementPostBannerKind({
+    error,
+    readiness,
+    statement: persistedStatement,
+    unmatchedCount,
+  });
+  const postedCount = fullyPosted
+    ? (persistedStatement.postedRowCount ?? readiness?.postedCount ?? review?.postedCount ?? 0)
+    : (readiness?.postedCount ?? review?.postedCount ?? 0);
   const ignoredCount = review?.rows.filter((row) => row.status === "ignored").length ?? 0;
-  const postedGrossCents = review?.rows
+  const postedGrossCents = review?.postedGrossCents ?? review?.rows
     .filter((row) => row.status === "posted")
     .reduce((sum, row) => sum + (row.grossCommissionCents ?? 0), 0) ?? 0;
   const mappingFieldsToShow = mappingFields.filter((field) => !(field === "carrier" && statement.carrierName));
   const showCarrierMapping = extractedConfirm ? false : !statement.carrierName;
   const recognizedLayout = preview.pdf?.layoutName;
-  const resolveActive = unmatchedGroups.length + unmatchedLines.length + unmatchedAgents.length > 0;
+  const resolveActive = unmatchedCount > 0;
   const workflowStep = fullyPosted || postedCount ? "post" : review && !resolveActive && readiness?.canContinue ? "review" : review ? "resolve" : "read";
   const paidMonthLabel = formatPaidMonthLong(statement.paidMonth);
+  const rowCount = review?.rows.length ?? preview.rowCount;
+  const postBlockedReason = postButtonBlockedReason(readiness);
 
   return (
     <div className="result">
@@ -300,9 +333,11 @@ export function StatementPosting({
         <li className={workflowStep === "review" || workflowStep === "post" ? "active" : review && readiness?.canContinue ? "done" : ""}>Post</li>
       </ol>
       <strong>
-        {extractedConfirm
-          ? `We found ${review?.rows.length ?? preview.rowCount} commission record${(review?.rows.length ?? preview.rowCount) === 1 ? "" : "s"}`
-          : "Confirm the extracted commission data, then post"}
+        {fullyPosted
+          ? `Posted ${postedCount} commission record${postedCount === 1 ? "" : "s"} into ${paidMonthLabel}`
+          : extractedConfirm
+            ? `We found ${rowCount} row${rowCount === 1 ? "" : "s"} to review. They are not posted yet.`
+            : "Confirm the extracted commission data, then post"}
       </strong>
       <p>
         These rows will post into <strong>{paidMonthLabel}</strong>
@@ -318,7 +353,27 @@ export function StatementPosting({
       )}
       {review && (
         <div className="blocker-summary" id="statement-blockers">
-          {fullyPosted ? (
+          {bannerKind === "error" ? (
+            <>
+              <strong>Statement was not posted</strong>
+              <p className="form-error">{error}</p>
+              {continueBlocked ? <p>{continueBlocked}</p> : null}
+              {readiness?.blockers.length ? (
+                <ol>
+                  {readiness.blockers.map((blocker) => (
+                    <li key={blocker.kind}>{blocker.message}</li>
+                  ))}
+                </ol>
+              ) : null}
+              <div className="form-actions">
+                {readiness?.blockers.map((blocker) => (
+                  <a key={blocker.kind} className="secondary" href={`#${blocker.targetId}`} style={{ display: "inline-block", textDecoration: "none" }}>
+                    {blocker.actionLabel}
+                  </a>
+                ))}
+              </div>
+            </>
+          ) : fullyPosted ? (
             <>
               <strong>Statement posted</strong>
               <p>
@@ -376,7 +431,7 @@ export function StatementPosting({
           <button type="button" className="secondary" disabled={busy} onClick={() => setShowMappingHelp(true)}>
             Help the app read this statement
           </button>
-          <button type="button" disabled={busy || !readiness?.canContinue} onClick={postReady}>
+          <button type="button" disabled={busy || !readiness?.canContinue} onClick={postReady} title={postBlockedReason ?? undefined}>
             {review ? `Post Statement · ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Post Statement"}
           </button>
         </div>
@@ -418,15 +473,19 @@ export function StatementPosting({
               </button>
             )}
             {!fullyPosted && (
-              <button type="button" disabled={busy || !readiness?.canContinue} onClick={postReady}>
+              <button type="button" disabled={busy || !readiness?.canContinue} onClick={postReady} title={postBlockedReason ?? undefined}>
                 {review ? `Post Statement · ${review.readyCount} ready row${review.readyCount === 1 ? "" : "s"}` : "Post Statement"}
               </button>
             )}
           </div>
         </>
       )}
-      {!fullyPosted && !readiness?.canContinue && continueBlocked && !readiness?.blockers.length && !reviewLoading && (
-        <p className="form-error">{continueBlocked}</p>
+      {!fullyPosted && !reviewLoading && (
+        <p className={postBlockedReason ? "form-error" : "muted-note"}>
+          {postBlockedReason
+            ? `Post Statement is blocked. ${postBlockedReason}`
+            : "Post Statement writes commission records. Saving a review section does not."}
+        </p>
       )}
       {error && <p className="form-error">{error}</p>}
       {layoutMessage && <p className="form-success">{layoutMessage}</p>}
@@ -563,9 +622,9 @@ export function StatementPosting({
       )}
       {review && (
         <>
-          {review.createdCount ? <p className="form-success">Saved {review.createdCount} confirmed record{review.createdCount === 1 ? "" : "s"}. No compensation was created.</p> : null}
+          {(review.createdCount || review.matchedCount || review.reusedCount) ? <p className="muted-note">{sectionConfirmSuccessMessage(review)}</p> : null}
           {review.conflicts?.map((conflict) => <p key={conflict} className="form-error">{conflict}</p>)}
-          {postedCount > 0 && !fullyPosted && <p className="form-success">Posted rows are now commission records in {paidMonthLabel}. Reopening this statement will not post them twice.</p>}
+          {fullyPosted ? null : postedCount > 0 && persistedStatement.postedRowCount ? <p className="muted-note">Some rows from this statement are already commission records in {paidMonthLabel}. Reopening this statement will not post them twice. This statement is not fully posted.</p> : null}
           <StatementGroupAssignment
             rows={review.rows}
             groups={groups}

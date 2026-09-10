@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { StatementBlockedError } from "./errors";
 import { isDatabaseTimeoutError, isDatabaseUnavailableError, toErrorResponse } from "./http";
 
 describe("database error responses", () => {
@@ -22,5 +23,18 @@ describe("database error responses", () => {
     const response = toErrorResponse(missing);
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ message: "The database is temporarily unavailable. Try again." });
+  });
+
+  it("marks a blocked statement post as unpublished", async () => {
+    const response = toErrorResponse(new StatementBlockedError(
+      "This statement was not posted. 1 Group needs review. No commission records were written.",
+      [{ kind: "groups", message: "1 Group needs review" }],
+    ));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      posted: false,
+      message: "This statement was not posted. 1 Group needs review. No commission records were written.",
+      blockers: [{ kind: "groups", message: "1 Group needs review" }],
+    });
   });
 });

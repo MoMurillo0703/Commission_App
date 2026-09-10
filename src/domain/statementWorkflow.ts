@@ -33,6 +33,8 @@ export function statementStatusLabel(status: string, sourceType?: string | null,
   if (status === "needs_profile" && sourceType === "pdf" && !hasReadableRows) {
     return "Scanned/image PDF cannot yet be read";
   }
+  if (status === "posted") return "Posted";
+  if (status === "partially_posted") return "Partially posted";
   if (sourceType === "pdf" && hasReadableRows) return "Text-based PDF successfully read";
   if (status === "needs_profile") return "Needs help reading";
   switch (status) {

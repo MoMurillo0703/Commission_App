@@ -17,8 +17,10 @@ import { collectUnmatchedImportGroups } from "@/domain/importGroups";
 import { collectUnmatchedImportAgents, collectUnmatchedImportLines } from "@/domain/namedImport";
 import { validateMappedRows } from "@/domain/importRows";
 import { collectMappingBlockers, statementReadiness } from "@/domain/statementReadiness";
+import { acceptedPostHttpBody, blockedPostMessage } from "@/domain/statementPostPersistence";
 import { canReviewRows } from "@/domain/statementWorkflow";
 import { NotFoundError, StatementBlockedError, ValidationError } from "@/lib/errors";
+import { failIfTestHook } from "./transactionTestHook";
 import { timedStage } from "@/lib/stageLog";
 
 async function references(db: AppDatabase, statementCarrierId?: number | null, paidMonth?: string) {
@@ -134,7 +136,7 @@ export async function postImportStatement(db: AppDatabase | undefined, statement
     const preview = await previewImportPosting(tx, statementId, mapping);
     if (preview.blockedCount > 0 || preview.unmatchedGroups.length > 0 || preview.unmatchedLines.length > 0 || preview.unmatchedAgents.length > 0 || preview.readiness.blockers.length > 0) {
       throw new StatementBlockedError(
-        `This statement was not posted because ${preview.blockedCount} row${preview.blockedCount === 1 ? " is" : "s are"} blocked. Resolve every blocker and review again.`,
+        blockedPostMessage(preview.readiness, preview.blockedCount),
         preview.readiness.blockers,
       );
     }
@@ -160,8 +162,12 @@ export async function postImportStatement(db: AppDatabase | undefined, statement
       });
       posted.push(created.id);
     }
+    if (posted.length === 0 && preview.postedCount === 0) {
+      throw new ValidationError("This statement was not posted. No rows were ready to post. No commission records were written.");
+    }
     const postedCount = preview.postedCount + posted.length;
     const statement = await markImportStatementPosted(tx, statementId, postedCount, postedCount > 0 ? "posted" : preview.statement.status);
+    failIfTestHook("import-post-after-mark");
     return { preview, posted, postedCount, statement };
   };
 
@@ -169,15 +175,24 @@ export async function postImportStatement(db: AppDatabase | undefined, statement
     ? await database.transaction(async (tx) => run(tx as unknown as AppDatabase))
     : await run(database);
   const after = await previewImportPosting(database, statementId, mapping);
+  const postedGrossCents = after.rows
+    .filter((row) => row.status === "posted")
+    .reduce((sum, row) => sum + (row.grossCommissionCents ?? 0), 0);
 
-  return {
+  const payload = {
     ...after,
+    posted: true as const,
     statement: result.statement,
     paidMonth: result.preview.paidMonth,
     postedCount: result.posted.length,
     alreadyPostedCount: result.preview.postedCount,
+    postedGrossCents,
     blockedCount: after.blockedCount,
     remainingReadyCount: 0,
     commissionIds: result.posted,
   };
+  if (!acceptedPostHttpBody(payload)) {
+    throw new ValidationError("This statement was not posted. No commission records were written.");
+  }
+  return payload;
 }
