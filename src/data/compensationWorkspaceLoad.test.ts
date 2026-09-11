@@ -30,6 +30,7 @@ describe("compensation workspace load", () => {
     expect(first.groups.map((row) => row.name)).toEqual(["H R LABOR CONTRACTING"]);
     expect(first.allocations.find((row) => row.id === allocation.id)?.entries.map((entry) => entry.compensationBps)).toEqual([7000, 3000]);
     expect(first.directory.some((row) => row.groupId === group.id)).toBe(true);
+    expect(first.compensationDirectory.some((row) => row.groupId === group.id && row.compensationLabel.includes("John"))).toBe(true);
     expect(first.linesOfBusiness.map((row) => row.name)).toEqual(["Group Medical"]);
     expect(second.allocations).toEqual(first.allocations);
     expect(second.directory).toEqual(first.directory);

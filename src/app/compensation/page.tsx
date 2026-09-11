@@ -37,7 +37,7 @@ export default async function CompensationPage({
         <div>
           <p className="eyebrow">Compensation allocations</p>
           <h1>Compensation</h1>
-          <p>Browse compensation by Group. Open a Group to see every Line of Coverage together. Posted payout snapshots stay unchanged.</p>
+          <p>Filter Groups and lines, select matching targets, apply a people split or template, preview, and commit once. Current unpaid earnings use those effective-dated terms.</p>
         </div>
       </header>
       <CompensationWorkspace
@@ -58,6 +58,8 @@ export default async function CompensationPage({
         agencyOwner={loaded.agencyOwner}
         namedPeople={loaded.namedPeople}
         directory={loaded.directory}
+        compensationDirectory={loaded.compensationDirectory}
+        carriers={loaded.carriers}
       />
     </AppShell>
   );

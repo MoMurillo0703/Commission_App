@@ -8,6 +8,9 @@ import {
   type TeamShare,
 } from "./allocations";
 import { paidMonthInRange } from "./dates";
+import { coveringAllocationsForCanonicalPair, type CanonicalLine } from "./canonicalLob";
+import { allocationHasOwnerPersonAndAgency } from "./personCompensationModel";
+import { AGENCY_OWNER_DISPLAY_NAME, type PersonIdentity } from "./agencyOwner";
 import { recipientCompensationMethod } from "./reportPresentation";
 import { individualRecipientTypeLabel } from "./reportWorkspace";
 import type { IndividualReportRow, TeamReportRow } from "./reports";
@@ -17,7 +20,9 @@ export const EARNINGS_REVIEW_REQUIRED = "REVIEW REQUIRED";
 export type EarningsReviewReason =
   | "allocation does not total 100%"
   | "Team has invalid effective membership"
-  | "conflicting effective allocation periods";
+  | "conflicting effective allocation periods"
+  | "Agency owner is not configured"
+  | "Mo is named twice as person and Agency";
 
 export type EarningsCommission = {
   id: number;
@@ -137,12 +142,15 @@ export function currentEarningsReadiness(input: {
 export function resolveEarningsAllocation(
   allocations: AllocationCandidate[],
   query: { groupId: number; lineOfBusinessId: number; paidMonth: string },
+  lines?: CanonicalLine[],
 ): {
   allocation: AllocationCandidate | null;
   defaultAgency: boolean;
   reviewReason: EarningsReviewReason | null;
 } {
-  const covering = coveringAllocationsForPaidMonth(allocations, query);
+  const covering = lines
+    ? coveringAllocationsForCanonicalPair(allocations, query, lines, paidMonthInRange)
+    : coveringAllocationsForPaidMonth(allocations, query);
   if (covering.length === 0) {
     return { allocation: null, defaultAgency: true, reviewReason: null };
   }
@@ -176,6 +184,8 @@ export function settleCurrentCommissionEarnings(input: {
   allocations: AllocationCandidate[];
   teams: EarningsTeam[];
   names: { agencyName?: string; personName: (kind: PersonKind, id: number) => string };
+  agencyOwner?: PersonIdentity | null;
+  lines?: CanonicalLine[];
 }): {
   settled: SettledAllocation | null;
   allocationId: number | null;
@@ -186,16 +196,35 @@ export function settleCurrentCommissionEarnings(input: {
     groupId: input.commission.groupId,
     lineOfBusinessId: input.commission.lineOfBusinessId,
     paidMonth: input.commission.paidMonth,
-  });
+  }, input.lines);
   if (resolved.reviewReason) {
     return { settled: null, allocationId: resolved.allocation?.id ?? null, defaultAgency: false, reviewReason: resolved.reviewReason };
   }
   if (resolved.defaultAgency || !resolved.allocation) {
+    if (input.agencyOwner === null) {
+      return {
+        settled: null,
+        allocationId: null,
+        defaultAgency: false,
+        reviewReason: "Agency owner is not configured",
+      };
+    }
     return {
-      settled: implicitAgencyAllocation(input.commission.grossCommissionCents, input.names.agencyName ?? "Murillo Insurance"),
+      settled: implicitAgencyAllocation(
+        input.commission.grossCommissionCents,
+        input.agencyOwner ? AGENCY_OWNER_DISPLAY_NAME : (input.names.agencyName ?? "Murillo Insurance"),
+      ),
       allocationId: null,
       defaultAgency: true,
       reviewReason: null,
+    };
+  }
+  if (allocationHasOwnerPersonAndAgency(resolved.allocation.entries, input.agencyOwner ?? null)) {
+    return {
+      settled: null,
+      allocationId: resolved.allocation.id,
+      defaultAgency: false,
+      reviewReason: "Mo is named twice as person and Agency",
     };
   }
   try {
@@ -216,6 +245,24 @@ export function settleCurrentCommissionEarnings(input: {
   }
 }
 
+export function individualPeoplePayouts(
+  payouts: SettledAllocation["payouts"],
+  owner?: PersonIdentity | null,
+) {
+  const people = payouts.filter((payout) => payout.recipientType === "person" || payout.recipientType === "team_member");
+  if (!owner) return people;
+  return [
+    ...people,
+    ...payouts.filter((payout) => payout.recipientType === "agency").map((payout) => ({
+      ...payout,
+      recipientType: "person" as const,
+      personKind: owner.personKind,
+      personId: owner.personId,
+      personName: AGENCY_OWNER_DISPLAY_NAME,
+    })),
+  ];
+}
+
 export function evaluateIndividualEarnings(input: {
   commissions: EarningsCommission[];
   allocations: AllocationCandidate[];
@@ -224,6 +271,8 @@ export function evaluateIndividualEarnings(input: {
   personKind?: PersonKind | null;
   personId?: number | null;
   teamId?: number | null;
+  agencyOwner?: PersonIdentity | null;
+  lines?: CanonicalLine[];
 }): { rows: IndividualReportRow[]; outcomes: CommissionEarningsOutcome[] } {
   const rows: IndividualReportRow[] = [];
   const outcomes: CommissionEarningsOutcome[] = [];
@@ -233,6 +282,8 @@ export function evaluateIndividualEarnings(input: {
       allocations: input.allocations,
       teams: input.teams,
       names: input.names,
+      agencyOwner: input.agencyOwner,
+      lines: input.lines,
     });
     const outcomeBase = {
       commissionId: commission.id,
@@ -247,6 +298,14 @@ export function evaluateIndividualEarnings(input: {
       allocationId: result.allocationId,
     };
     if (result.reviewReason) {
+      if (
+        result.reviewReason === "Agency owner is not configured"
+        && input.personKind
+        && input.personId
+      ) {
+        outcomes.push({ ...outcomeBase, kind: "agency_default", defaultAgency: true, reviewReason: null });
+        continue;
+      }
       outcomes.push({ ...outcomeBase, kind: "review_required" });
       rows.push({
         paidMonth: commission.paidMonth,
@@ -281,7 +340,7 @@ export function evaluateIndividualEarnings(input: {
       ...outcomeBase,
       kind: result.defaultAgency ? "agency_default" : "calculated",
     });
-    const leaves = (result.settled?.payouts ?? []).filter((payout) => payout.recipientType === "person" || payout.recipientType === "team_member");
+    const leaves = individualPeoplePayouts(result.settled?.payouts ?? [], input.agencyOwner);
     for (const payout of leaves) {
       const method = recipientCompensationMethod(payout.recipientType);
       if (!method) continue;

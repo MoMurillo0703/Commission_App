@@ -395,4 +395,146 @@ describe("current earnings projection", () => {
     expect(historicalAllocationsForGroup(allocations, 10, "2026-09").map((row) => row.id)).not.toContain(2);
     expect(currentAllocationsForGroup(allocations, 10, "2026-11").map((row) => row.id)).toEqual([2]);
   });
+
+  it("defaults missing allocation to Mo 100% when the effective owner is present", () => {
+    const owner = { personKind: "agent" as const, personId: mo.id };
+    const rows = projectIndividualEarnings({
+      commissions: [josesRows[4]!],
+      allocations: [],
+      teams: [],
+      names,
+      agencyOwner: owner,
+      personKind: "agent",
+      personId: mo.id,
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      recipientName: "Mo",
+      compensationCents: 62076,
+      allocationBps: 10000,
+    });
+    expect(rows.some((row) => row.recipientName === "Agency")).toBe(false);
+    expect(projectIndividualEarnings({
+      commissions: [josesRows[4]!],
+      allocations: [],
+      teams: [],
+      names,
+      agencyOwner: owner,
+      personKind: "agent",
+      personId: john.id,
+    })).toHaveLength(0);
+  });
+
+  it("does not block a person-filtered report when Agency owner coverage is missing", () => {
+    const evaluated = evaluateIndividualEarnings({
+      commissions: [josesRows[4]!],
+      allocations: [],
+      teams: [],
+      names,
+      agencyOwner: null,
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(evaluated.rows).toHaveLength(0);
+    expect(evaluated.outcomes[0]?.kind).toBe("agency_default");
+    expect(currentEarningsReadiness({
+      matchingCommissionCount: 1,
+      outcomes: evaluated.outcomes,
+      recipientRowCount: 0,
+    }).payableReady).toBe(true);
+  });
+
+  it("requires review when Agency owner coverage is missing or Mo is named twice", () => {
+    expect(settleCurrentCommissionEarnings({
+      commission: josesRows[4]!,
+      allocations: [],
+      teams: [],
+      names,
+      agencyOwner: null,
+    }).reviewReason).toBe("Agency owner is not configured");
+    expect(settleCurrentCommissionEarnings({
+      commission: josesRows[4]!,
+      allocations: [{
+        id: 91,
+        groupId: 1,
+        lineOfBusinessId: 12,
+        effectiveStart: "2026-08",
+        effectiveEnd: null,
+        status: "active",
+        entries: [
+          { recipientType: "agency", compensationBps: 5000 },
+          { recipientType: "person", personKind: "agent", personId: mo.id, compensationBps: 5000 },
+        ],
+      }],
+      teams: [],
+      names,
+      agencyOwner: { personKind: "agent", personId: mo.id },
+    }).reviewReason).toBe("Mo is named twice as person and Agency");
+  });
+
+  it("requires review when multiple raw allocations collapse to the same canonical LOB", () => {
+    const lines = [
+      { id: 12, name: "Group Medical" },
+      { id: 14, name: "MED" },
+      { id: 15, name: "MEDHMO" },
+    ];
+    const resolved = resolveEarningsAllocation([
+      {
+        id: 1,
+        groupId: 1,
+        lineOfBusinessId: 14,
+        effectiveStart: "2026-08",
+        effectiveEnd: null,
+        status: "active",
+        entries: [{ recipientType: "agency", compensationBps: 10000 }],
+      },
+      {
+        id: 2,
+        groupId: 1,
+        lineOfBusinessId: 15,
+        effectiveStart: "2026-08",
+        effectiveEnd: null,
+        status: "active",
+        entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }],
+      },
+    ], { groupId: 1, lineOfBusinessId: 12, paidMonth: "2026-08" }, lines);
+    expect(resolved.reviewReason).toBe("conflicting effective allocation periods");
+  });
+
+  it("settles people-expanded 70/20/5/5 Joses terms to John's $370.56", () => {
+    const peopleEntries = [
+      { recipientType: "person" as const, personKind: "agent" as const, personId: john.id, compensationBps: 7000 },
+      { recipientType: "agency" as const, compensationBps: 2000 },
+      { recipientType: "person" as const, personKind: "account_manager" as const, personId: laura.id, compensationBps: 500 },
+      { recipientType: "person" as const, personKind: "account_manager" as const, personId: nancy.id, compensationBps: 500 },
+    ];
+    const allocations = [
+      { id: 81, groupId: 1, lineOfBusinessId: 11, effectiveStart: "2026-08", effectiveEnd: null, status: "active" as const, entries: peopleEntries },
+      { id: 82, groupId: 1, lineOfBusinessId: 12, effectiveStart: "2026-08", effectiveEnd: null, status: "active" as const, entries: peopleEntries },
+      { id: 83, groupId: 1, lineOfBusinessId: 13, effectiveStart: "2026-08", effectiveEnd: null, status: "active" as const, entries: peopleEntries },
+    ];
+    const rows = projectIndividualEarnings({
+      commissions: josesRows,
+      allocations,
+      teams: [calChoiceTeam],
+      names,
+      personKind: "agent",
+      personId: john.id,
+      agencyOwner: { personKind: "agent", personId: mo.id },
+    });
+    expect(rows.reduce((sum, row) => sum + row.compensationCents, 0)).toBe(37056);
+    const laterTeam = {
+      ...calChoiceTeam,
+      members: calChoiceTeam.members.map((member) => ({ ...member, shareBps: member.personId === john.id ? 10000 : 0 })).filter((member) => member.shareBps > 0),
+    };
+    expect(projectIndividualEarnings({
+      commissions: josesRows,
+      allocations,
+      teams: [laterTeam],
+      names,
+      personKind: "agent",
+      personId: john.id,
+      agencyOwner: { personKind: "agent", personId: mo.id },
+    }).reduce((sum, row) => sum + row.compensationCents, 0)).toBe(37056);
+  });
 });

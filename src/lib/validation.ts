@@ -233,6 +233,29 @@ export const compensationCorrectionConfirmSchema = z.object({
   previewToken: z.string().trim().min(16, "Confirm the exact preview. Preview again if it expired."),
 });
 
+export const bulkCompensationPersonSchema = z.object({
+  personKind: z.enum(["agent", "account_manager"]),
+  personId: z.coerce.number().int().positive(),
+  compensationPercent: z.string().min(1, "Compensation split is required."),
+});
+
+export const bulkCompensationTargetSchema = z.object({
+  groupId: z.coerce.number().int().positive(),
+  lineOfBusinessId: z.coerce.number().int().positive(),
+});
+
+export const bulkCompensationPreviewSchema = z.object({
+  effectiveStart: z.string().regex(paidMonthPattern, "Enter an effective start month as YYYY-MM."),
+  mode: z.enum(["template", "custom"]),
+  teamId: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
+  people: z.array(bulkCompensationPersonSchema).optional(),
+  targets: z.array(bulkCompensationTargetSchema).min(1, "Select at least one Group and Line of Coverage."),
+});
+
+export const bulkCompensationCommitSchema = bulkCompensationPreviewSchema.extend({
+  previewToken: z.string().trim().min(16, "Preview the change before committing."),
+});
+
 export function emptyToNull(value: string | null | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;

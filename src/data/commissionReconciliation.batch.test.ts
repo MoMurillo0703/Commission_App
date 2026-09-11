@@ -27,7 +27,7 @@ import { agencyReportDocument, printableReportHtml } from "@/domain/reportDocume
 const SEPTEMBER_GROSS = 649973;
 const JOHN_SOURCE_GROSS = 214693;
 const JOHN_CANONICAL_PAYABLE = 42040;
-const JOHN_CURRENT_EARNINGS = 45612;
+const JOHN_CURRENT_EARNINGS = 73415;
 const HR_GROSS = 46220;
 
 function distribute(count: number, total: number) {

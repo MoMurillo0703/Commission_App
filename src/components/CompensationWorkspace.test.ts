@@ -72,6 +72,7 @@ describe("rendered Compensation workspace", () => {
       ],
     }));
 
+    expect(html).toContain("Compensation directory");
     expect(html).toContain("1 group needs compensation attention");
     expect(html).toContain("1 group has Lines of Coverage that still need compensation");
     expect(html).toContain("Review groups needing allocation");

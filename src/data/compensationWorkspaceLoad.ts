@@ -3,16 +3,18 @@ import { listAccountManagers } from "./accountManagers";
 import { getAgencyOwnerForPaidMonth } from "./agencyOwner";
 import { listAgents } from "./agents";
 import { listAllocations } from "./allocations";
-import { buildCompensationDirectory, namedBusinessPeople } from "./businessCompensation";
-import { countUnassignedCommissions, listCommissions, listPostedGroupLobMonths } from "./commissions";
-import { listCorrectedCommissionIds } from "./compensationCorrections";
+import { namedBusinessPeople } from "./businessCompensation";
+import { classifyCompensationGroups } from "@/domain/businessCompensation";
+import { missingLinesForGroup } from "@/domain/compensationHome";
+import { countUnassignedCommissions, listPostedGroupLobMonths } from "./commissions";
 import { listPostedCompensationExceptions } from "./compensationExceptions";
 import { listGroupCompensationQueue } from "./compensationQueue";
+import { listCarriers } from "./carriers";
 import { listGroups } from "./groups";
 import { listGroupLineEvidence } from "./groupLineEvidence";
 import { listLinesOfBusiness } from "./linesOfBusiness";
-import { listAllPayouts } from "./payouts";
 import { listTeams } from "./teams";
+import { listPostedGroupLineCarriers, projectCompensationDirectory } from "./compensationDirectory";
 
 export async function loadCompensationWorkspaceData(
   db: AppDatabase,
@@ -21,7 +23,7 @@ export async function loadCompensationWorkspaceData(
     review?: { paidMonth: string; commissionIds?: number[] } | null;
   },
 ) {
-  // Sequential on purpose: a 14-way Promise.all against the transaction pooler
+  // Sequential on purpose: a wide Promise.all against the transaction pooler
   // (postgres.js max 10) never drains and holds connections after abort.
   const agents = await listAgents(db);
   const accountManagers = await listAccountManagers(db);
@@ -30,23 +32,42 @@ export async function loadCompensationWorkspaceData(
   const allocations = await listAllocations(db);
   const teams = await listTeams(db);
   const evidence = await listGroupLineEvidence(db);
-  const commissions = await listCommissions(db);
-  const payouts = await listAllPayouts(db);
-  const corrected = await listCorrectedCommissionIds(db);
-  const posted = await listPostedGroupLobMonths(db);
+  const postedCarriers = await listPostedGroupLineCarriers(db);
+  const carriers = await listCarriers(db);
   const agencyOwner = await getAgencyOwnerForPaidMonth(db, input.ownerMonth);
   const reviewCount = await countUnassignedCommissions(db);
   const reviewCommissions = input.review
     ? await listPostedCompensationExceptions(db, input.review)
     : [];
-  const directory = await buildCompensationDirectory(db, {
+  const posted = await listPostedGroupLobMonths(db);
+  const compensationDirectory = projectCompensationDirectory({
     groups,
     allocations,
     evidence,
     lines: linesOfBusiness,
-    commissions,
-    payouts,
-    corrected,
+    agents,
+    accountManagers,
+    postedCarriers,
+    asOfMonth: input.ownerMonth,
+    owner: agencyOwner,
+  });
+  const missingLineCounts = Object.fromEntries(groups.map((group) => [
+    group.id,
+    missingLinesForGroup(group.id, evidence, linesOfBusiness, allocations).length,
+  ]));
+  const directory = classifyCompensationGroups({
+    groups,
+    summaries: groups.map((group) => {
+      const active = allocations.filter((row) => row.groupId === group.id && row.status === "active");
+      return {
+        groupId: group.id,
+        groupName: group.name,
+        activeAllocationCount: active.length,
+        currentLineNames: [...new Set(active.map((row) => row.lineOfBusinessName))],
+      };
+    }),
+    missingLineCounts,
+    exceptionGroupIds: [],
   });
   const initialQueue = await listGroupCompensationQueue(db, {
     groups,
@@ -62,10 +83,12 @@ export async function loadCompensationWorkspaceData(
     allocations,
     teams,
     evidence,
+    carriers,
     agencyOwner,
     reviewCount,
     reviewCommissions,
     directory,
+    compensationDirectory,
     initialQueue,
     namedPeople: namedBusinessPeople(agents, accountManagers, agencyOwner),
   };

@@ -29,6 +29,7 @@ export function parsePersonKey(value: string): PersonIdentity | null {
 }
 
 export const AGENCY_OWNER_LABEL = "Mo / Agency";
+export const AGENCY_OWNER_DISPLAY_NAME = "Mo";
 
 export type AgencyCompensationOwnerPeriod = {
   id?: number;

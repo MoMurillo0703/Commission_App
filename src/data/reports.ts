@@ -1,4 +1,4 @@
-import { and, eq, gte, lte } from "drizzle-orm";
+import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import { reportAvailabilityFromMonths } from "@/domain/reportDiscovery";
 import {
   monthInReportRange,
@@ -25,7 +25,9 @@ import { getAccountManager, listAccountManagers } from "./accountManagers";
 import { getAgent, listAgents } from "./agents";
 import { getCarrier } from "./carriers";
 import { getGroup } from "./groups";
-import { getLineOfBusiness } from "./linesOfBusiness";
+import { getLineOfBusiness, listLinesOfBusiness } from "./linesOfBusiness";
+import { getAgencyOwnerForPaidMonth } from "./agencyOwner";
+import { canonicalLineIdsMatching } from "@/domain/canonicalLob";
 import { getTeam } from "./teams";
 
 export type ReportNameLookup = {
@@ -38,13 +40,14 @@ export type ReportNameLookup = {
   primaryAgentName?: string | null;
 };
 
-async function postedCommissions(db: AppDatabase, filters: ReportFilters) {
+async function postedCommissions(db: AppDatabase, filters: ReportFilters, lineIds?: number[] | null) {
   const clauses = [];
   if (filters.startMonth) clauses.push(gte(commissionRecords.statementMonth, filters.startMonth));
   if (filters.endMonth) clauses.push(lte(commissionRecords.statementMonth, filters.endMonth));
   if (filters.groupId) clauses.push(eq(commissionRecords.groupId, filters.groupId));
   if (filters.carrierId) clauses.push(eq(commissionRecords.carrierId, filters.carrierId));
-  if (filters.lineOfBusinessId) clauses.push(eq(commissionRecords.lineOfBusinessId, filters.lineOfBusinessId));
+  if (lineIds && lineIds.length > 0) clauses.push(inArray(commissionRecords.lineOfBusinessId, lineIds));
+  else if (filters.lineOfBusinessId) clauses.push(eq(commissionRecords.lineOfBusinessId, filters.lineOfBusinessId));
   const rows = await db
     .select({
       id: commissionRecords.id,
@@ -171,12 +174,16 @@ function earningsTeams(teams: TeamView[]) {
 export async function buildIndividualReport(db: AppDatabase | undefined, input: ReportFilters) {
   const database = await resolveDb(db);
   const filters = normalizeReportFilters({ ...input, kind: input.kind === "recipient" ? "recipient" : "individual" });
-  const commissions = await postedCommissions(database, filters);
-  const [agents, managers, allocations, teams] = await Promise.all([
+  const lines = await listLinesOfBusiness(database);
+  const lineIds = canonicalLineIdsMatching(filters.lineOfBusinessId, lines);
+  const commissions = await postedCommissions(database, filters, lineIds);
+  const paidMonth = filters.paidMonth ?? commissions[0]?.paidMonth ?? "";
+  const [agents, managers, allocations, teams, agencyOwner] = await Promise.all([
     listAgents(database),
     listAccountManagers(database),
     listAllocations(database),
     listTeams(database),
+    paidMonth ? getAgencyOwnerForPaidMonth(database, paidMonth) : Promise.resolve(null),
   ]);
   const evaluation = evaluateIndividualEarnings({
     commissions,
@@ -186,6 +193,8 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
     personKind: filters.personKind,
     personId: filters.personId,
     teamId: filters.teamId,
+    agencyOwner: paidMonth ? agencyOwner : undefined,
+    lines,
   });
   const rows = evaluation.rows;
   const readiness = currentEarningsReadiness({
@@ -193,7 +202,6 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
     outcomes: evaluation.outcomes,
     recipientRowCount: rows.filter((row) => !row.reviewRequired).length,
   });
-  const paidMonth = filters.paidMonth ?? evaluation.outcomes[0]?.paidMonth ?? "";
   const names = await reportNameLookup(database, filters);
   return {
     filters,
@@ -223,7 +231,8 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
 export async function buildTeamReport(db: AppDatabase | undefined, input: ReportFilters) {
   const database = await resolveDb(db);
   const filters = normalizeReportFilters({ ...input, kind: "team" });
-  const commissions = await postedCommissions(database, filters);
+  const lines = await listLinesOfBusiness(database);
+  const commissions = await postedCommissions(database, filters, canonicalLineIdsMatching(filters.lineOfBusinessId, lines));
   const [agents, managers, allocations, teams] = await Promise.all([
     listAgents(database),
     listAccountManagers(database),

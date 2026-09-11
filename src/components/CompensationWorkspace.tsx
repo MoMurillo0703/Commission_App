@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { AllocationRecipientEditor } from "@/components/AllocationRecipientEditor";
+import { CompensationDirectoryPanel } from "@/components/CompensationDirectoryPanel";
+import type { CompensationDirectoryRow } from "@/domain/compensationDirectory";
 import { CompensationCorrectionDialog } from "@/components/CompensationCorrectionDialog";
 import { CompensationReconciliation } from "@/components/CompensationReconciliation";
 import { GroupCoverageTable } from "@/components/GroupCoverageTable";
@@ -22,7 +24,7 @@ import {
   type PostedCompensationException,
 } from "@/domain/compensationExceptions";
 import type { TeamView } from "@/data/teams";
-import type { AccountManager, Agent, Group, LineOfBusiness } from "@/db/schema";
+import type { AccountManager, Agent, Carrier, Group, LineOfBusiness } from "@/db/schema";
 import {
   allocationEntryPayload,
   cancelAllocationDraft,
@@ -79,6 +81,8 @@ export function CompensationWorkspace({
   agencyOwner = null,
   namedPeople = [],
   directory = [],
+  compensationDirectory = [],
+  carriers = [],
 }: {
   groups: Group[];
   agents: Agent[];
@@ -97,6 +101,8 @@ export function CompensationWorkspace({
   agencyOwner?: PersonIdentity | null;
   namedPeople?: NamedBusinessPerson[];
   directory?: CompensationGroupClass[];
+  compensationDirectory?: CompensationDirectoryRow[];
+  carriers?: Carrier[];
 }) {
   const focusedAllocation = focusAllocationId
     ? initialAllocations.find((allocation) => allocation.id === focusAllocationId) ?? null
@@ -615,6 +621,19 @@ export function CompensationWorkspace({
             </article>
           ))}
         </section>
+      )}
+
+      {!reviewActive && (
+        <CompensationDirectoryPanel
+          initialRows={compensationDirectory}
+          initialAsOfMonth={reviewContext?.paidMonth || currentPaidMonth()}
+          agents={agents}
+          accountManagers={accountManagers}
+          linesOfBusiness={linesOfBusiness}
+          carriers={carriers}
+          teams={teams}
+          owner={agencyOwner ?? null}
+        />
       )}
 
       {correctionOpen && correctionIds.length > 0 && (

@@ -440,6 +440,75 @@ export async function createAllocationsForLines(
   };
 }
 
+export type CrossGroupAllocationWrite = {
+  effectiveStart: string;
+  effectiveEnd?: string | null;
+  status?: AllocationStatus;
+  targets: Array<{ groupId: number; lineOfBusinessId: number; entries: AllocationEntryInput[] }>;
+};
+
+export async function applyAllocationWrites(
+  tx: AppDatabase,
+  items: Array<{
+    write: AllocationWrite;
+    period: { effectiveStart: string; effectiveEnd: string | null };
+    status: AllocationStatus;
+  }>,
+) {
+  const ids: number[] = [];
+  for (const item of items) {
+    const siblings = await listAllocationsForPair(tx, item.write.groupId, item.write.lineOfBusinessId);
+    const classified = classifyRequestedAllocation(siblings, allocationTermsFromWrite(item.write, item.period, item.status));
+    if (classified.status === "conflict") {
+      throw new ValidationError(allocationConflictReviewMessage());
+    }
+    if (classified.status === "exact") continue;
+    ids.push(await writeAllocationRecord(tx, item.write, item.period, item.status, siblings));
+  }
+  return ids;
+}
+
+export async function createAllocationsForTargets(
+  db: AppDatabase | undefined,
+  input: CrossGroupAllocationWrite,
+): Promise<BulkAllocationResult> {
+  const database = await resolveDb(db);
+  if (input.targets.length === 0) throw new ValidationError("Select at least one Group and Line of Coverage.");
+  const keys = input.targets.map((target) => `${target.groupId}:${target.lineOfBusinessId}`);
+  if (new Set(keys).size !== keys.length) {
+    throw new ValidationError("Each Group and Line of Coverage can be selected only once.");
+  }
+  const period = normalizePeriod(input.effectiveStart, input.effectiveEnd);
+  const status = input.status ?? "active";
+  const writes: AllocationWrite[] = [];
+  for (const target of input.targets) {
+    const write = {
+      groupId: target.groupId,
+      lineOfBusinessId: target.lineOfBusinessId,
+      effectiveStart: period.effectiveStart,
+      effectiveEnd: period.effectiveEnd,
+      status,
+      entries: target.entries,
+    };
+    await prepareAllocationWrite(database, write);
+    writes.push(write);
+  }
+  const createdIds = await database.transaction(async (tx) => {
+    const transaction = tx as unknown as AppDatabase;
+    await lockAllocationNamespaces(transaction, writes.map((write) => ({
+      groupId: write.groupId,
+      lineOfBusinessId: write.lineOfBusinessId,
+    })));
+    return applyAllocationWrites(transaction, writes.map((write) => ({ write, period, status })));
+  });
+  const created = await Promise.all(createdIds.map((id) => getAllocation(database, id)));
+  return {
+    allocations: created.filter((row): row is AllocationView => Boolean(row)),
+    createdCount: createdIds.length,
+    reusedCount: input.targets.length - createdIds.length,
+  };
+}
+
 export async function updateAllocation(
   db: AppDatabase | undefined,
   id: number,

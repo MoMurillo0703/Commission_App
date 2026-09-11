@@ -1,0 +1,135 @@
+import { describe, expect, it } from "vitest";
+import { buildCompensationDirectoryRows, emptyCompensationDirectoryFilters, filterCompensationDirectory, selectAllDirectoryKeys } from "./compensationDirectory";
+
+const owner = { personKind: "agent" as const, personId: 2 };
+const lines = [
+  { id: 1, name: "Group Medical" },
+  { id: 2, name: "MED" },
+  { id: 12, name: "Group Dental" },
+];
+
+describe("compensation directory", () => {
+  it("projects durable Group + canonical LOB targets and Select All uses the full filtered set", () => {
+    const rows = buildCompensationDirectoryRows({
+      asOfMonth: "2026-08",
+      owner,
+      lines,
+      personName: () => "John",
+      sources: [
+        {
+          groupId: 1,
+          groupName: "Alpha",
+          groupNumber: "A1",
+          primaryAgentId: 1,
+          primaryAgentName: "John",
+          accountManagerId: 3,
+          accountManagerName: "Laura",
+          carrierIds: [8],
+          carrierNames: ["CaliforniaChoice"],
+          lineOfBusinessId: 1,
+          lineOfBusinessName: "Group Medical",
+          allocations: [],
+        },
+        {
+          groupId: 1,
+          groupName: "Alpha",
+          groupNumber: "A1",
+          primaryAgentId: 1,
+          primaryAgentName: "John",
+          accountManagerId: 3,
+          accountManagerName: "Laura",
+          carrierIds: [8],
+          carrierNames: ["CaliforniaChoice"],
+          lineOfBusinessId: 2,
+          lineOfBusinessName: "MED",
+          allocations: [],
+        },
+        {
+          groupId: 2,
+          groupName: "Beta",
+          groupNumber: "B2",
+          primaryAgentId: 9,
+          primaryAgentName: "Other",
+          accountManagerId: 4,
+          accountManagerName: "Nancy",
+          carrierIds: [9],
+          carrierNames: ["ChoiceBuilder"],
+          lineOfBusinessId: 12,
+          lineOfBusinessName: "Group Dental",
+          allocations: [{
+            id: 40,
+            status: "active",
+            effectiveStart: "2026-08",
+            effectiveEnd: null,
+            entries: [{ recipientType: "agency", compensationBps: 10000 }],
+          }],
+        },
+      ],
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.compensationLabel).toBe("Mo 100% — Default");
+    expect(rows[0]?.recipientKeys).toEqual(["agent:2"]);
+    const filtered = filterCompensationDirectory(rows, {
+      ...emptyCompensationDirectoryFilters("2026-08"),
+      carrierId: 8,
+      lineOfBusinessId: 2,
+      primaryAgentId: 1,
+    }, lines);
+    expect(filtered).toHaveLength(1);
+    expect(selectAllDirectoryKeys(filtered)).toEqual([filtered[0]!.key]);
+    expect(selectAllDirectoryKeys(filtered)[0]).toBe("1:medical");
+  });
+
+  it("marks conflicting canonical collapse as Review Required", () => {
+    const rows = buildCompensationDirectoryRows({
+      asOfMonth: "2026-08",
+      owner,
+      lines,
+      personName: () => "John",
+      sources: [
+        {
+          groupId: 1,
+          groupName: "Alpha",
+          groupNumber: null,
+          primaryAgentId: null,
+          primaryAgentName: null,
+          accountManagerId: null,
+          accountManagerName: null,
+          carrierIds: [1],
+          carrierNames: ["Anthem"],
+          lineOfBusinessId: 1,
+          lineOfBusinessName: "Group Medical",
+          allocations: [{
+            id: 1,
+            status: "active",
+            effectiveStart: "2026-08",
+            effectiveEnd: null,
+            entries: [{ recipientType: "person", personKind: "agent", personId: 1, compensationBps: 10000 }],
+          }],
+        },
+        {
+          groupId: 1,
+          groupName: "Alpha",
+          groupNumber: null,
+          primaryAgentId: null,
+          primaryAgentName: null,
+          accountManagerId: null,
+          accountManagerName: null,
+          carrierIds: [1],
+          carrierNames: ["Anthem"],
+          lineOfBusinessId: 2,
+          lineOfBusinessName: "MED",
+          allocations: [{
+            id: 2,
+            status: "active",
+            effectiveStart: "2026-08",
+            effectiveEnd: null,
+            entries: [{ recipientType: "agency", compensationBps: 10000 }],
+          }],
+        },
+      ],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.compensationKind).toBe("review_required");
+  });
+});
