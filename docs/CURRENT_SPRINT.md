@@ -4,7 +4,7 @@ Authoritative owner: **Alex**.
 
 ## Phase
 
-Commission App 1.0 Sprint 1 — **DEPLOYED — AWAITING LIVE PRODUCT QA**. Production is `0defc6aa4c88fb98d7e36affd40661dd759d4463` with migrations **0001–0011** (deployed 2026-09-09; no new migration). Mo is configured as Agency owner (`agents.id = 2`) effective **2026-09 → Present**. Live product QA is pending Tom’s Change Paid Month correction test. This is not Done. Do not mark Product Accepted or Done until that workflow completes. Do not execute H&R/Anthem/linkage repairs or correct the 12 Historical Agency Fallback or 49 Legacy No-Payout September commissions as a deploy test.
+Commission App 1.0 Sprint 1 — **DEPLOYED — AWAITING LIVE PRODUCT QA**. Production is `eaaa7eddf74bbd2c36b2d890d0853dfbd784e0b9` with migrations **0001–0011** (deployed 2026-09-11; no new migration). Mo is configured as Agency owner (`agents.id = 2`) effective **2026-09 → Present**. Live product QA is pending Mo/Tom review of statement post truthfulness and the Groups + People workspace. This is not Done. Do not mark Product Accepted or Done until that workflow completes. Do not post Statement 7, execute H&R/Anthem/linkage repairs, or correct the 12 Historical Agency Fallback or 49 Legacy No-Payout September commissions as a deploy test.
 
 ## Authorized work
 

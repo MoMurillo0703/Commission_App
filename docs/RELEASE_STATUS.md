@@ -7,12 +7,12 @@ Authoritative owner: **Alex**. Update this file when a release is deployed or ac
 | Field | Value |
 | --- | --- |
 | URL | https://commissionapp-iota.vercel.app |
-| SHA | `0defc6aa4c88fb98d7e36affd40661dd759d4463` |
-| Deployed | 2026-09-09 |
+| SHA | `eaaa7eddf74bbd2c36b2d890d0853dfbd784e0b9` |
+| Deployed | 2026-09-11 |
 | Migrations | **0001–0011** (no new migration for this application deploy) |
 | Agency owner | Mo / `agents.id = 2`, effective **2026-09 → Present** |
 | Release state | **DEPLOYED — AWAITING LIVE PRODUCT QA** |
-| Product acceptance | Pending Tom’s live production QA of simplified Change Paid Month (Cal Choice Sep → Aug allowed without destination allocation; financial snapshots preserved). Do not execute H&R/Anthem/linkage repairs or historical compensation correction as a deploy test. |
+| Product acceptance | Pending Mo/Tom live QA of statement post truthfulness and the Groups + People management workspace. Do not post Statement 7 or rewrite production financial records as a deploy test. |
 
 This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 
@@ -23,8 +23,12 @@ This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 - Unmatched group review with searchable / suggested matching; create, match, or ignore; confirmed carrier Group identity learning; fingerprint and source-row duplicate protection
 - Private original-file storage
 - Groups, Carriers, LOBs, Agents, Account Managers
+- Groups directory + Group Detail (`/groups/[groupId]`): search, AND filters, alphabet navigation, assignment by stable IDs, compensation status, received commissions
+- People directory + Person Detail (`/people/agent/[id]`, `/people/account-manager/[id]`): typed identities are not merged by name; assignment is not compensation; Reports deep links including separate Mo / Agency
+- Statement Post success is tied to persisted commission rows; review/mapped/zero-row responses cannot show financial success; unresolved Group/LOB blocks posting
 - Exception-oriented Group Account Manager / Primary Agent assignment with Save All (assignment ≠ compensation; missing assignment does not block posting)
 - Compensation allocations (Agency / Person / Team), effective dating, payout snapshots, setup queue
+- Compensation queue evaluates the current as-of month first; historical posted-month coverage cannot hide a current gap; multiple or incomplete current coverings are Review Required
 - Missing Compensation is Group-first: one queue item per Group, all coverage lines visible together, default selection of unconfigured LOBs only
 - One entered split applies to selected LOBs through the existing atomic bulk allocation write; configured LOBs are not silently overwritten; Agency 100% remains available without inventing a Person
 - Group-level compensation apply across selected LOBs through one atomic server transaction; LOB overrides remain Group + LOB allocations
@@ -50,6 +54,8 @@ Statement 5 (`Cal Choice - 08 2026.pdf`) is Mo’s live CaliforniaChoice Product
 
 Posted Anthem commissions from an earlier statement remain historical truth.
 
+Statement 7 (`Beam 09 2026 Commission Report.pdf`): status **mapped**, Paid Month **2026-09**, 45 preview rows, preview gross **$1,329.63**, **0** posted rows, **0** linked commissions. Do not post it to test this deploy.
+
 ## 1.0 not claimed complete
 
-Missing commissions, fuller Agency Report, OCR, payment tracking, and broader Groups/People UX remain planned. See [`PRODUCT_ROADMAP.md`](PRODUCT_ROADMAP.md).
+Missing commissions, fuller Agency Report, OCR, and payment tracking remain planned. See [`PRODUCT_ROADMAP.md`](PRODUCT_ROADMAP.md).
