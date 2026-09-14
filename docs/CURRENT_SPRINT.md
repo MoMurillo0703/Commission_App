@@ -4,7 +4,7 @@ Authoritative owner: **Alex**.
 
 ## Phase
 
-Commission App 1.0 Sprint 1 — **DEPLOYED — AWAITING PRODUCT ACCEPTANCE**. Production application SHA is `d963ac138e8b2f2275a2e7f088ae7375353701a2` with migrations **0001–0011** (deployed 2026-09-14; no new migration). Mo is configured as Agency owner (`agents.id = 2`) effective **2026-09 → Present**. Person-Centric Bulk Compensation is live for Mo Product Acceptance testing. This is not Done. Do not mark Product Accepted or Done until Mo accepts the live workflow. Do not post Statement 7, create Joses production compensation, execute H&R/Anthem/linkage repairs, or correct the 12 Historical Agency Fallback or 49 Legacy No-Payout September commissions as a deploy test.
+Commission App 1.0 Sprint 1 — **DEPLOYED — PRODUCT ACCEPTANCE IN PROGRESS**. Production application SHA is `5e74bacfb25e19afcda2257f34aaf2697f6e53a8` with migrations **0001–0011** (deployed 2026-09-14; no new migration). Mo is configured as Agency owner (`agents.id = 2`) effective **2026-09 → Present**. Compensation workspace acceptance corrections are live for Mo retest. This is not Done. Do not mark Product Accepted or Done yet. Do not post Statement 7, create/backdate August Agency owner, create Joses production compensation, execute H&R/Anthem/linkage repairs, or correct the 12 Historical Agency Fallback or 49 Legacy No-Payout September commissions as a deploy test.
 
 ## Authorized work
 
