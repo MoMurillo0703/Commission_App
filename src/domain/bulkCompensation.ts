@@ -7,19 +7,24 @@ import { persistPeopleSplit, recipientFingerprint } from "./personCompensationMo
 import { expandTeamTemplate, type TemplateTeam } from "./teamTemplate";
 import type { PersonIdentity } from "./agencyOwner";
 
+export type BulkCompensationSibling = {
+  id: number;
+  lineOfBusinessId: number;
+  effectiveStart: string;
+  effectiveEnd: string | null;
+  status: AllocationStatus;
+  entries: AllocationEntryInput[];
+};
+
 export type BulkCompensationTarget = {
   key: string;
   groupId: number;
   groupName: string;
   lineOfBusinessId: number;
   lineOfBusinessName: string;
-  current: {
-    id: number;
-    effectiveStart: string;
-    effectiveEnd: string | null;
-    status: AllocationStatus;
-    entries: AllocationEntryInput[];
-  } | null;
+  siblingLineIds: number[];
+  siblings: BulkCompensationSibling[];
+  current: BulkCompensationSibling | null;
 };
 
 export type BulkCompensationPreviewRow = {
@@ -35,22 +40,56 @@ export type BulkCompensationPreviewRow = {
   warning: string | null;
 };
 
+export function siblingStateFingerprint(siblings: BulkCompensationSibling[]) {
+  return siblings
+    .map((row) => [
+      row.id,
+      row.lineOfBusinessId,
+      row.effectiveStart,
+      row.effectiveEnd ?? "",
+      row.status,
+      recipientFingerprint(row.entries),
+    ].join(":"))
+    .sort()
+    .join("|");
+}
+
+export function templateStateFingerprint(team: TemplateTeam | null | undefined) {
+  if (!team) return "";
+  return [
+    team.id,
+    team.status ?? "active",
+    ...team.members
+      .map((member) => [
+        member.personKind,
+        member.personId,
+        member.shareBps,
+        member.status,
+        member.effectiveStart,
+        member.effectiveEnd ?? "",
+      ].join(":"))
+      .sort(),
+  ].join("|");
+}
+
 export function bulkCompensationPreviewToken(input: {
   effectiveStart: string;
   ownerKey: string | null;
   templateId: number | null;
+  templateFingerprint: string;
   entries: AllocationEntryInput[];
   targets: Array<{
     groupId: number;
     lineOfBusinessId: number;
-    currentId: number | null;
-    currentFingerprint: string;
+    siblingLineIds: number[];
+    siblingFingerprint: string;
   }>;
 }) {
   return fingerprintBuffer(new TextEncoder().encode(stableJson({
     effectiveStart: input.effectiveStart,
     ownerKey: input.ownerKey,
     templateId: input.templateId,
+    templateFingerprint: input.templateFingerprint,
     entries: recipientFingerprint(input.entries),
     targets: [...input.targets].sort((left, right) => (
       left.groupId - right.groupId || left.lineOfBusinessId - right.lineOfBusinessId
@@ -79,6 +118,14 @@ export function resolveBulkProposedEntries(input: {
   });
 }
 
+function coveringSiblings(target: BulkCompensationTarget, effectiveStart: string) {
+  return target.siblings.filter((row) => (
+    row.status === "active"
+    && row.effectiveStart <= effectiveStart
+    && (row.effectiveEnd == null || row.effectiveEnd >= effectiveStart)
+  ));
+}
+
 export function planBulkCompensation(input: {
   targets: BulkCompensationTarget[];
   entries: AllocationEntryInput[];
@@ -87,15 +134,30 @@ export function planBulkCompensation(input: {
   currentSummary: (entries: AllocationEntryInput[]) => string;
 }): BulkCompensationPreviewRow[] {
   return input.targets.map((target) => {
-    const siblings = target.current ? [{
-      id: target.current.id,
+    const covering = coveringSiblings(target, input.effectiveStart);
+    if (covering.length > 1) {
+      return {
+        key: target.key,
+        groupId: target.groupId,
+        groupName: target.groupName,
+        lineOfBusinessId: target.lineOfBusinessId,
+        lineOfBusinessName: target.lineOfBusinessName,
+        action: "conflict" as const,
+        currentSummary: "Review required",
+        proposedSummary: input.proposedSummary,
+        closePriorEnd: null,
+        warning: "Multiple allocations cover this canonical Group and Line of Coverage. Nothing was selected.",
+      };
+    }
+    const siblings = target.siblings.map((row) => ({
+      id: row.id,
       groupId: target.groupId,
       lineOfBusinessId: target.lineOfBusinessId,
-      effectiveStart: target.current.effectiveStart,
-      effectiveEnd: target.current.effectiveEnd,
-      status: target.current.status,
-      entries: target.current.entries,
-    }] : [];
+      effectiveStart: row.effectiveStart,
+      effectiveEnd: row.effectiveEnd,
+      status: row.status,
+      entries: row.entries,
+    }));
     const classified = classifyRequestedAllocation(siblings, {
       groupId: target.groupId,
       lineOfBusinessId: target.lineOfBusinessId,
@@ -140,7 +202,7 @@ export function planBulkCompensation(input: {
       lineOfBusinessId: target.lineOfBusinessId,
       lineOfBusinessName: target.lineOfBusinessName,
       action: target.current ? "version" as const : "create" as const,
-      currentSummary: target.current ? input.currentSummary(target.current.entries) : `${"Mo"} 100% — Default`,
+      currentSummary: target.current ? input.currentSummary(target.current.entries) : "Mo 100% — Default",
       proposedSummary: input.proposedSummary,
       closePriorEnd,
       warning: null,

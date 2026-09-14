@@ -57,6 +57,22 @@ describe("person-centric compensation model", () => {
       owner: mo,
       personName: names.personName,
     })).toThrow(/Review is required/);
+    expect(() => peopleFacingRecipients({
+      entries: [
+        { recipientType: "agency", compensationBps: 2000 },
+        { recipientType: "team", teamId: 10, compensationBps: 8000 },
+      ],
+      owner: mo,
+      personName: names.personName,
+      teams: [{
+        id: 10,
+        members: [
+          { personKind: "agent", personId: 1, name: "John", shareBps: 8000, status: "active", effectiveStart: "2026-08", effectiveEnd: null },
+          { personKind: "agent", personId: 2, name: "Mo", shareBps: 2000, status: "active", effectiveStart: "2026-08", effectiveEnd: null },
+        ],
+      }],
+      asOfMonth: "2026-08",
+    })).toThrow(/Review is required/);
   });
 
   it("lists Mo as Mo, not Agency or Mo Agent", () => {

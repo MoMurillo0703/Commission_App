@@ -11,6 +11,8 @@ import { personKey, type PersonIdentity } from "@/domain/agencyOwner";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import { carriers, commissionRecords } from "@/db/schema";
+import type { GroupLineEvidence } from "@/domain/activeGroupLines";
+import type { AccountManager, Agent, Group, LineOfBusiness } from "@/db/schema";
 import { listAccountManagers } from "./accountManagers";
 import { getAgencyOwnerForPaidMonth } from "./agencyOwner";
 import { listAgents } from "./agents";
@@ -19,8 +21,7 @@ import { listCarriers } from "./carriers";
 import { listGroups } from "./groups";
 import { listGroupLineEvidence } from "./groupLineEvidence";
 import { listLinesOfBusiness } from "./linesOfBusiness";
-import type { GroupLineEvidence } from "@/domain/activeGroupLines";
-import type { AccountManager, Agent, Group, LineOfBusiness } from "@/db/schema";
+import { listTeams, type TeamView } from "./teams";
 
 export async function listPostedGroupLineCarriers(db?: AppDatabase) {
   const database = await resolveDb(db);
@@ -104,6 +105,7 @@ export function projectCompensationDirectory(input: {
   postedCarriers: Array<{ groupId: number; lineOfBusinessId: number; carrierId: number; carrierName: string }>;
   asOfMonth: string;
   owner: PersonIdentity | null;
+  teams?: TeamView[];
 }) {
   const names = new Map<string, string>();
   for (const agent of input.agents) names.set(`agent:${agent.id}`, agent.name);
@@ -120,6 +122,7 @@ export function projectCompensationDirectory(input: {
     asOfMonth: input.asOfMonth,
     owner: input.owner,
     personName: (kind, id) => names.get(`${kind}:${id}`) ?? "Person",
+    teams: input.teams,
   });
 }
 
@@ -163,6 +166,7 @@ export async function loadCompensationDirectory(
   const allocations = await listAllocations(database);
   const evidence = await listGroupLineEvidence(database);
   const postedCarriers = await listPostedGroupLineCarriers(database);
+  const teams = await listTeams(database);
   const owner = await getAgencyOwnerForPaidMonth(database, filters.asOfMonth);
   const rows = filterCompensationDirectory(
     projectCompensationDirectory({
@@ -175,6 +179,7 @@ export async function loadCompensationDirectory(
       postedCarriers,
       asOfMonth: filters.asOfMonth,
       owner,
+      teams,
     }),
     filters,
     lines,

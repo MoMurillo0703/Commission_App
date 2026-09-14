@@ -11,6 +11,7 @@ import {
   type RecipientType,
 } from "@/domain/allocations";
 import { allocationConflictReviewMessage, classifyRequestedAllocation, type AllocationTerms } from "@/domain/allocationTerms";
+import { siblingLineIdsFor } from "@/domain/canonicalLob";
 import { isPaidMonth } from "@/domain/dates";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
@@ -18,9 +19,9 @@ import { accountManagers, agents, compensationAllocationEntries, compensationAll
 import { getAccountManager } from "./accountManagers";
 import { getAgent } from "./agents";
 import { getGroup } from "./groups";
-import { getLineOfBusiness } from "./linesOfBusiness";
+import { getLineOfBusiness, listLinesOfBusiness } from "./linesOfBusiness";
 import { getTeam } from "./teams";
-import { lockAllocationNamespaces } from "./allocationNamespaceLock";
+import { allocationNamespacePairs, lockAllocationNamespaces } from "./allocationNamespaceLock";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 
 export type AllocationEntryView = {
@@ -203,13 +204,24 @@ export async function listAllocations(db?: AppDatabase): Promise<AllocationView[
 }
 
 export async function listAllocationsForPair(db: AppDatabase, groupId: number, lineOfBusinessId: number) {
+  return listAllocationsForNamespaces(db, [{ groupId, lineOfBusinessId }]);
+}
+
+export async function listAllocationsForNamespaces(
+  db: AppDatabase,
+  pairs: Array<{ groupId: number; lineOfBusinessId: number }>,
+) {
+  if (pairs.length === 0) return [];
+  const groupIds = [...new Set(pairs.map((pair) => pair.groupId))];
   const rows = await db
     .select(allocationSelect)
     .from(compensationAllocations)
     .innerJoin(groups, eq(compensationAllocations.groupId, groups.id))
     .innerJoin(linesOfBusiness, eq(compensationAllocations.lineOfBusinessId, linesOfBusiness.id))
-    .where(and(eq(compensationAllocations.groupId, groupId), eq(compensationAllocations.lineOfBusinessId, lineOfBusinessId)));
-  return hydrateAllocationRows(db, rows);
+    .where(inArray(compensationAllocations.groupId, groupIds));
+  const allowed = new Set(pairs.map((pair) => `${pair.groupId}:${pair.lineOfBusinessId}`));
+  const hydrated = await hydrateAllocationRows(db, rows);
+  return hydrated.filter((row) => allowed.has(`${row.groupId}:${row.lineOfBusinessId}`));
 }
 
 export async function getAllocation(db: AppDatabase | undefined, id: number) {
@@ -245,8 +257,14 @@ export async function findApplicableAllocation(
   db: AppDatabase,
   query: { groupId: number; lineOfBusinessId: number; paidMonth: string },
 ) {
-  const rows = await listAllocations(db);
-  const candidate = resolveCompensationAllocation(allocationCandidates(rows), query);
+  const lines = await listLinesOfBusiness(db);
+  const queryLine = lines.find((line) => line.id === query.lineOfBusinessId);
+  const siblingIds = queryLine ? siblingLineIdsFor(queryLine, lines) : [query.lineOfBusinessId];
+  const rows = await listAllocationsForNamespaces(
+    db,
+    siblingIds.map((lineOfBusinessId) => ({ groupId: query.groupId, lineOfBusinessId })),
+  );
+  const candidate = resolveCompensationAllocation(allocationCandidates(rows), query, lines);
   return candidate ? rows.find((row) => row.id === candidate.id) ?? null : null;
 }
 
@@ -453,17 +471,36 @@ export async function applyAllocationWrites(
     write: AllocationWrite;
     period: { effectiveStart: string; effectiveEnd: string | null };
     status: AllocationStatus;
+    siblingPairs?: Array<{ groupId: number; lineOfBusinessId: number }>;
   }>,
 ) {
   const ids: number[] = [];
+  const loadedAll = await listAllocationsForNamespaces(
+    tx,
+    allocationNamespacePairs(items.flatMap((item) => item.siblingPairs ?? [{
+      groupId: item.write.groupId,
+      lineOfBusinessId: item.write.lineOfBusinessId,
+    }])),
+  );
   for (const item of items) {
-    const siblings = await listAllocationsForPair(tx, item.write.groupId, item.write.lineOfBusinessId);
-    const classified = classifyRequestedAllocation(siblings, allocationTermsFromWrite(item.write, item.period, item.status));
+    const pairs = item.siblingPairs ?? [{
+      groupId: item.write.groupId,
+      lineOfBusinessId: item.write.lineOfBusinessId,
+    }];
+    const allowed = new Set(pairs.map((pair) => `${pair.groupId}:${pair.lineOfBusinessId}`));
+    const loaded = loadedAll.filter((row) => allowed.has(`${row.groupId}:${row.lineOfBusinessId}`));
+    const classified = classifyRequestedAllocation(
+      loaded.map((row) => ({
+        ...row,
+        lineOfBusinessId: item.write.lineOfBusinessId,
+      })),
+      allocationTermsFromWrite(item.write, item.period, item.status),
+    );
     if (classified.status === "conflict") {
       throw new ValidationError(allocationConflictReviewMessage());
     }
     if (classified.status === "exact") continue;
-    ids.push(await writeAllocationRecord(tx, item.write, item.period, item.status, siblings));
+    ids.push(await writeAllocationRecord(tx, item.write, item.period, item.status, loaded));
   }
   return ids;
 }

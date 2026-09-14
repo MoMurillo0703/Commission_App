@@ -9,7 +9,7 @@ import {
 } from "./allocations";
 import { paidMonthInRange } from "./dates";
 import { coveringAllocationsForCanonicalPair, type CanonicalLine } from "./canonicalLob";
-import { allocationHasOwnerPersonAndAgency } from "./personCompensationModel";
+import { allocationHasOwnerAndAgencyDuplicate } from "./personCompensationModel";
 import { AGENCY_OWNER_DISPLAY_NAME, type PersonIdentity } from "./agencyOwner";
 import { recipientCompensationMethod } from "./reportPresentation";
 import { individualRecipientTypeLabel } from "./reportWorkspace";
@@ -185,6 +185,7 @@ export function settleCurrentCommissionEarnings(input: {
   teams: EarningsTeam[];
   names: { agencyName?: string; personName: (kind: PersonKind, id: number) => string };
   agencyOwner?: PersonIdentity | null;
+  ownerForPaidMonth?: (paidMonth: string) => PersonIdentity | null;
   lines?: CanonicalLine[];
 }): {
   settled: SettledAllocation | null;
@@ -192,6 +193,9 @@ export function settleCurrentCommissionEarnings(input: {
   defaultAgency: boolean;
   reviewReason: EarningsReviewReason | null;
 } {
+  const owner = input.ownerForPaidMonth
+    ? input.ownerForPaidMonth(input.commission.paidMonth)
+    : input.agencyOwner;
   const resolved = resolveEarningsAllocation(input.allocations, {
     groupId: input.commission.groupId,
     lineOfBusinessId: input.commission.lineOfBusinessId,
@@ -201,7 +205,7 @@ export function settleCurrentCommissionEarnings(input: {
     return { settled: null, allocationId: resolved.allocation?.id ?? null, defaultAgency: false, reviewReason: resolved.reviewReason };
   }
   if (resolved.defaultAgency || !resolved.allocation) {
-    if (input.agencyOwner === null) {
+    if (owner == null && (input.ownerForPaidMonth || input.agencyOwner !== undefined)) {
       return {
         settled: null,
         allocationId: null,
@@ -209,17 +213,39 @@ export function settleCurrentCommissionEarnings(input: {
         reviewReason: "Agency owner is not configured",
       };
     }
+    if (owner == null) {
+      return {
+        settled: implicitAgencyAllocation(input.commission.grossCommissionCents, input.names.agencyName ?? "Murillo Insurance"),
+        allocationId: null,
+        defaultAgency: true,
+        reviewReason: null,
+      };
+    }
     return {
       settled: implicitAgencyAllocation(
         input.commission.grossCommissionCents,
-        input.agencyOwner ? AGENCY_OWNER_DISPLAY_NAME : (input.names.agencyName ?? "Murillo Insurance"),
+        AGENCY_OWNER_DISPLAY_NAME,
       ),
       allocationId: null,
       defaultAgency: true,
       reviewReason: null,
     };
   }
-  if (allocationHasOwnerPersonAndAgency(resolved.allocation.entries, input.agencyOwner ?? null)) {
+  const hasAgency = resolved.allocation.entries.some((entry) => entry.recipientType === "agency");
+  if (hasAgency && owner == null && (input.ownerForPaidMonth || input.agencyOwner !== undefined)) {
+    return {
+      settled: null,
+      allocationId: resolved.allocation.id,
+      defaultAgency: false,
+      reviewReason: "Agency owner is not configured",
+    };
+  }
+  if (allocationHasOwnerAndAgencyDuplicate(
+    resolved.allocation.entries,
+    owner ?? null,
+    input.teams,
+    input.commission.paidMonth,
+  )) {
     return {
       settled: null,
       allocationId: resolved.allocation.id,
@@ -272,17 +298,22 @@ export function evaluateIndividualEarnings(input: {
   personId?: number | null;
   teamId?: number | null;
   agencyOwner?: PersonIdentity | null;
+  ownerForPaidMonth?: (paidMonth: string) => PersonIdentity | null;
   lines?: CanonicalLine[];
 }): { rows: IndividualReportRow[]; outcomes: CommissionEarningsOutcome[] } {
   const rows: IndividualReportRow[] = [];
   const outcomes: CommissionEarningsOutcome[] = [];
   for (const commission of input.commissions) {
+    const owner = input.ownerForPaidMonth
+      ? input.ownerForPaidMonth(commission.paidMonth)
+      : input.agencyOwner;
     const result = settleCurrentCommissionEarnings({
       commission,
       allocations: input.allocations,
       teams: input.teams,
       names: input.names,
-      agencyOwner: input.agencyOwner,
+      agencyOwner: owner,
+      ownerForPaidMonth: input.ownerForPaidMonth,
       lines: input.lines,
     });
     const outcomeBase = {
@@ -298,14 +329,6 @@ export function evaluateIndividualEarnings(input: {
       allocationId: result.allocationId,
     };
     if (result.reviewReason) {
-      if (
-        result.reviewReason === "Agency owner is not configured"
-        && input.personKind
-        && input.personId
-      ) {
-        outcomes.push({ ...outcomeBase, kind: "agency_default", defaultAgency: true, reviewReason: null });
-        continue;
-      }
       outcomes.push({ ...outcomeBase, kind: "review_required" });
       rows.push({
         paidMonth: commission.paidMonth,
@@ -340,7 +363,7 @@ export function evaluateIndividualEarnings(input: {
       ...outcomeBase,
       kind: result.defaultAgency ? "agency_default" : "calculated",
     });
-    const leaves = individualPeoplePayouts(result.settled?.payouts ?? [], input.agencyOwner);
+    const leaves = individualPeoplePayouts(result.settled?.payouts ?? [], owner);
     for (const payout of leaves) {
       const method = recipientCompensationMethod(payout.recipientType);
       if (!method) continue;
@@ -389,6 +412,9 @@ export function projectTeamEarnings(input: {
   teams: EarningsTeam[];
   names: { agencyName?: string; personName: (kind: PersonKind, id: number) => string };
   teamId?: number | null;
+  agencyOwner?: PersonIdentity | null;
+  ownerForPaidMonth?: (paidMonth: string) => PersonIdentity | null;
+  lines?: CanonicalLine[];
 }): TeamReportRow[] {
   const rows: TeamReportRow[] = [];
   for (const commission of input.commissions) {
@@ -397,8 +423,33 @@ export function projectTeamEarnings(input: {
       allocations: input.allocations,
       teams: input.teams,
       names: input.names,
+      agencyOwner: input.agencyOwner,
+      ownerForPaidMonth: input.ownerForPaidMonth,
+      lines: input.lines,
     });
     if (result.reviewReason) {
+      if (input.teamId) {
+        const covering = input.lines
+          ? coveringAllocationsForCanonicalPair(
+            input.allocations,
+            {
+              groupId: commission.groupId,
+              lineOfBusinessId: commission.lineOfBusinessId,
+              paidMonth: commission.paidMonth,
+            },
+            input.lines,
+            paidMonthInRange,
+          )
+          : coveringAllocationsForPaidMonth(input.allocations, {
+            groupId: commission.groupId,
+            lineOfBusinessId: commission.lineOfBusinessId,
+            paidMonth: commission.paidMonth,
+          });
+        const involvesTeam = covering.some((allocation) => allocation.entries.some((entry) => (
+          entry.recipientType === "team" && entry.teamId === input.teamId
+        )));
+        if (!involvesTeam) continue;
+      }
       rows.push({
         snapshotKey: `${commission.id}:review`,
         paidMonth: commission.paidMonth,

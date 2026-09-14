@@ -1,5 +1,6 @@
 import { paidMonthInRange, paidMonthRangesOverlap, previousPaidMonth } from "./dates";
 import { calculateAgentCompensationCents } from "./compensation";
+import { coveringAllocationsForCanonicalPair } from "./canonicalLob";
 
 export const FULL_ALLOCATION_BPS = 10000;
 export const MAX_DIRECT_PERSONS = 5;
@@ -160,15 +161,18 @@ export function validateTeamMemberShares(members: Array<{ shareBps: number; pers
 export function resolveCompensationAllocation(
   allocations: AllocationCandidate[],
   query: { groupId: number; lineOfBusinessId: number; paidMonth: string },
+  lines?: Array<{ id: number; name: string }>,
 ) {
-  return allocations
-    .filter((allocation) => (
+  const covering = lines
+    ? coveringAllocationsForCanonicalPair(allocations, query, lines, paidMonthInRange)
+    : allocations.filter((allocation) => (
       allocation.status === "active"
       && allocation.groupId === query.groupId
       && allocation.lineOfBusinessId === query.lineOfBusinessId
       && paidMonthInRange(query.paidMonth, allocation.effectiveStart, allocation.effectiveEnd)
-    ))
-    .sort((left, right) => right.effectiveStart.localeCompare(left.effectiveStart))[0] ?? null;
+    ));
+  if (covering.length !== 1) return null;
+  return covering.sort((left, right) => right.effectiveStart.localeCompare(left.effectiveStart) || left.id - right.id)[0] ?? null;
 }
 
 export function overlappingActiveAllocations<T extends { status: AllocationStatus; effectiveStart: string; effectiveEnd: string | null }>(

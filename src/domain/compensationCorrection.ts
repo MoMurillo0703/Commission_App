@@ -8,6 +8,7 @@ import {
   type SettledAllocation,
   type SettledPayout,
 } from "./allocations";
+import { canonicalLineKey } from "./canonicalLob";
 import { paidMonthInRange } from "./dates";
 import { formatAllocationPercent } from "./recipientStatement";
 import type { CorrectionSourceClass } from "./compensationFallback";
@@ -18,26 +19,32 @@ export type HistoricalAllocationState = "covers" | "newer_only" | "missing";
 export function historicalAllocationForPaidMonth(
   allocations: AllocationCandidate[],
   query: { groupId: number; lineOfBusinessId: number; paidMonth: string },
+  lines?: Array<{ id: number; name: string }>,
 ) {
   const complete = allocations.filter((allocation) => (
     allocation.groupId === query.groupId
-    && allocation.lineOfBusinessId === query.lineOfBusinessId
+    && (lines != null || allocation.lineOfBusinessId === query.lineOfBusinessId)
     && !allocationNeedsReview(allocation)
   ));
-  return resolveCompensationAllocation(complete, query);
+  return resolveCompensationAllocation(complete, query, lines);
 }
 
 export function historicalAllocationState(
   allocations: AllocationCandidate[],
   query: { groupId: number; lineOfBusinessId: number; paidMonth: string },
+  lines?: Array<{ id: number; name: string }>,
 ): HistoricalAllocationState {
-  if (historicalAllocationForPaidMonth(allocations, query)) return "covers";
-  const newerComplete = allocations.some((allocation) => (
-    allocation.groupId === query.groupId
-    && allocation.lineOfBusinessId === query.lineOfBusinessId
-    && allocation.effectiveStart > query.paidMonth
-    && !allocationNeedsReview(allocation)
-  ));
+  if (historicalAllocationForPaidMonth(allocations, query, lines)) return "covers";
+  const newerComplete = allocations.some((allocation) => {
+    if (allocation.groupId !== query.groupId || allocation.effectiveStart <= query.paidMonth || allocationNeedsReview(allocation)) {
+      return false;
+    }
+    if (!lines) return allocation.lineOfBusinessId === query.lineOfBusinessId;
+    const queryLine = lines.find((line) => line.id === query.lineOfBusinessId);
+    const allocationLine = lines.find((line) => line.id === allocation.lineOfBusinessId);
+    if (!queryLine || !allocationLine) return allocation.lineOfBusinessId === query.lineOfBusinessId;
+    return canonicalLineKey(query.groupId, queryLine) === canonicalLineKey(allocation.groupId, allocationLine);
+  });
   return newerComplete ? "newer_only" : "missing";
 }
 

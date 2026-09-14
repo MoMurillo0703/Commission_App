@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { createAccountManager } from "./accountManagers";
+import { createAgencyCompensationOwner } from "./agencyOwner";
 import { createAgent } from "./agents";
 import { createAllocation } from "./allocations";
 import { createCarrier } from "./carriers";
@@ -45,6 +46,7 @@ describe("September commission reporting and identity reconciliation", () => {
     const mo = await createAgent(db, { name: "Mo Murillo" });
     const laura = await createAccountManager(db, { name: "Laura" });
     const nancy = await createAccountManager(db, { name: "Nancy" });
+    await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-01" });
     const anthem = await createCarrier(db, { name: "Anthem" });
     const choice = await createCarrier(db, { name: "ChoiceBuilder" });
     const calChoice = await createCarrier(db, { name: "CaliforniaChoice" });

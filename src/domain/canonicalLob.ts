@@ -52,6 +52,64 @@ export function canonicalLineIdsMatching(lineId: number | null | undefined, line
   return matches.length > 0 ? matches : [lineId];
 }
 
+export function siblingLineIdsFor(line: CanonicalLine, lines: CanonicalLine[]) {
+  const family = canonicalCoverageFamilyFromName(line.name);
+  if (!family) return [line.id];
+  return lines
+    .filter((item) => canonicalCoverageFamilyFromName(item.name) === family)
+    .map((item) => item.id)
+    .sort((left, right) => left - right);
+}
+
+export type CanonicalCompensationTarget = {
+  key: string;
+  groupId: number;
+  canonicalLineId: number;
+  canonicalLineName: string;
+  siblingLineIds: number[];
+};
+
+export function canonicalizeCompensationTargets(
+  targets: Array<{ groupId: number; lineOfBusinessId: number }>,
+  lines: CanonicalLine[],
+): CanonicalCompensationTarget[] {
+  const byKey = new Map<string, CanonicalCompensationTarget>();
+  for (const target of targets) {
+    const line = lines.find((item) => item.id === target.lineOfBusinessId);
+    if (!line) {
+      throw new Error("A selected Group or Line of Coverage no longer exists.");
+    }
+    const key = canonicalLineKey(target.groupId, line);
+    if (byKey.has(key)) continue;
+    const canonicalLineId = canonicalLineIdFor(line, lines);
+    byKey.set(key, {
+      key,
+      groupId: target.groupId,
+      canonicalLineId,
+      canonicalLineName: lines.find((item) => item.id === canonicalLineId)?.name ?? line.name,
+      siblingLineIds: siblingLineIdsFor(line, lines),
+    });
+  }
+  return [...byKey.values()].sort((left, right) => (
+    left.groupId - right.groupId || left.canonicalLineId - right.canonicalLineId
+  ));
+}
+
+export function canonicalLockPairs(targets: CanonicalCompensationTarget[]) {
+  const unique = new Map<string, { groupId: number; lineOfBusinessId: number }>();
+  for (const target of targets) {
+    for (const lineOfBusinessId of target.siblingLineIds) {
+      unique.set(`${target.groupId}:${lineOfBusinessId}`, {
+        groupId: target.groupId,
+        lineOfBusinessId,
+      });
+    }
+  }
+  return [...unique.values()].sort((left, right) => (
+    left.groupId - right.groupId || left.lineOfBusinessId - right.lineOfBusinessId
+  ));
+}
+
 export function coveringAllocationsForCanonicalPair<T extends {
   id: number;
   groupId: number;

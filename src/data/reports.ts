@@ -26,8 +26,9 @@ import { getAgent, listAgents } from "./agents";
 import { getCarrier } from "./carriers";
 import { getGroup } from "./groups";
 import { getLineOfBusiness, listLinesOfBusiness } from "./linesOfBusiness";
-import { getAgencyOwnerForPaidMonth } from "./agencyOwner";
+import { listAgencyCompensationOwners } from "./agencyOwner";
 import { canonicalLineIdsMatching } from "@/domain/canonicalLob";
+import { agencyOwnerLookup } from "@/domain/agencyOwner";
 import { getTeam } from "./teams";
 
 export type ReportNameLookup = {
@@ -110,7 +111,12 @@ export async function reportAvailability(db: AppDatabase | undefined, matchingRo
 export async function buildAgencyReport(db: AppDatabase | undefined, input: ReportFilters) {
   const database = await resolveDb(db);
   const filters = normalizeReportFilters(input);
-  const rows: AgencyReportRow[] = (await postedCommissions(database, filters)).map((row) => ({
+  const lines = await listLinesOfBusiness(database);
+  const rows: AgencyReportRow[] = (await postedCommissions(
+    database,
+    filters,
+    canonicalLineIdsMatching(filters.lineOfBusinessId, lines),
+  )).map((row) => ({
     paidMonth: row.paidMonth,
     coverageMonth: row.premiumMonth,
     sourcePeriodLabel: row.sourcePeriodLabel,
@@ -177,14 +183,18 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
   const lines = await listLinesOfBusiness(database);
   const lineIds = canonicalLineIdsMatching(filters.lineOfBusinessId, lines);
   const commissions = await postedCommissions(database, filters, lineIds);
-  const paidMonth = filters.paidMonth ?? commissions[0]?.paidMonth ?? "";
-  const [agents, managers, allocations, teams, agencyOwner] = await Promise.all([
+  const [agents, managers, allocations, teams, owners] = await Promise.all([
     listAgents(database),
     listAccountManagers(database),
     listAllocations(database),
     listTeams(database),
-    paidMonth ? getAgencyOwnerForPaidMonth(database, paidMonth) : Promise.resolve(null),
+    listAgencyCompensationOwners(database),
   ]);
+  const ownerForPaidMonth = agencyOwnerLookup(owners.map((row) => ({
+    identity: row.identity,
+    effectiveStartMonth: row.effectiveStartMonth,
+    effectiveEndMonth: row.effectiveEndMonth,
+  })));
   const evaluation = evaluateIndividualEarnings({
     commissions,
     allocations: allocationCandidates(allocations),
@@ -193,7 +203,7 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
     personKind: filters.personKind,
     personId: filters.personId,
     teamId: filters.teamId,
-    agencyOwner: paidMonth ? agencyOwner : undefined,
+    ownerForPaidMonth,
     lines,
   });
   const rows = evaluation.rows;
@@ -203,6 +213,7 @@ export async function buildIndividualReport(db: AppDatabase | undefined, input: 
     recipientRowCount: rows.filter((row) => !row.reviewRequired).length,
   });
   const names = await reportNameLookup(database, filters);
+  const paidMonth = filters.paidMonth ?? commissions[0]?.paidMonth ?? "";
   return {
     filters,
     names,
@@ -233,11 +244,12 @@ export async function buildTeamReport(db: AppDatabase | undefined, input: Report
   const filters = normalizeReportFilters({ ...input, kind: "team" });
   const lines = await listLinesOfBusiness(database);
   const commissions = await postedCommissions(database, filters, canonicalLineIdsMatching(filters.lineOfBusinessId, lines));
-  const [agents, managers, allocations, teams] = await Promise.all([
+  const [agents, managers, allocations, teams, owners] = await Promise.all([
     listAgents(database),
     listAccountManagers(database),
     listAllocations(database),
     listTeams(database),
+    listAgencyCompensationOwners(database),
   ]);
   const rows: TeamReportRow[] = projectTeamEarnings({
     commissions,
@@ -245,6 +257,12 @@ export async function buildTeamReport(db: AppDatabase | undefined, input: Report
     teams: earningsTeams(teams),
     names: { personName: personNameLookup(agents, managers) },
     teamId: filters.teamId,
+    ownerForPaidMonth: agencyOwnerLookup(owners.map((row) => ({
+      identity: row.identity,
+      effectiveStartMonth: row.effectiveStartMonth,
+      effectiveEndMonth: row.effectiveEndMonth,
+    }))),
+    lines,
   });
   return {
     filters,

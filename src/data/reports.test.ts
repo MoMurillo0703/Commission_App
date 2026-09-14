@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
 import { createAccountManager } from "./accountManagers";
+import { createAgencyCompensationOwner } from "./agencyOwner";
 import { createAgent } from "./agents";
 import { createAllocation } from "./allocations";
 import { createCarrier } from "./carriers";
@@ -21,7 +22,9 @@ async function seed() {
   const db = await createTestDb();
   const john = await createAgent(db, { name: "John Elizando" });
   const nancy = await createAgent(db, { name: "Nancy" });
+  const mo = await createAgent(db, { name: "Mo Murillo" });
   const laura = await createAccountManager(db, { name: "Laura Montoya" });
+  await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-01" });
   const group = await createGroup(db, { name: "H R LABOR CONTRACTING", primaryAgentId: john.id, accountManagerId: laura.id });
   const carrier = await createCarrier(db, { name: "Choice Builder" });
   const medical = await createLineOfBusiness(db, { name: "Group Medical" });
@@ -144,6 +147,8 @@ describe("posted commission reports", () => {
   it("aggregates three posted statements into one recipient payable statement", async () => {
     const db = await createTestDb();
     const john = await createAgent(db, { name: "John Elizando" });
+    const mo = await createAgent(db, { name: "Mo Murillo" });
+    await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-01" });
     const groupA = await createGroup(db, { name: "Acme Benefits", groupNumber: "A1", primaryAgentId: john.id });
     const groupB = await createGroup(db, { name: "Beta Health", groupNumber: "B1", primaryAgentId: john.id });
     const carrier = await createCarrier(db, { name: "Principal" });
@@ -240,6 +245,8 @@ describe("posted commission reports", () => {
   it("does not treat current Group assignment as a recipient compensation exception", async () => {
     const db = await createTestDb();
     const john = await createAgent(db, { name: "John Elizando" });
+    const mo = await createAgent(db, { name: "Mo Murillo" });
+    await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-01" });
     const group = await createGroup(db, { name: "Need Plan", primaryAgentId: john.id });
     const carrier = await createCarrier(db, { name: "Principal" });
     const dental = await createLineOfBusiness(db, { name: "Dental" });
@@ -264,10 +271,37 @@ describe("posted commission reports", () => {
     expect(report.names.personName).toBe("John Elizando");
   });
 
+  it("does not convert missing Agency owner into a person-filtered payable zero", async () => {
+    const db = await createTestDb();
+    const john = await createAgent(db, { name: "John Elizando" });
+    const group = await createGroup(db, { name: "Need Owner", primaryAgentId: john.id });
+    const carrier = await createCarrier(db, { name: "Principal" });
+    const dental = await createLineOfBusiness(db, { name: "Dental" });
+    await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: dental.id,
+      grossCommissionCents: 8000,
+    });
+    const report = await buildIndividualReport(db, {
+      kind: "recipient",
+      paidMonth: "2026-08",
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(report.payable?.payableReady).toBe(false);
+    expect(report.rows[0]?.reviewRequired).toBe(true);
+    expect(report.rows[0]?.reviewReason).toBe("Agency owner is not configured");
+    expect(report.readiness?.kind).toBe("review_required");
+  });
+
   it("uses a historical paid-month allocation, not current assignment, for recipient exceptions", async () => {
     const db = await createTestDb();
     const john = await createAgent(db, { name: "John Elizondo" });
     const other = await createAgent(db, { name: "Other Agent" });
+    const mo = await createAgent(db, { name: "Mo Murillo" });
+    await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-01" });
     const johnGroup = await createGroup(db, { name: "John Group", primaryAgentId: other.id });
     const otherGroup = await createGroup(db, { name: "Other Group", primaryAgentId: john.id });
     const carrier = await createCarrier(db, { name: "Principal" });
@@ -395,6 +429,8 @@ describe("posted commission reports", () => {
     const db = await createTestDb();
     const john = await createAgent(db, { name: "John Elizando" });
     const nancy = await createAgent(db, { name: "Nancy" });
+    const mo = await createAgent(db, { name: "Mo Murillo" });
+    await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-01" });
     const group = await createGroup(db, { name: "Split Group", primaryAgentId: john.id });
     const carrier = await createCarrier(db, { name: "Principal" });
     const dental = await createLineOfBusiness(db, { name: "Dental" });
@@ -477,6 +513,8 @@ describe("posted commission reports", () => {
     const db = await createTestDb();
     const john = await createAgent(db, { name: "John Elizondo" });
     const nobody = await createAgent(db, { name: "No Activity" });
+    const mo = await createAgent(db, { name: "Mo Murillo" });
+    await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-01" });
     const laura = await createAccountManager(db, { name: "Laura Montoya" });
     const groupA = await createGroup(db, { name: "Alpha Benefits", primaryAgentId: john.id });
     const groupB = await createGroup(db, { name: "Beta Health", primaryAgentId: john.id });

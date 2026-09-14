@@ -3,21 +3,24 @@ import {
   bulkPreviewHasConflicts,
   planBulkCompensation,
   resolveBulkProposedEntries,
+  siblingStateFingerprint,
   staleBulkPreviewMessage,
+  templateStateFingerprint,
   type BulkCompensationTarget,
 } from "@/domain/bulkCompensation";
-import { peopleFacingRecipients, peopleFacingSummary, recipientFingerprint } from "@/domain/personCompensationModel";
-import { personKey } from "@/domain/agencyOwner";
+import { peopleFacingRecipients, peopleFacingSummary } from "@/domain/personCompensationModel";
+import { agencyOwnerForPaidMonth, personKey } from "@/domain/agencyOwner";
 import { AGENCY_OWNER_DISPLAY_NAME } from "@/domain/agencyOwner";
 import type { AllocationEntryInput } from "@/domain/allocations";
+import { canonicalLockPairs, canonicalizeCompensationTargets } from "@/domain/canonicalLob";
 import type { AppDatabase } from "@/db";
 import { resolveDb } from "@/db";
 import { ConflictError, ValidationError } from "@/lib/errors";
-import { getAgencyOwnerForPaidMonth } from "./agencyOwner";
+import { listAgencyCompensationOwners } from "./agencyOwner";
 import {
   applyAllocationWrites,
   listAllocations,
-  listAllocationsForPair,
+  listAllocationsForNamespaces,
   type AllocationView,
 } from "./allocations";
 import { lockAllocationNamespaces } from "./allocationNamespaceLock";
@@ -26,7 +29,6 @@ import { listLinesOfBusiness } from "./linesOfBusiness";
 import { listAgents } from "./agents";
 import { listAccountManagers } from "./accountManagers";
 import { getTeam } from "./teams";
-import { canonicalLineIdFor } from "@/domain/canonicalLob";
 
 export type BulkCompensationRequest = {
   effectiveStart: string;
@@ -47,73 +49,63 @@ function personNameLookup(
   return (kind: "agent" | "account_manager", id: number) => names.get(`${kind}:${id}`) ?? "Person";
 }
 
-function currentForPair(allocations: AllocationView[], groupId: number, lineOfBusinessId: number, asOfMonth: string) {
+function coveringCurrent(allocations: AllocationView[], groupId: number, siblingLineIds: number[], asOfMonth: string) {
   return allocations
     .filter((row) => (
       row.groupId === groupId
-      && row.lineOfBusinessId === lineOfBusinessId
+      && siblingLineIds.includes(row.lineOfBusinessId)
       && row.status === "active"
       && row.effectiveStart <= asOfMonth
       && (row.effectiveEnd == null || row.effectiveEnd >= asOfMonth)
     ))
-    .sort((left, right) => right.effectiveStart.localeCompare(left.effectiveStart) || left.id - right.id)[0] ?? null;
+    .sort((left, right) => right.effectiveStart.localeCompare(left.effectiveStart) || left.id - right.id);
 }
 
-function targetFingerprint(allocation: AllocationView | null) {
-  return allocation
-    ? `${allocation.id}:${allocation.effectiveStart}:${allocation.effectiveEnd ?? ""}:${allocation.status}:${recipientFingerprint(allocation.entries)}`
-    : "none";
-}
-
-async function resolveProposed(db: AppDatabase, input: BulkCompensationRequest) {
-  if (input.targets.length === 0) throw new ValidationError("Select at least one Group and Line of Coverage.");
-  const keys = input.targets.map((target) => `${target.groupId}:${target.lineOfBusinessId}`);
-  if (new Set(keys).size !== keys.length) {
-    throw new ValidationError("Each Group and Line of Coverage can be selected only once.");
+function bindCanonicalTargets(input: {
+  request: BulkCompensationRequest;
+  allocations: AllocationView[];
+  groups: Array<{ id: number; name: string }>;
+  lines: Array<{ id: number; name: string }>;
+}): BulkCompensationTarget[] {
+  if (input.request.targets.length === 0) {
+    throw new ValidationError("Select at least one Group and Line of Coverage.");
   }
-  const owner = await getAgencyOwnerForPaidMonth(db, input.effectiveStart);
-  const team = input.mode === "template" && input.teamId != null ? await getTeam(db, input.teamId) : null;
-  if (input.mode === "template" && !team) throw new ValidationError("Choose a compensation template.");
+  let canonical;
   try {
-    const entries = resolveBulkProposedEntries({
-      mode: input.mode,
-      team,
-      people: input.people,
-      owner,
-      effectiveStart: input.effectiveStart,
-    });
-    return { owner, team, entries };
+    canonical = canonicalizeCompensationTargets(input.request.targets, input.lines);
   } catch (error) {
-    throw new ValidationError(error instanceof Error ? error.message : "Invalid compensation split.");
+    throw new ValidationError(error instanceof Error ? error.message : "A selected Group or Line of Coverage no longer exists.");
   }
-}
-
-function bindTargets(
-  input: BulkCompensationRequest,
-  allocations: AllocationView[],
-  groups: Array<{ id: number; name: string }>,
-  lines: Array<{ id: number; name: string }>,
-): BulkCompensationTarget[] {
-  const groupsById = new Map(groups.map((group) => [group.id, group]));
-  return input.targets.map((target) => {
+  const groupsById = new Map(input.groups.map((group) => [group.id, group]));
+  return canonical.map((target) => {
     const group = groupsById.get(target.groupId);
-    const line = lines.find((item) => item.id === target.lineOfBusinessId);
-    if (!group || !line) throw new ValidationError("A selected Group or Line of Coverage no longer exists.");
-    const canonicalId = canonicalLineIdFor({ id: line.id, name: line.name }, lines);
-    const current = currentForPair(allocations, target.groupId, canonicalId, input.effectiveStart)
-      ?? currentForPair(allocations, target.groupId, target.lineOfBusinessId, input.effectiveStart);
+    if (!group) throw new ValidationError("A selected Group or Line of Coverage no longer exists.");
+    const siblings = input.allocations
+      .filter((row) => row.groupId === target.groupId && target.siblingLineIds.includes(row.lineOfBusinessId))
+      .map((row) => ({
+        id: row.id,
+        lineOfBusinessId: row.lineOfBusinessId,
+        effectiveStart: row.effectiveStart,
+        effectiveEnd: row.effectiveEnd,
+        status: row.status,
+        entries: row.entries,
+      }));
+    const covering = coveringCurrent(input.allocations, target.groupId, target.siblingLineIds, input.request.effectiveStart);
     return {
-      key: `${target.groupId}:${canonicalId}`,
+      key: target.key,
       groupId: target.groupId,
       groupName: group.name,
-      lineOfBusinessId: canonicalId,
-      lineOfBusinessName: lines.find((item) => item.id === canonicalId)?.name ?? line.name,
-      current: current ? {
-        id: current.id,
-        effectiveStart: current.effectiveStart,
-        effectiveEnd: current.effectiveEnd,
-        status: current.status,
-        entries: current.entries,
+      lineOfBusinessId: target.canonicalLineId,
+      lineOfBusinessName: target.canonicalLineName,
+      siblingLineIds: target.siblingLineIds,
+      siblings,
+      current: covering.length === 1 ? {
+        id: covering[0]!.id,
+        lineOfBusinessId: covering[0]!.lineOfBusinessId,
+        effectiveStart: covering[0]!.effectiveStart,
+        effectiveEnd: covering[0]!.effectiveEnd,
+        status: covering[0]!.status,
+        entries: covering[0]!.entries,
       } : null,
     };
   });
@@ -123,6 +115,7 @@ function previewFromState(input: {
   effectiveStart: string;
   ownerKey: string | null;
   templateId: number | null;
+  templateFingerprint: string;
   entries: AllocationEntryInput[];
   targets: BulkCompensationTarget[];
   proposedSummary: string;
@@ -139,43 +132,47 @@ function previewFromState(input: {
     effectiveStart: input.effectiveStart,
     ownerKey: input.ownerKey,
     templateId: input.templateId,
+    templateFingerprint: input.templateFingerprint,
     entries: input.entries,
     targets: input.targets.map((target) => ({
       groupId: target.groupId,
       lineOfBusinessId: target.lineOfBusinessId,
-      currentId: target.current?.id ?? null,
-      currentFingerprint: targetFingerprint(target.current ? {
-        id: target.current.id,
-        groupId: target.groupId,
-        groupName: target.groupName,
-        lineOfBusinessId: target.lineOfBusinessId,
-        lineOfBusinessName: target.lineOfBusinessName,
-        effectiveStart: target.current.effectiveStart,
-        effectiveEnd: target.current.effectiveEnd,
-        status: target.current.status,
-        sourceAgreementId: null,
-        createdAt: "",
-        updatedAt: "",
-        entries: target.current.entries.map((entry, index) => ({
-          id: index,
-          recipientType: entry.recipientType,
-          personKind: entry.personKind ?? null,
-          personId: entry.personId ?? null,
-          personName: null,
-          teamId: entry.teamId ?? null,
-          teamName: null,
-          compensationBps: entry.compensationBps,
-          sortOrder: index,
-        })),
-      } : null),
+      siblingLineIds: target.siblingLineIds,
+      siblingFingerprint: siblingStateFingerprint(target.siblings),
     })),
   });
   return { rows, token };
 }
 
+async function resolveProposedFromDb(
+  db: AppDatabase,
+  input: BulkCompensationRequest,
+) {
+  const owners = await listAgencyCompensationOwners(db);
+  const owner = agencyOwnerForPaidMonth(owners.map((row) => ({
+    identity: row.identity,
+    effectiveStartMonth: row.effectiveStartMonth,
+    effectiveEndMonth: row.effectiveEndMonth,
+  })), input.effectiveStart);
+  const team = input.mode === "template" && input.teamId != null ? await getTeam(db, input.teamId) : null;
+  if (input.mode === "template" && !team) throw new ValidationError("Choose a compensation template.");
+  try {
+    const entries = resolveBulkProposedEntries({
+      mode: input.mode,
+      team,
+      people: input.people,
+      owner,
+      effectiveStart: input.effectiveStart,
+    });
+    return { owner, team, entries };
+  } catch (error) {
+    throw new ValidationError(error instanceof Error ? error.message : "Invalid compensation split.");
+  }
+}
+
 export async function previewBulkCompensation(db: AppDatabase | undefined, input: BulkCompensationRequest) {
   const database = await resolveDb(db);
-  const proposed = await resolveProposed(database, input);
+  const proposed = await resolveProposedFromDb(database, input);
   const allocations = await listAllocations(database);
   const groups = await listGroups(database);
   const lines = await listLinesOfBusiness(database);
@@ -189,11 +186,12 @@ export async function previewBulkCompensation(db: AppDatabase | undefined, input
     ownerDisplayName: AGENCY_OWNER_DISPLAY_NAME,
   }));
   const proposedSummary = currentSummary(proposed.entries);
-  const targets = bindTargets(input, allocations, groups, lines);
+  const targets = bindCanonicalTargets({ request: input, allocations, groups, lines });
   const preview = previewFromState({
     effectiveStart: input.effectiveStart,
     ownerKey: proposed.owner ? personKey(proposed.owner) : null,
     templateId: proposed.team?.id ?? null,
+    templateFingerprint: templateStateFingerprint(proposed.team),
     entries: proposed.entries,
     targets,
     proposedSummary,
@@ -223,35 +221,38 @@ export async function previewBulkCompensation(db: AppDatabase | undefined, input
 export async function commitBulkCompensation(db: AppDatabase | undefined, input: BulkCompensationRequest) {
   if (!input.previewToken) throw new ValidationError("Preview the change before committing.");
   const database = await resolveDb(db);
-  const proposed = await resolveProposed(database, input);
   const groups = await listGroups(database);
   const lines = await listLinesOfBusiness(database);
   const agents = await listAgents(database);
   const managers = await listAccountManagers(database);
   const personName = personNameLookup(agents, managers);
-  const currentSummary = (entries: AllocationEntryInput[]) => peopleFacingSummary(peopleFacingRecipients({
-    entries,
-    owner: proposed.owner,
-    personName,
-    ownerDisplayName: AGENCY_OWNER_DISPLAY_NAME,
-  }));
-  const proposedSummary = currentSummary(proposed.entries);
   const period = { effectiveStart: input.effectiveStart, effectiveEnd: null as string | null };
+  let canonical;
+  try {
+    canonical = canonicalizeCompensationTargets(input.targets, lines);
+  } catch (error) {
+    throw new ValidationError(error instanceof Error ? error.message : "A selected Group or Line of Coverage no longer exists.");
+  }
+  const lockPairs = canonicalLockPairs(canonical);
 
   const result = await database.transaction(async (tx) => {
     const transaction = tx as unknown as AppDatabase;
-    await lockAllocationNamespaces(transaction, input.targets);
-    const allocations: AllocationView[] = [];
-    for (const target of [...input.targets].sort((left, right) => (
-      left.groupId - right.groupId || left.lineOfBusinessId - right.lineOfBusinessId
-    ))) {
-      allocations.push(...await listAllocationsForPair(transaction, target.groupId, target.lineOfBusinessId));
-    }
-    const targets = bindTargets(input, allocations, groups, lines);
+    await lockAllocationNamespaces(transaction, lockPairs);
+    const allocations = await listAllocationsForNamespaces(transaction, lockPairs);
+    const proposed = await resolveProposedFromDb(transaction, input);
+    const currentSummary = (entries: AllocationEntryInput[]) => peopleFacingSummary(peopleFacingRecipients({
+      entries,
+      owner: proposed.owner,
+      personName,
+      ownerDisplayName: AGENCY_OWNER_DISPLAY_NAME,
+    }));
+    const proposedSummary = currentSummary(proposed.entries);
+    const targets = bindCanonicalTargets({ request: input, allocations, groups, lines });
     const preview = previewFromState({
       effectiveStart: input.effectiveStart,
       ownerKey: proposed.owner ? personKey(proposed.owner) : null,
       templateId: proposed.team?.id ?? null,
+      templateFingerprint: templateStateFingerprint(proposed.team),
       entries: proposed.entries,
       targets,
       proposedSummary,
@@ -260,7 +261,13 @@ export async function commitBulkCompensation(db: AppDatabase | undefined, input:
     const exactReuse = preview.rows.every((row) => row.action === "reuse");
     if (preview.token !== input.previewToken) {
       if (exactReuse) {
-        return { createdCount: 0, reusedCount: targets.length, rows: preview.rows, previewToken: preview.token };
+        return {
+          createdCount: 0,
+          reusedCount: targets.length,
+          rows: preview.rows,
+          previewToken: preview.token,
+          proposedSummary,
+        };
       }
       throw new ConflictError(staleBulkPreviewMessage());
     }
@@ -278,6 +285,10 @@ export async function commitBulkCompensation(db: AppDatabase | undefined, input:
       },
       period,
       status: "active" as const,
+      siblingPairs: target.siblingLineIds.map((lineOfBusinessId) => ({
+        groupId: target.groupId,
+        lineOfBusinessId,
+      })),
     }));
     const createdIds = await applyAllocationWrites(transaction, toWrite);
     return {
@@ -285,14 +296,14 @@ export async function commitBulkCompensation(db: AppDatabase | undefined, input:
       reusedCount: targets.length - createdIds.length,
       rows: preview.rows,
       previewToken: preview.token,
+      proposedSummary,
     };
   });
 
   return {
     ...result,
-    groupCount: new Set(input.targets.map((target) => target.groupId)).size,
-    targetCount: input.targets.length,
-    proposedSummary,
+    groupCount: new Set(canonical.map((target) => target.groupId)).size,
+    targetCount: canonical.length,
     effectiveStart: input.effectiveStart,
   };
 }

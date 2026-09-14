@@ -1,9 +1,22 @@
 import { classifyGroupLobCompensation, type GroupLobCompensationKind } from "./groupCompensationStatus";
 import { canonicalCoverageFamilyFromName, canonicalLineIdFor, canonicalLineKey, type CanonicalLine } from "./canonicalLob";
-import { peopleFacingRecipients, peopleFacingSummary } from "./personCompensationModel";
+import { economicPeopleFromAllocation, peopleFacingRecipients, peopleFacingSummary } from "./personCompensationModel";
 import { personKey, type PersonIdentity } from "./agencyOwner";
 import type { AllocationEntryInput, AllocationStatus, PersonKind } from "./allocations";
 import { AGENCY_OWNER_DISPLAY_NAME } from "./agencyOwner";
+
+export type DirectoryTeam = {
+  id: number;
+  members: Array<{
+    personKind: PersonKind;
+    personId: number;
+    name?: string;
+    shareBps: number;
+    status: string;
+    effectiveStart: string;
+    effectiveEnd: string | null;
+  }>;
+};
 
 export type CompensationDirectoryFilters = {
   query: string;
@@ -81,6 +94,7 @@ export function buildCompensationDirectoryRows(input: {
   asOfMonth: string;
   owner: PersonIdentity | null;
   personName: (kind: PersonKind, id: number) => string;
+  teams?: DirectoryTeam[];
 }): CompensationDirectoryRow[] {
   const byCanonical = new Map<string, CompensationDirectorySourceRow[]>();
   for (const source of input.sources) {
@@ -115,28 +129,34 @@ export function buildCompensationDirectoryRows(input: {
         .map((source) => source.lineOfBusinessId)
     )));
     let kind = uniqueCovering.length > 1 && uniqueLineIds.size > 1 ? "review_required" as const : classified.kind;
+    const defaultAgencyKind = kind === "default_unconfigured"
+      || kind === "historical"
+      || kind === "future"
+      || kind === "inactive";
+    if (!input.owner && defaultAgencyKind) kind = "review_required";
+    const facingInput = uniqueCovering[0]
+      ? {
+        entries: uniqueCovering[0].entries,
+        owner: input.owner,
+        personName: input.personName,
+        ownerDisplayName: AGENCY_OWNER_DISPLAY_NAME,
+        teams: input.teams,
+        asOfMonth: input.asOfMonth,
+      }
+      : null;
     let facing: ReturnType<typeof peopleFacingRecipients> = [];
     try {
-      facing = uniqueCovering[0] && kind !== "review_required"
-        ? peopleFacingRecipients({
-          entries: uniqueCovering[0].entries,
-          owner: input.owner,
-          personName: input.personName,
-          ownerDisplayName: AGENCY_OWNER_DISPLAY_NAME,
-        })
+      facing = facingInput && kind !== "review_required"
+        ? peopleFacingRecipients(facingInput)
         : [];
     } catch {
       kind = "review_required";
       facing = [];
     }
-    const recipientKeys = facing.length > 0
-      ? facing.map((row) => personKey(row))
-      : (input.owner && (
-        kind === "default_unconfigured"
-        || kind === "historical"
-        || kind === "future"
-        || kind === "inactive"
-      ) ? [personKey(input.owner)] : []);
+    const economic = facingInput ? economicPeopleFromAllocation(facingInput) : [];
+    const recipientKeys = economic.length > 0
+      ? economic.map((row) => personKey(row))
+      : (input.owner && defaultAgencyKind ? [personKey(input.owner)] : []);
     const teamIds = [...new Set(allocations.flatMap((row) => (
       row.entries.flatMap((entry) => entry.teamId == null ? [] : [entry.teamId])
     )))];

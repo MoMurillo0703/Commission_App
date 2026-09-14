@@ -240,7 +240,7 @@ export function validateMappedRows(
           groupId: group.groupId,
           lineOfBusinessId: line.id,
           paidMonth,
-        });
+        }, references.linesOfBusiness);
         try {
           let settled;
           let legacyCompensationBps: number | null = null;

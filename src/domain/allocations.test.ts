@@ -4,6 +4,7 @@ import {
   allocationProgressLabel,
   allocationTotals,
   implicitAgencyAllocation,
+  resolveCompensationAllocation,
   settleAllocation,
   validateAllocationEntries,
   validateTeamMemberShares,
@@ -137,5 +138,38 @@ describe("compensation allocations", () => {
     ]);
     expect(() => validateAllocationEntries(entries)).toThrow(/exactly 100 percent/);
     expect(implicitAgencyAllocation(5000).agencyNetCents).toBe(5000);
+  });
+
+  it("never selects an exact raw LOB when canonical siblings conflict", () => {
+    const lines = [
+      { id: 1, name: "Group Medical" },
+      { id: 2, name: "MED" },
+      { id: 3, name: "MEDHMO" },
+    ];
+    const med = {
+      id: 21,
+      groupId: 10,
+      lineOfBusinessId: 2,
+      effectiveStart: "2026-08",
+      effectiveEnd: null,
+      status: "active" as const,
+      entries: [{ recipientType: "agency" as const, compensationBps: 10000 }],
+    };
+    const medhmo = {
+      ...med,
+      id: 22,
+      lineOfBusinessId: 3,
+      entries: [{ recipientType: "person" as const, personKind: "agent" as const, personId: 1, compensationBps: 10000 }],
+    };
+    expect(resolveCompensationAllocation([med], {
+      groupId: 10,
+      lineOfBusinessId: 1,
+      paidMonth: "2026-08",
+    }, lines)?.id).toBe(21);
+    expect(resolveCompensationAllocation([med, medhmo], {
+      groupId: 10,
+      lineOfBusinessId: 2,
+      paidMonth: "2026-08",
+    }, lines)).toBeNull();
   });
 });

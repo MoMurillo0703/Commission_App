@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createAgent } from "./agents";
+import { createAgencyCompensationOwner } from "./agencyOwner";
 import { createCarrier } from "./carriers";
 import { createCommission } from "./commissions";
 import { listPostedCompensationExceptions } from "./compensationExceptions";
@@ -12,6 +13,8 @@ describe("safe fallback exception listing", () => {
   it("lists genuine Agency fallbacks and excludes legitimate null-allocation settlements", async () => {
     const db = await createTestDb();
     const john = await createAgent(db, { name: "John Elizondo" });
+    const mo = await createAgent(db, { name: "Mo Murillo" });
+    await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-01" });
     const group = await createGroup(db, { name: "ABC COMPANY", primaryAgentId: john.id });
     const carrier = await createCarrier(db, { name: "Principal" });
     const medical = await createLineOfBusiness(db, { name: "Medical" });

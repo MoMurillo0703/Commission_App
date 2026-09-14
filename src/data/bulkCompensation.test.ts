@@ -14,7 +14,10 @@ import { emptyCompensationDirectoryFilters } from "@/domain/compensationDirector
 import { evaluateIndividualEarnings } from "@/domain/currentEarnings";
 import { allocationCandidates } from "./allocations";
 import { createTestDb } from "@/db/test-db";
+import { agencyCompensationOwners } from "@/db/schema";
 import { ConflictError, ValidationError } from "@/lib/errors";
+import { eq } from "drizzle-orm";
+import { listAgencyCompensationOwners } from "./agencyOwner";
 
 async function seed() {
   const db = await createTestDb();
@@ -370,5 +373,153 @@ describe("person-centric bulk compensation", () => {
       agencyOwner: { personKind: "agent", personId: mo.id },
     });
     expect(earnings.rows.reduce((sum, row) => sum + row.compensationCents, 0)).toBe(37056);
+  });
+
+  it("canonicalizes MED before lock and writes the Group Medical namespace", async () => {
+    const { db, people, alpha, medical, med } = await seed();
+    const preview = await previewBulkCompensation(db, {
+      effectiveStart: "2026-08",
+      mode: "custom",
+      people,
+      targets: [{ groupId: alpha.id, lineOfBusinessId: med.id }],
+    });
+    expect(preview.targetCount).toBe(1);
+    expect(preview.rows[0]?.lineOfBusinessId).toBe(medical.id);
+    await commitBulkCompensation(db, {
+      effectiveStart: "2026-08",
+      mode: "custom",
+      people,
+      targets: [{ groupId: alpha.id, lineOfBusinessId: med.id }],
+      previewToken: preview.previewToken,
+    });
+    const written = (await listAllocations(db)).filter((row) => row.groupId === alpha.id && row.effectiveStart === "2026-08");
+    expect(written).toHaveLength(1);
+    expect(written[0]?.lineOfBusinessId).toBe(medical.id);
+  });
+
+  it("dedupes MED and MEDHMO on the same Group to one canonical namespace", async () => {
+    const { db, people, alpha, medical, med } = await seed();
+    const medhmo = await createLineOfBusiness(db, { name: "MEDHMO" });
+    const preview = await previewBulkCompensation(db, {
+      effectiveStart: "2026-08",
+      mode: "custom",
+      people,
+      targets: [
+        { groupId: alpha.id, lineOfBusinessId: med.id },
+        { groupId: alpha.id, lineOfBusinessId: medhmo.id },
+        { groupId: alpha.id, lineOfBusinessId: medical.id },
+      ],
+    });
+    expect(preview.targetCount).toBe(1);
+    const committed = await commitBulkCompensation(db, {
+      effectiveStart: "2026-08",
+      mode: "custom",
+      people,
+      targets: [
+        { groupId: alpha.id, lineOfBusinessId: med.id },
+        { groupId: alpha.id, lineOfBusinessId: medhmo.id },
+      ],
+      previewToken: preview.previewToken,
+    });
+    expect(committed.createdCount).toBe(1);
+    expect((await listAllocations(db)).filter((row) => row.groupId === alpha.id && row.effectiveStart === "2026-08")).toHaveLength(1);
+  });
+
+  it("rejects a raw or canonical sibling change after preview and writes nothing", async () => {
+    const { db, john, people, alpha, medical, med } = await seed();
+    const preview = await previewBulkCompensation(db, {
+      effectiveStart: "2026-08",
+      mode: "custom",
+      people,
+      targets: [{ groupId: alpha.id, lineOfBusinessId: medical.id }],
+    });
+    await createAllocation(db, {
+      groupId: alpha.id,
+      lineOfBusinessId: med.id,
+      effectiveStart: "2026-08",
+      entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }],
+    });
+    const before = await listAllocations(db);
+    await expect(commitBulkCompensation(db, {
+      effectiveStart: "2026-08",
+      mode: "custom",
+      people,
+      targets: [{ groupId: alpha.id, lineOfBusinessId: medical.id }],
+      previewToken: preview.previewToken,
+    })).rejects.toBeInstanceOf(ConflictError);
+    expect((await listAllocations(db)).map((row) => row.id)).toEqual(before.map((row) => row.id));
+
+    const second = await previewBulkCompensation(db, {
+      effectiveStart: "2026-09",
+      mode: "custom",
+      people,
+      targets: [{ groupId: alpha.id, lineOfBusinessId: medical.id }],
+    });
+    await createAllocation(db, {
+      groupId: alpha.id,
+      lineOfBusinessId: medical.id,
+      effectiveStart: "2026-09",
+      entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }],
+    });
+    const beforeCanonical = await listAllocations(db);
+    await expect(commitBulkCompensation(db, {
+      effectiveStart: "2026-09",
+      mode: "custom",
+      people,
+      targets: [{ groupId: alpha.id, lineOfBusinessId: medical.id }],
+      previewToken: second.previewToken,
+    })).rejects.toBeInstanceOf(ConflictError);
+    expect((await listAllocations(db)).map((row) => `${row.id}:${row.effectiveEnd ?? ""}`))
+      .toEqual(beforeCanonical.map((row) => `${row.id}:${row.effectiveEnd ?? ""}`));
+  });
+
+  it("rolls back the batch when owner or Team membership changes after preview", async () => {
+    const { db, john, laura, people, alpha, beta, medical, dental, team } = await seed();
+    const ownerPreview = await previewBulkCompensation(db, {
+      effectiveStart: "2026-08",
+      mode: "custom",
+      people,
+      targets: [
+        { groupId: alpha.id, lineOfBusinessId: medical.id },
+        { groupId: beta.id, lineOfBusinessId: dental.id },
+      ],
+    });
+    const owners = await listAgencyCompensationOwners(db);
+    await db.update(agencyCompensationOwners).set({
+      agentId: null,
+      accountManagerId: laura.id,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(agencyCompensationOwners.id, owners[0]!.id));
+    const beforeOwner = await listAllocations(db);
+    await expect(commitBulkCompensation(db, {
+      effectiveStart: "2026-08",
+      mode: "custom",
+      people,
+      targets: [
+        { groupId: alpha.id, lineOfBusinessId: medical.id },
+        { groupId: beta.id, lineOfBusinessId: dental.id },
+      ],
+      previewToken: ownerPreview.previewToken,
+    })).rejects.toBeInstanceOf(ConflictError);
+    expect((await listAllocations(db)).map((row) => row.id)).toEqual(beforeOwner.map((row) => row.id));
+
+    const templatePreview = await previewBulkCompensation(db, {
+      effectiveStart: "2026-08",
+      mode: "template",
+      teamId: team.id,
+      targets: [{ groupId: alpha.id, lineOfBusinessId: medical.id }],
+    });
+    await replaceTeamMembers(db, team.id, [
+      { personKind: "agent", personId: john.id, shareBps: 10000, effectiveStart: "2026-09" },
+    ], { requireComplete: true, closePrior: true });
+    const beforeTeam = await listAllocations(db);
+    await expect(commitBulkCompensation(db, {
+      effectiveStart: "2026-08",
+      mode: "template",
+      teamId: team.id,
+      targets: [{ groupId: alpha.id, lineOfBusinessId: medical.id }],
+      previewToken: templatePreview.previewToken,
+    })).rejects.toBeInstanceOf(ConflictError);
+    expect((await listAllocations(db)).map((row) => row.id)).toEqual(beforeTeam.map((row) => row.id));
   });
 });

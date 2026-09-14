@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createAccountManager } from "./accountManagers";
+import { createAgencyCompensationOwner } from "./agencyOwner";
 import { createAgent } from "./agents";
 import { createAllocation, createAllocationsForLines, listAllocations } from "./allocations";
 import { createCarrier } from "./carriers";
@@ -30,6 +31,7 @@ async function seedJoses() {
   const mo = await createAgent(db, { name: "Mo Murillo" });
   const laura = await createAccountManager(db, { name: "Laura Montoya" });
   const nancy = await createAccountManager(db, { name: "Nancy" });
+  await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-01" });
   const group = await createGroup(db, { name: "JOSES ORNAMENTAL SUPPLY INC" });
   const carrier = await createCarrier(db, { name: "CaliforniaChoice" });
   const dental = await createLineOfBusiness(db, { name: "Dental" });
@@ -405,6 +407,7 @@ describe("current unpaid earnings reports", () => {
     const db = await createTestDb();
     const john = await createAgent(db, { name: "John Elizondo" });
     const mo = await createAgent(db, { name: "Mo Murillo" });
+    await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-01" });
     const group = await createGroup(db, { name: "Mixed Group" });
     const carrier = await createCarrier(db, { name: "Principal" });
     const dental = await createLineOfBusiness(db, { name: "Dental" });
@@ -461,5 +464,131 @@ describe("current unpaid earnings reports", () => {
     const teamReport = await buildTeamReport(db, { kind: "team", paidMonth: "2026-08", teamId: team.id });
     expect(teamReport.totals.teamCompensationCents).toBe(6000);
     expect(teamReport.totals.memberCompensationCents).toBe(6000);
+  });
+
+  it("requires review for missing owner on default and explicit Agency, including person filters", async () => {
+    const db = await createTestDb();
+    const john = await createAgent(db, { name: "John Elizondo" });
+    const group = await createGroup(db, { name: "Owner Gap" });
+    const carrier = await createCarrier(db, { name: "Principal" });
+    const dental = await createLineOfBusiness(db, { name: "Dental" });
+    const medical = await createLineOfBusiness(db, { name: "Medical" });
+    await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: medical.id,
+      effectiveStart: "2026-08",
+      entries: [{ recipientType: "agency", compensationBps: 10000 }],
+    });
+    await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: dental.id,
+      grossCommissionCents: 1000,
+    });
+    await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: medical.id,
+      grossCommissionCents: 2000,
+    });
+    const johnReport = await buildIndividualReport(db, {
+      kind: "individual",
+      paidMonth: "2026-08",
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(johnReport.rows).toHaveLength(2);
+    expect(johnReport.rows.every((row) => row.reviewRequired && row.reviewReason === "Agency owner is not configured")).toBe(true);
+    expect(johnReport.payable?.payableReady).toBe(false);
+    const unfiltered = await buildIndividualReport(db, { kind: "individual", paidMonth: "2026-08" });
+    expect(unfiltered.rows.every((row) => row.reviewRequired)).toBe(true);
+  });
+
+  it("resolves Agency owner per Paid Month on a YTD Individual report", async () => {
+    const db = await createTestDb();
+    const mo = await createAgent(db, { name: "Mo Murillo" });
+    const laura = await createAccountManager(db, { name: "Laura Montoya" });
+    await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-08", effectiveEndMonth: "2026-08" });
+    await createAgencyCompensationOwner(db, { accountManagerId: laura.id, effectiveStartMonth: "2026-09" });
+    const group = await createGroup(db, { name: "Owner History" });
+    const carrier = await createCarrier(db, { name: "Principal" });
+    const medical = await createLineOfBusiness(db, { name: "Medical" });
+    await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: medical.id,
+      grossCommissionCents: 10000,
+    });
+    await createCommission(db, {
+      statementMonth: "2026-09",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: medical.id,
+      grossCommissionCents: 20000,
+    });
+    const report = await buildIndividualReport(db, {
+      kind: "individual",
+      startMonth: "2026-08",
+      endMonth: "2026-09",
+    });
+    expect(report.rows.find((row) => row.paidMonth === "2026-08")?.personId).toBe(mo.id);
+    expect(report.rows.find((row) => row.paidMonth === "2026-09")?.personId).toBe(laura.id);
+    expect(report.rows.every((row) => row.recipientName === "Mo")).toBe(true);
+  });
+
+  it("canonicalizes Agency LOB filters and Team settlement across MED/MEDHMO/Group Medical", async () => {
+    const db = await createTestDb();
+    const john = await createAgent(db, { name: "John Elizondo" });
+    const mo = await createAgent(db, { name: "Mo Murillo" });
+    await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-01" });
+    const group = await createGroup(db, { name: "Anthem Group" });
+    const carrier = await createCarrier(db, { name: "Anthem" });
+    const medical = await createLineOfBusiness(db, { name: "Group Medical" });
+    const med = await createLineOfBusiness(db, { name: "MED" });
+    const medhmo = await createLineOfBusiness(db, { name: "MEDHMO" });
+    const team = await createTeam(db, {
+      name: "Producers",
+      members: [
+        { personKind: "agent", personId: john.id, shareBps: 7000, effectiveStart: "2026-08" },
+        { personKind: "agent", personId: mo.id, shareBps: 3000, effectiveStart: "2026-08" },
+      ],
+    });
+    await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: medical.id,
+      effectiveStart: "2026-08",
+      entries: [{ recipientType: "team", teamId: team.id, compensationBps: 10000 }],
+    });
+    await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: med.id,
+      grossCommissionCents: 10000,
+    });
+    await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: medhmo.id,
+      grossCommissionCents: 5000,
+    });
+    const agency = await buildAgencyReport(db, { kind: "agency", paidMonth: "2026-08", lineOfBusinessId: medical.id });
+    expect(agency.rows).toHaveLength(2);
+    expect(agency.totals.grossCommissionCents).toBe(15000);
+    const teamReport = await buildTeamReport(db, { kind: "team", paidMonth: "2026-08", teamId: team.id });
+    expect(teamReport.totals.teamCompensationCents).toBe(15000);
+    expect(teamReport.rows.filter((row) => row.memberName === "John Elizondo").reduce((sum, row) => sum + row.memberCompensationCents, 0)).toBe(10500);
+    const johnReport = await buildIndividualReport(db, {
+      kind: "individual",
+      paidMonth: "2026-08",
+      personKind: "agent",
+      personId: john.id,
+      lineOfBusinessId: med.id,
+    });
+    expect(johnReport.totals.compensationCents).toBe(10500);
   });
 });

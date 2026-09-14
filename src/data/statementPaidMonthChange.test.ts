@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createAgent } from "./agents";
+import { createAgencyCompensationOwner } from "./agencyOwner";
 import { createAllocation, updateAllocation } from "./allocations";
 import { createCarrier } from "./carriers";
 import { createCommission, getCommission, type CommissionView } from "./commissions";
@@ -205,6 +206,7 @@ describe("posted statement Change Paid Month", () => {
     const db = await createTestDb();
     const john = await createAgent(db, { name: "John Elizando" });
     const mo = await createAgent(db, { name: "Mo Murillo" });
+    await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-01" });
     const groupA = await createGroup(db, { name: "Cal Choice Medical Book" });
     const groupB = await createGroup(db, { name: "Cal Choice Dental Book" });
     const carrier = await createCarrier(db, { name: "CaliforniaChoice" });

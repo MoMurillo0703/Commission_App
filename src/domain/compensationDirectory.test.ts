@@ -132,4 +132,48 @@ describe("compensation directory", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.compensationKind).toBe("review_required");
   });
+
+  it("includes a person who participates through a legacy Team-backed allocation", () => {
+    const rows = buildCompensationDirectoryRows({
+      asOfMonth: "2026-08",
+      owner,
+      lines,
+      personName: (kind, id) => kind === "agent" && id === 1 ? "John" : "Person",
+      teams: [{
+        id: 10,
+        members: [
+          { personKind: "agent", personId: 1, name: "John", shareBps: 7000, status: "active", effectiveStart: "2026-08", effectiveEnd: null },
+          { personKind: "agent", personId: 2, name: "Mo", shareBps: 3000, status: "active", effectiveStart: "2026-08", effectiveEnd: null },
+        ],
+      }],
+      sources: [{
+        groupId: 1,
+        groupName: "Alpha",
+        groupNumber: null,
+        primaryAgentId: null,
+        primaryAgentName: null,
+        accountManagerId: null,
+        accountManagerName: null,
+        carrierIds: [1],
+        carrierNames: ["CaliforniaChoice"],
+        lineOfBusinessId: 1,
+        lineOfBusinessName: "Group Medical",
+        allocations: [{
+          id: 9,
+          status: "active",
+          effectiveStart: "2026-08",
+          effectiveEnd: null,
+          entries: [{ recipientType: "team", teamId: 10, compensationBps: 10000 }],
+        }],
+      }],
+    });
+    expect(rows[0]?.recipientKeys).toEqual(expect.arrayContaining(["agent:1", "agent:2"]));
+    expect(rows[0]?.recipientKeys).not.toContain("team:10");
+    const filtered = filterCompensationDirectory(rows, {
+      ...emptyCompensationDirectoryFilters("2026-08"),
+      recipientKey: "agent:1",
+    }, lines);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.key).toBe("1:medical");
+  });
 });

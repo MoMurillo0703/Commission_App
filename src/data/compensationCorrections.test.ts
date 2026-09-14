@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createAgent } from "./agents";
+import { createAgencyCompensationOwner } from "./agencyOwner";
 import { createAllocationsForLines, listAllocations, updateAllocation } from "./allocations";
 import { createCarrier } from "./carriers";
 import { createCommission, getCommission } from "./commissions";
@@ -25,6 +26,8 @@ describe("authorized historical compensation correction", () => {
   it("corrects six genuine Agency fallbacks atomically and leaves legitimate null-allocation settlements untouched", async () => {
     const db = await createTestDb();
     const john = await createAgent(db, { name: "John Elizondo" });
+    const mo = await createAgent(db, { name: "Mo Murillo" });
+    await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-01" });
     const abc = await createGroup(db, { name: "ABC COMPANY", primaryAgentId: john.id });
     const xyz = await createGroup(db, { name: "XYZ COMPANY", primaryAgentId: john.id });
     const def = await createGroup(db, { name: "DEF COMPANY", primaryAgentId: john.id });

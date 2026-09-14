@@ -50,6 +50,7 @@ export async function loadCompensationWorkspaceData(
     postedCarriers,
     asOfMonth: input.ownerMonth,
     owner: agencyOwner,
+    teams,
   });
   const missingLineCounts = Object.fromEntries(groups.map((group) => [
     group.id,

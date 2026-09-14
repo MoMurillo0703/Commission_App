@@ -41,6 +41,7 @@ import { allocationCandidates, listAllocations, type AllocationView } from "./al
 import { listAccountManagers } from "./accountManagers";
 import { listAgents } from "./agents";
 import { getCommission, listCommissions, type CommissionView } from "./commissions";
+import { listLinesOfBusiness } from "./linesOfBusiness";
 import { listAllPayouts, listPayoutsForCommission, replaceCommissionPayouts, type PayoutView } from "./payouts";
 import { currentTeamMembers, listTeams, type TeamView } from "./teams";
 
@@ -209,12 +210,13 @@ async function assembleCorrectionPlan(
 ): Promise<CompensationCorrectionPreview & { terms: CorrectionAuthorizedTerms }> {
   const uniqueIds = [...new Set(commissionIds)].sort((left, right) => left - right);
   if (uniqueIds.length === 0) throw new ValidationError("Select at least one commission to preview.");
-  const [commissions, payouts, allocations, teams, corrected] = await Promise.all([
+  const [commissions, payouts, allocations, teams, corrected, lines] = await Promise.all([
     listCommissions(db),
     listAllPayouts(db),
     listAllocations(db),
     listTeams(db),
     listCorrectedCommissionIds(db),
+    listLinesOfBusiness(db),
   ]);
   const byId = new Map(commissions.map((row) => [row.id, row]));
   const payoutsByCommission = new Map<number, PayoutView[]>();
@@ -278,8 +280,8 @@ async function assembleCorrectionPlan(
       lineOfBusinessId: commission.lineOfBusinessId,
       paidMonth: commission.statementMonth,
     };
-    const state = historicalAllocationState(candidates, query);
-    const allocation = historicalAllocationForPaidMonth(candidates, query);
+    const state = historicalAllocationState(candidates, query, lines);
+    const allocation = historicalAllocationForPaidMonth(candidates, query, lines);
     const fullAllocation = allocation
       ? allocations.find((row) => row.id === allocation.id) ?? null
       : null;
@@ -462,6 +464,7 @@ export async function confirmCompensationCorrection(
 
       const names = await personNameLookup(transaction);
       const lockedAllocations = allocationCandidates(await listAllocations(transaction));
+      const lines = await listLinesOfBusiness(transaction);
 
       for (const item of plan.items) {
         const commission = await getCommission(transaction, item.commissionId);
@@ -489,7 +492,7 @@ export async function confirmCompensationCorrection(
           groupId: commission.groupId,
           lineOfBusinessId: commission.lineOfBusinessId,
           paidMonth: commission.statementMonth,
-        });
+        }, lines);
         if (!authorized || !allocation || allocation.id !== authorized.allocation.id || allocation.id !== item.proposed?.allocationId) {
           throw new ValidationError(stalePreviewMessage());
         }

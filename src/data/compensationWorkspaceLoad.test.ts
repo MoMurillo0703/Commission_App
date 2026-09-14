@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createAccountManager } from "./accountManagers";
+import { createAgencyCompensationOwner } from "./agencyOwner";
 import { createAgent } from "./agents";
 import { createAllocation } from "./allocations";
 import { loadCompensationWorkspaceData } from "./compensationWorkspaceLoad";
@@ -11,7 +12,9 @@ describe("compensation workspace load", () => {
   it("loads groups, allocations, directory, and queue without a parallel request burst", async () => {
     const db = await createTestDb();
     const john = await createAgent(db, { name: "John Elizando" });
+    const mo = await createAgent(db, { name: "Mo Murillo" });
     const laura = await createAccountManager(db, { name: "Laura Montoya" });
+    await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-01" });
     const group = await createGroup(db, { name: "H R LABOR CONTRACTING", primaryAgentId: john.id, accountManagerId: laura.id });
     const medical = await createLineOfBusiness(db, { name: "Group Medical" });
     const allocation = await createAllocation(db, {

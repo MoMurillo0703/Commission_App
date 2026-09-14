@@ -425,7 +425,7 @@ describe("current earnings projection", () => {
     })).toHaveLength(0);
   });
 
-  it("does not block a person-filtered report when Agency owner coverage is missing", () => {
+  it("requires review when a person-filtered report has no Agency owner", () => {
     const evaluated = evaluateIndividualEarnings({
       commissions: [josesRows[4]!],
       allocations: [],
@@ -435,13 +435,19 @@ describe("current earnings projection", () => {
       personKind: "agent",
       personId: john.id,
     });
-    expect(evaluated.rows).toHaveLength(0);
-    expect(evaluated.outcomes[0]?.kind).toBe("agency_default");
+    expect(evaluated.rows).toHaveLength(1);
+    expect(evaluated.rows[0]).toMatchObject({
+      reviewRequired: true,
+      reviewReason: "Agency owner is not configured",
+      recipientName: EARNINGS_REVIEW_REQUIRED,
+      compensationCents: 0,
+    });
+    expect(evaluated.outcomes[0]?.kind).toBe("review_required");
     expect(currentEarningsReadiness({
       matchingCommissionCount: 1,
       outcomes: evaluated.outcomes,
-      recipientRowCount: 0,
-    }).payableReady).toBe(true);
+      recipientRowCount: evaluated.rows.filter((row) => !row.reviewRequired).length,
+    }).payableReady).toBe(false);
   });
 
   it("requires review when Agency owner coverage is missing or Mo is named twice", () => {
@@ -470,6 +476,64 @@ describe("current earnings projection", () => {
       names,
       agencyOwner: { personKind: "agent", personId: mo.id },
     }).reviewReason).toBe("Mo is named twice as person and Agency");
+    expect(settleCurrentCommissionEarnings({
+      commission: josesRows[4]!,
+      allocations: [{
+        id: 92,
+        groupId: 1,
+        lineOfBusinessId: 12,
+        effectiveStart: "2026-08",
+        effectiveEnd: null,
+        status: "active",
+        entries: [
+          { recipientType: "agency", compensationBps: 2000 },
+          { recipientType: "team", teamId: calChoiceTeam.id, compensationBps: 8000 },
+        ],
+      }],
+      teams: [calChoiceTeam],
+      names,
+      agencyOwner: { personKind: "agent", personId: mo.id },
+    }).reviewReason).toBe("Mo is named twice as person and Agency");
+    expect(settleCurrentCommissionEarnings({
+      commission: josesRows[4]!,
+      allocations: [{
+        id: 93,
+        groupId: 1,
+        lineOfBusinessId: 12,
+        effectiveStart: "2026-08",
+        effectiveEnd: null,
+        status: "active",
+        entries: [{ recipientType: "agency", compensationBps: 10000 }],
+      }],
+      teams: [],
+      names,
+      agencyOwner: null,
+    }).reviewReason).toBe("Agency owner is not configured");
+  });
+
+  it("resolves Agency owner per Paid Month across a YTD range", () => {
+    const augustOwner = { personKind: "agent" as const, personId: mo.id };
+    const septemberOwner = { personKind: "account_manager" as const, personId: laura.id };
+    const rows = projectIndividualEarnings({
+      commissions: [
+        { ...josesRows[4]!, id: 201, paidMonth: "2026-08" },
+        { ...josesRows[4]!, id: 202, paidMonth: "2026-09" },
+      ],
+      allocations: [],
+      teams: [],
+      names,
+      ownerForPaidMonth: (month) => month === "2026-08" ? augustOwner : month === "2026-09" ? septemberOwner : null,
+    });
+    expect(rows.find((row) => row.paidMonth === "2026-08")).toMatchObject({
+      recipientName: "Mo",
+      personId: mo.id,
+      compensationCents: 62076,
+    });
+    expect(rows.find((row) => row.paidMonth === "2026-09")).toMatchObject({
+      recipientName: "Mo",
+      personId: laura.id,
+      compensationCents: 62076,
+    });
   });
 
   it("requires review when multiple raw allocations collapse to the same canonical LOB", () => {

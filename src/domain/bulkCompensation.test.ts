@@ -29,8 +29,18 @@ describe("bulk compensation preview", () => {
           groupName: "Alpha",
           lineOfBusinessId: 10,
           lineOfBusinessName: "Group Medical",
+          siblingLineIds: [10],
+          siblings: [{
+            id: 21,
+            lineOfBusinessId: 10,
+            effectiveStart: "2026-08",
+            effectiveEnd: null,
+            status: "active",
+            entries: [{ recipientType: "agency", compensationBps: 10000 }],
+          }],
           current: {
             id: 21,
+            lineOfBusinessId: 10,
             effectiveStart: "2026-08",
             effectiveEnd: null,
             status: "active",
@@ -43,8 +53,18 @@ describe("bulk compensation preview", () => {
           groupName: "Beta",
           lineOfBusinessId: 12,
           lineOfBusinessName: "Group Dental",
+          siblingLineIds: [12],
+          siblings: [{
+            id: 22,
+            lineOfBusinessId: 12,
+            effectiveStart: "2027-03",
+            effectiveEnd: null,
+            status: "active",
+            entries,
+          }],
           current: {
             id: 22,
+            lineOfBusinessId: 12,
             effectiveStart: "2027-03",
             effectiveEnd: null,
             status: "active",
@@ -60,10 +80,11 @@ describe("bulk compensation preview", () => {
       effectiveStart: "2027-03",
       ownerKey: "agent:2",
       templateId: null,
+      templateFingerprint: "",
       entries,
       targets: [
-        { groupId: 1, lineOfBusinessId: 10, currentId: 21, currentFingerprint: "a" },
-        { groupId: 2, lineOfBusinessId: 12, currentId: 22, currentFingerprint: "b" },
+        { groupId: 1, lineOfBusinessId: 10, siblingLineIds: [10], siblingFingerprint: "a" },
+        { groupId: 2, lineOfBusinessId: 12, siblingLineIds: [12], siblingFingerprint: "b" },
       ],
     });
     expect(token).toHaveLength(64);

@@ -59,6 +59,16 @@ export function agencyOwnerForPaidMonth(
   return match?.identity ?? null;
 }
 
+export function agencyOwnerLookup(owners: AgencyCompensationOwnerPeriod[]) {
+  const cache = new Map<string, PersonIdentity | null>();
+  return (paidMonth: string) => {
+    if (!cache.has(paidMonth)) {
+      cache.set(paidMonth, agencyOwnerForPaidMonth(owners, paidMonth));
+    }
+    return cache.get(paidMonth) ?? null;
+  };
+}
+
 export function ownerGapWarning(months: string[]) {
   const unique = [...new Set(months)].sort();
   if (unique.length === 0) return null;

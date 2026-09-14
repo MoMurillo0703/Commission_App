@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalLineIdsMatching, canonicalLineKey, coveringAllocationsForCanonicalPair } from "./canonicalLob";
+import { canonicalLineIdsMatching, canonicalLineKey, canonicalizeCompensationTargets, canonicalLockPairs, coveringAllocationsForCanonicalPair, siblingLineIdsFor } from "./canonicalLob";
 import { paidMonthInRange } from "./dates";
 
 const lines = [
@@ -28,5 +28,24 @@ describe("canonical LOB projection", () => {
       { id: 22, groupId: 10, lineOfBusinessId: 3, status: "active", effectiveStart: "2026-08", effectiveEnd: null },
     ], { groupId: 10, lineOfBusinessId: 1, paidMonth: "2026-08" }, lines, paidMonthInRange);
     expect(covering.map((row) => row.id)).toEqual([21, 22]);
+  });
+
+  it("dedupes raw MED and MEDHMO targets to one canonical lock namespace", () => {
+    const canonical = canonicalizeCompensationTargets([
+      { groupId: 10, lineOfBusinessId: 2 },
+      { groupId: 10, lineOfBusinessId: 3 },
+      { groupId: 10, lineOfBusinessId: 1 },
+    ], lines);
+    expect(canonical).toEqual([expect.objectContaining({
+      groupId: 10,
+      canonicalLineId: 1,
+      siblingLineIds: [1, 2, 3],
+    })]);
+    expect(canonicalLockPairs(canonical)).toEqual([
+      { groupId: 10, lineOfBusinessId: 1 },
+      { groupId: 10, lineOfBusinessId: 2 },
+      { groupId: 10, lineOfBusinessId: 3 },
+    ]);
+    expect(siblingLineIdsFor({ id: 2, name: "MED" }, lines)).toEqual([1, 2, 3]);
   });
 });
