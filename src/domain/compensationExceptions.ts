@@ -14,7 +14,7 @@ export type PostedCompensationException = {
   eligibleFallback: boolean;
 };
 
-export type ExceptionLineStatus = "needs_allocation" | "ready_to_correct" | "blocked_newer_allocation";
+export type ExceptionLineStatus = "needs_allocation" | "ready_to_correct" | "blocked_newer_allocation" | "blocked_conflict";
 
 export type GroupedCompensationException = {
   groupId: number;
@@ -85,6 +85,9 @@ function statusFromHistorical(state: HistoricalAllocationState): {
   }
   if (state === "newer_only") {
     return { status: "blocked_newer_allocation", statusLabel: "Newer allocation only — blocked" };
+  }
+  if (state === "conflict") {
+    return { status: "blocked_conflict", statusLabel: "Conflicting allocations — review required" };
   }
   return { status: "needs_allocation", statusLabel: "Needs allocation" };
 }

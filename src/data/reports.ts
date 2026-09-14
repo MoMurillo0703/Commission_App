@@ -19,6 +19,7 @@ import { currentEarningsReadiness, evaluateIndividualEarnings, projectTeamEarnin
 import type { UnallocatedPostedCommission } from "@/domain/recipientStatement";
 import { agencyExecutiveSummary } from "@/domain/reportPresentation";
 import { allocationCandidates, listAllocations } from "./allocations";
+import { canonicalAllocationConflictMessage, resolveCompensationAllocation } from "@/domain/allocations";
 import { buildMonthlyCompensationReconciliation } from "./businessCompensation";
 import { listTeams, type TeamView } from "./teams";
 import { getAccountManager, listAccountManagers } from "./accountManagers";
@@ -131,11 +132,24 @@ export async function buildAgencyReport(db: AppDatabase | undefined, input: Repo
     compensationDistributedCents: row.compensationDistributedCents,
     agencyNetCents: row.agencyNetCents,
   }));
+  const allocations = await listAllocations(database);
+  const candidates = allocationCandidates(allocations);
+  const hasCanonicalConflict = rows.some((row) => (
+    resolveCompensationAllocation(candidates, {
+      groupId: row.groupId,
+      lineOfBusinessId: row.lineOfBusinessId,
+      paidMonth: row.paidMonth,
+    }, lines).status === "conflict"
+  ));
   const reconciliation = await buildMonthlyCompensationReconciliation(database, filters);
+  const payableReady = reconciliation.reconciliation.payableReady && !hasCanonicalConflict;
+  const payableMessage = hasCanonicalConflict
+    ? canonicalAllocationConflictMessage()
+    : reconciliation.reconciliation.payableReadyMessage;
   const executive = agencyExecutiveSummary(
     rows,
-    reconciliation.reconciliation.payableReady,
-    reconciliation.reconciliation.payableReadyMessage,
+    payableReady,
+    payableMessage,
   );
   return {
     filters,

@@ -49,6 +49,26 @@ describe("historical paid-month allocation for correction", () => {
     expect(missingAllocationBlockedMessage()).toMatch(/covers the original paid month/);
   });
 
+  it("treats multiple canonical covering allocations as conflict, not missing", () => {
+    const lines = [
+      { id: 1, name: "Group Medical" },
+      { id: 2, name: "MED" },
+      { id: 3, name: "MEDHMO" },
+    ];
+    const med = { ...johnPerson, id: 21, lineOfBusinessId: 2 };
+    const medhmo = { ...johnPerson, id: 22, lineOfBusinessId: 3, entries: [{ recipientType: "agency" as const, compensationBps: 10000 }] };
+    expect(historicalAllocationState([med, medhmo], {
+      groupId: 1,
+      lineOfBusinessId: 1,
+      paidMonth: "2026-09",
+    }, lines)).toBe("conflict");
+    expect(historicalAllocationForPaidMonth([med, medhmo], {
+      groupId: 1,
+      lineOfBusinessId: 1,
+      paidMonth: "2026-09",
+    }, lines)).toBeNull();
+  });
+
   it("builds original vs proposed preview totals from the existing settlement rules", () => {
     const settled = settleAllocation(10000, johnPerson.entries, new Map(), {
       personName: () => "John Elizondo",

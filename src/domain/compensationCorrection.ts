@@ -14,9 +14,9 @@ import { formatAllocationPercent } from "./recipientStatement";
 import type { CorrectionSourceClass } from "./compensationFallback";
 import { LEGACY_NO_PAYOUT_LABEL } from "./compensationFallback";
 
-export type HistoricalAllocationState = "covers" | "newer_only" | "missing";
+export type HistoricalAllocationState = "covers" | "newer_only" | "missing" | "conflict";
 
-export function historicalAllocationForPaidMonth(
+export function historicalAllocationResolution(
   allocations: AllocationCandidate[],
   query: { groupId: number; lineOfBusinessId: number; paidMonth: string },
   lines?: Array<{ id: number; name: string }>,
@@ -29,12 +29,23 @@ export function historicalAllocationForPaidMonth(
   return resolveCompensationAllocation(complete, query, lines);
 }
 
+export function historicalAllocationForPaidMonth(
+  allocations: AllocationCandidate[],
+  query: { groupId: number; lineOfBusinessId: number; paidMonth: string },
+  lines?: Array<{ id: number; name: string }>,
+) {
+  const resolved = historicalAllocationResolution(allocations, query, lines);
+  return resolved.status === "resolved" ? resolved.allocation : null;
+}
+
 export function historicalAllocationState(
   allocations: AllocationCandidate[],
   query: { groupId: number; lineOfBusinessId: number; paidMonth: string },
   lines?: Array<{ id: number; name: string }>,
 ): HistoricalAllocationState {
-  if (historicalAllocationForPaidMonth(allocations, query, lines)) return "covers";
+  const resolved = historicalAllocationResolution(allocations, query, lines);
+  if (resolved.status === "resolved") return "covers";
+  if (resolved.status === "conflict") return "conflict";
   const newerComplete = allocations.some((allocation) => {
     if (allocation.groupId !== query.groupId || allocation.effectiveStart <= query.paidMonth || allocationNeedsReview(allocation)) {
       return false;

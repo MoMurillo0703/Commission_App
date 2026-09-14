@@ -13,6 +13,8 @@ import { createTeam } from "./teams";
 import { createTestDb } from "@/db/test-db";
 import { commissionPayouts, commissionRecords } from "@/db/schema";
 import { currentAllocationsForGroup, futureAllocationsForGroup, historicalAllocationsForGroup } from "@/domain/compensationHome";
+import { canonicalAllocationConflictMessage } from "@/domain/allocations";
+import { ValidationError } from "@/lib/errors";
 
 async function snapshotRecords(db: Awaited<ReturnType<typeof createTestDb>>) {
   const [payouts, commissions] = await Promise.all([
@@ -590,5 +592,74 @@ describe("current unpaid earnings reports", () => {
       lineOfBusinessId: med.id,
     });
     expect(johnReport.totals.compensationCents).toBe(10500);
+  });
+
+  it("treats canonical sibling allocation conflict as Review Required, not Mo 100% or legacy", async () => {
+    const db = await createTestDb();
+    const john = await createAgent(db, { name: "John Elizondo" });
+    const mo = await createAgent(db, { name: "Mo Murillo" });
+    await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-01" });
+    const group = await createGroup(db, { name: "Anthem Conflict" });
+    const carrier = await createCarrier(db, { name: "Anthem" });
+    const medical = await createLineOfBusiness(db, { name: "Group Medical" });
+    const med = await createLineOfBusiness(db, { name: "MED" });
+    const medhmo = await createLineOfBusiness(db, { name: "MEDHMO" });
+    const team = await createTeam(db, {
+      name: "Producers",
+      members: [
+        { personKind: "agent", personId: john.id, shareBps: 7000, effectiveStart: "2026-08" },
+        { personKind: "agent", personId: mo.id, shareBps: 3000, effectiveStart: "2026-08" },
+      ],
+    });
+    const posted = await createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: medical.id,
+      grossCommissionCents: 10000,
+    });
+    expect(posted.agencyNetCents).toBe(10000);
+
+    await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: med.id,
+      effectiveStart: "2026-08",
+      entries: [{ recipientType: "team", teamId: team.id, compensationBps: 10000 }],
+    });
+    await createAllocation(db, {
+      groupId: group.id,
+      lineOfBusinessId: medhmo.id,
+      effectiveStart: "2026-08",
+      entries: [{ recipientType: "agency", compensationBps: 10000 }],
+    });
+
+    const johnReport = await buildIndividualReport(db, {
+      kind: "individual",
+      paidMonth: "2026-08",
+      personKind: "agent",
+      personId: john.id,
+    });
+    expect(johnReport.rows).toHaveLength(1);
+    expect(johnReport.rows[0]?.reviewRequired).toBe(true);
+    expect(johnReport.rows[0]?.compensationCents).toBe(0);
+    expect(johnReport.payable?.payableReady).toBe(false);
+
+    const teamReport = await buildTeamReport(db, { kind: "team", paidMonth: "2026-08", teamId: team.id });
+    expect(teamReport.rows.some((row) => row.reviewRequired)).toBe(true);
+    expect(teamReport.rows.every((row) => row.memberCompensationCents === 0)).toBe(true);
+
+    const agency = await buildAgencyReport(db, { kind: "agency", paidMonth: "2026-08" });
+    expect(agency.payable?.payableReady).toBe(false);
+    expect(agency.payable?.message).toMatch(/REVIEW REQUIRED/);
+    expect(agency.totals.grossCommissionCents).toBe(10000);
+
+    await expect(createCommission(db, {
+      statementMonth: "2026-08",
+      groupId: group.id,
+      carrierId: carrier.id,
+      lineOfBusinessId: med.id,
+      grossCommissionCents: 5000,
+      sourceRowKey: "conflict-post",
+    })).rejects.toSatisfy((error) => error instanceof ValidationError && error.message === canonicalAllocationConflictMessage());
   });
 });

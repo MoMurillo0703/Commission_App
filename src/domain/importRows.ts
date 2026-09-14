@@ -1,5 +1,6 @@
 import { resolveCompensationAgreement, type CompensationAgreementCandidate } from "./agreements";
 import {
+  canonicalAllocationConflictMessage,
   implicitAgencyAllocation,
   previewCompensationBps,
   resolveCompensationAllocation,
@@ -57,7 +58,7 @@ export function importRowReviewLabel(row: Pick<ValidatedImportRow, "status" | "e
   if (row.status === "ready") return "READY";
   if (row.status === "posted") return "POSTED";
   if (row.status === "ignored") return "IGNORED";
-  if (row.exceptions.some((item) => /Unmatched|Ambiguous/.test(item))) return "NEEDS REVIEW";
+  if (row.exceptions.some((item) => /Unmatched|Ambiguous|REVIEW REQUIRED/.test(item))) return "NEEDS REVIEW";
   return "BLOCKED";
 }
 
@@ -236,7 +237,7 @@ export function validateMappedRows(
             references.personNames?.[`${kind}:${id}`] ?? (kind === "agent" ? "Person" : "Person")
           ),
         };
-        const allocation = resolveCompensationAllocation(references.allocations ?? [], {
+        const resolution = resolveCompensationAllocation(references.allocations ?? [], {
           groupId: group.groupId,
           lineOfBusinessId: line.id,
           paidMonth,
@@ -244,8 +245,10 @@ export function validateMappedRows(
         try {
           let settled;
           let legacyCompensationBps: number | null = null;
-          if (allocation) {
-            settled = settleAllocation(grossCommissionCents, allocation.entries, references.teams ?? new Map(), names);
+          if (resolution.status === "conflict") {
+            exceptions.push(canonicalAllocationConflictMessage());
+          } else if (resolution.status === "resolved") {
+            settled = settleAllocation(grossCommissionCents, resolution.allocation.entries, references.teams ?? new Map(), names);
           } else if (resolvedAgentId != null) {
             const legacy = resolveCompensationAgreement(references.agreements ?? [], {
               groupId: group.groupId,

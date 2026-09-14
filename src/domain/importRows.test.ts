@@ -356,6 +356,7 @@ describe("statement compensation from agreements", () => {
   it("keeps ignored, needs-review, and blocked labels distinct", () => {
     expect(importRowReviewLabel({ status: "ignored", exceptions: ["Group ignored. It will not be posted."] })).toBe("IGNORED");
     expect(importRowReviewLabel({ status: "blocked", exceptions: ["Unmatched group: Example Law. Confirm it as a new group or match an existing group."] })).toBe("NEEDS REVIEW");
+    expect(importRowReviewLabel({ status: "blocked", exceptions: ["REVIEW REQUIRED — multiple allocations cover this canonical Group and Line of Coverage. Compensation was not assigned."] })).toBe("NEEDS REVIEW");
     expect(importRowReviewLabel({ status: "blocked", exceptions: ["Gross commission is missing."] })).toBe("BLOCKED");
     expect(importRowReviewLabel({ status: "ready", exceptions: [] })).toBe("READY");
   });
@@ -377,5 +378,61 @@ describe("statement compensation from agreements", () => {
     expect(importRowReviewLabel(ignored[0]!)).toBe("IGNORED");
     expect(ignored[0]?.exceptions.join(" ")).toMatch(/ignored/i);
     expect(ignored[0]?.exceptions.join(" ")).not.toMatch(/Unmatched line/i);
+  });
+
+  it("blocks import compensation when canonical sibling allocations conflict and does not use legacy or Agency 100%", () => {
+    const medSheets = sheets.map((sheet) => ({
+      ...sheet,
+      rows: sheet.rows.map((row) => ({
+        ...row,
+        values: { ...row.values, LOB: "MED", Commission: "100.00" },
+        group: { status: "matched" as const, groupId: 1, groupName: "Acme Benefits", sourceName: "Acme Benefits", sourceNumber: null },
+      })),
+    }));
+    const lines = [
+      { id: 1, name: "Group Medical" },
+      { id: 2, name: "MED" },
+      { id: 3, name: "MEDHMO" },
+    ];
+    const rows = validateMappedRows(medSheets, mapping, "2026-08", {
+      groups: [{ id: 1, name: "Acme Benefits", groupNumber: "A1", primaryAgentId: 7 }],
+      carriers: [{ id: 9, name: "Anthem" }],
+      linesOfBusiness: lines,
+      agents: [{ id: 7, name: "John Elizondo" }],
+      statementCarrier: { id: 9, name: "Anthem" },
+      agreements: [{
+        id: 88,
+        groupId: 1,
+        agentId: 7,
+        lineOfBusinessId: 1,
+        compensationBps: 7000,
+        effectiveStart: "2026-01",
+        effectiveEnd: null,
+        status: "active",
+      }],
+      allocations: [{
+        id: 21,
+        groupId: 1,
+        lineOfBusinessId: 2,
+        effectiveStart: "2026-08",
+        effectiveEnd: null,
+        status: "active",
+        entries: [{ recipientType: "agency", compensationBps: 10000 }],
+      }, {
+        id: 22,
+        groupId: 1,
+        lineOfBusinessId: 3,
+        effectiveStart: "2026-08",
+        effectiveEnd: null,
+        status: "active",
+        entries: [{ recipientType: "person", personKind: "agent", personId: 7, compensationBps: 10000 }],
+      }],
+    });
+    expect(rows[0]?.status).toBe("blocked");
+    expect(importRowReviewLabel(rows[0]!)).toBe("NEEDS REVIEW");
+    expect(rows[0]?.exceptions.join(" ")).toMatch(/REVIEW REQUIRED/);
+    expect(rows[0]?.compensationDistributedCents).toBeNull();
+    expect(rows[0]?.agencyNetCents).toBeNull();
+    expect(rows[0]?.compensationBps).toBe(0);
   });
 });

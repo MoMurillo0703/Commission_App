@@ -165,11 +165,19 @@ describe("compensation allocations", () => {
       groupId: 10,
       lineOfBusinessId: 1,
       paidMonth: "2026-08",
-    }, lines)?.id).toBe(21);
+    }, lines)).toMatchObject({ status: "resolved", allocation: { id: 21 } });
+    expect(resolveCompensationAllocation([], {
+      groupId: 10,
+      lineOfBusinessId: 1,
+      paidMonth: "2026-08",
+    }, lines)).toEqual({ status: "none" });
     expect(resolveCompensationAllocation([med, medhmo], {
       groupId: 10,
       lineOfBusinessId: 2,
       paidMonth: "2026-08",
-    }, lines)).toBeNull();
+    }, lines)).toMatchObject({
+      status: "conflict",
+      conflictingAllocations: [{ id: 21 }, { id: 22 }],
+    });
   });
 });

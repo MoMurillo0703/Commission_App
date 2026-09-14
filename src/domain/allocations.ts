@@ -158,21 +158,31 @@ export function validateTeamMemberShares(members: Array<{ shareBps: number; pers
   return totals;
 }
 
+export type CompensationAllocationResolution<T = AllocationCandidate> =
+  | { status: "resolved"; allocation: T }
+  | { status: "none" }
+  | { status: "conflict"; conflictingAllocations: T[] };
+
+export function canonicalAllocationConflictMessage() {
+  return "REVIEW REQUIRED — multiple allocations cover this canonical Group and Line of Coverage. Compensation was not assigned.";
+}
+
 export function resolveCompensationAllocation(
   allocations: AllocationCandidate[],
   query: { groupId: number; lineOfBusinessId: number; paidMonth: string },
   lines?: Array<{ id: number; name: string }>,
-) {
-  const covering = lines
+): CompensationAllocationResolution<AllocationCandidate> {
+  const covering = (lines
     ? coveringAllocationsForCanonicalPair(allocations, query, lines, paidMonthInRange)
     : allocations.filter((allocation) => (
       allocation.status === "active"
       && allocation.groupId === query.groupId
       && allocation.lineOfBusinessId === query.lineOfBusinessId
       && paidMonthInRange(query.paidMonth, allocation.effectiveStart, allocation.effectiveEnd)
-    ));
-  if (covering.length !== 1) return null;
-  return covering.sort((left, right) => right.effectiveStart.localeCompare(left.effectiveStart) || left.id - right.id)[0] ?? null;
+    ))).sort((left, right) => right.effectiveStart.localeCompare(left.effectiveStart) || left.id - right.id);
+  if (covering.length === 0) return { status: "none" };
+  if (covering.length > 1) return { status: "conflict", conflictingAllocations: covering };
+  return { status: "resolved", allocation: covering[0]! };
 }
 
 export function overlappingActiveAllocations<T extends { status: AllocationStatus; effectiveStart: string; effectiveEnd: string | null }>(

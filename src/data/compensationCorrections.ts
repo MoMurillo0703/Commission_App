@@ -10,6 +10,7 @@ import {
   correctionPreviewTotals,
   correctablePreviewIds,
   historicalAllocationForPaidMonth,
+  historicalAllocationResolution,
   historicalAllocationState,
   missingAllocationBlockedMessage,
   newerAllocationBlockedMessage,
@@ -20,6 +21,7 @@ import {
   type CorrectionAuthorizedTerms,
   type CorrectionPreviewItem,
 } from "@/domain/compensationCorrection";
+import { canonicalAllocationConflictMessage } from "@/domain/allocations";
 import { correctionPreviewToken, correctionRequestFingerprint } from "@/domain/compensationCorrectionAuth";
 import {
   classifyCorrectionSource,
@@ -285,6 +287,20 @@ async function assembleCorrectionPlan(
     const fullAllocation = allocation
       ? allocations.find((row) => row.id === allocation.id) ?? null
       : null;
+    if (state === "conflict") {
+      items.push(correctionPreviewItem({
+        commissionId: commission.id,
+        paidMonth: commission.statementMonth,
+        groupName: commission.groupName,
+        carrierName: commission.carrierName,
+        lineOfBusinessName: commission.lineOfBusinessName,
+        grossCommissionCents: commission.grossCommissionCents,
+        ...originalPreview,
+        proposed: null,
+        blockedReason: canonicalAllocationConflictMessage(),
+      }));
+      continue;
+    }
     if (state === "newer_only" || !allocation || !fullAllocation) {
       items.push(correctionPreviewItem({
         commissionId: commission.id,
@@ -488,12 +504,13 @@ export async function confirmCompensationCorrection(
         if (!authorized || !originalStatesMatch(authorized.original, currentOriginal)) {
           throw new ValidationError(stalePreviewMessage());
         }
-        const allocation = historicalAllocationForPaidMonth(lockedAllocations, {
+        const resolved = historicalAllocationResolution(lockedAllocations, {
           groupId: commission.groupId,
           lineOfBusinessId: commission.lineOfBusinessId,
           paidMonth: commission.statementMonth,
         }, lines);
-        if (!authorized || !allocation || allocation.id !== authorized.allocation.id || allocation.id !== item.proposed?.allocationId) {
+        const allocation = resolved.status === "resolved" ? resolved.allocation : null;
+        if (resolved.status === "conflict" || !authorized || !allocation || allocation.id !== authorized.allocation.id || allocation.id !== item.proposed?.allocationId) {
           throw new ValidationError(stalePreviewMessage());
         }
         const settled = settleAllocation(

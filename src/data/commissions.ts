@@ -1,6 +1,7 @@
 import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import {
   allocationFromExplicitAgentOverride,
+  canonicalAllocationConflictMessage,
   implicitAgencyAllocation,
   previewCompensationBps,
   settleAllocation,
@@ -217,12 +218,16 @@ export async function settleCommissionCompensation(
   agentId: number | null,
 ): Promise<CompensationSnapshot> {
   const names = { agencyName: "Murillo Insurance", personName: await personNameLookup(db) };
-  const allocation = await findApplicableAllocation(db, {
+  const resolved = await findApplicableAllocation(db, {
     groupId: input.groupId,
     lineOfBusinessId: input.lineOfBusinessId,
     paidMonth: input.statementMonth,
   });
-  if (allocation) {
+  if (resolved.status === "conflict") {
+    throw new ValidationError(canonicalAllocationConflictMessage());
+  }
+  if (resolved.status === "resolved") {
+    const allocation = resolved.allocation;
     if (input.compensationBps != null && agentId) {
       const agent = await getAgent(db, agentId);
       if (!agent) throw new NotFoundError("Agent not found.");

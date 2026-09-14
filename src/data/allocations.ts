@@ -264,8 +264,21 @@ export async function findApplicableAllocation(
     db,
     siblingIds.map((lineOfBusinessId) => ({ groupId: query.groupId, lineOfBusinessId })),
   );
-  const candidate = resolveCompensationAllocation(allocationCandidates(rows), query, lines);
-  return candidate ? rows.find((row) => row.id === candidate.id) ?? null : null;
+  const resolved = resolveCompensationAllocation(allocationCandidates(rows), query, lines);
+  if (resolved.status === "resolved") {
+    const allocation = rows.find((row) => row.id === resolved.allocation.id);
+    return allocation ? { status: "resolved" as const, allocation } : { status: "none" as const };
+  }
+  if (resolved.status === "conflict") {
+    return {
+      status: "conflict" as const,
+      conflictingAllocations: resolved.conflictingAllocations.flatMap((item) => {
+        const row = rows.find((allocation) => allocation.id === item.id);
+        return row ? [row] : [];
+      }),
+    };
+  }
+  return { status: "none" as const };
 }
 
 function allocationTermsFromWrite(input: AllocationWrite, period: { effectiveStart: string; effectiveEnd: string | null }, status: AllocationStatus): AllocationTerms {

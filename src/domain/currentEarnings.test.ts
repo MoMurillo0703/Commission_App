@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AllocationCandidate } from "./allocations";
+import { resolveCompensationAllocation } from "./allocations";
 import {
   EARNINGS_REVIEW_REQUIRED,
   currentEarningsReadiness,
@@ -563,6 +564,85 @@ describe("current earnings projection", () => {
       },
     ], { groupId: 1, lineOfBusinessId: 12, paidMonth: "2026-08" }, lines);
     expect(resolved.reviewReason).toBe("conflicting effective allocation periods");
+    expect(resolved.defaultAgency).toBe(false);
+    expect(resolved.allocation).toBeNull();
+    const owner = { personKind: "agent" as const, personId: mo.id };
+    const settled = settleCurrentCommissionEarnings({
+      commission: josesRows[4]!,
+      allocations: [
+        {
+          id: 1,
+          groupId: 1,
+          lineOfBusinessId: 14,
+          effectiveStart: "2026-08",
+          effectiveEnd: null,
+          status: "active",
+          entries: [{ recipientType: "agency", compensationBps: 10000 }],
+        },
+        {
+          id: 2,
+          groupId: 1,
+          lineOfBusinessId: 15,
+          effectiveStart: "2026-08",
+          effectiveEnd: null,
+          status: "active",
+          entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }],
+        },
+      ],
+      teams: [calChoiceTeam],
+      names,
+      agencyOwner: owner,
+      lines,
+    });
+    expect(settled.reviewReason).toBe("conflicting effective allocation periods");
+    expect(settled.defaultAgency).toBe(false);
+    expect(settled.settled).toBeNull();
+    const johnRows = projectIndividualEarnings({
+      commissions: [josesRows[4]!],
+      allocations: [
+        {
+          id: 1,
+          groupId: 1,
+          lineOfBusinessId: 14,
+          effectiveStart: "2026-08",
+          effectiveEnd: null,
+          status: "active",
+          entries: [{ recipientType: "agency", compensationBps: 10000 }],
+        },
+        {
+          id: 2,
+          groupId: 1,
+          lineOfBusinessId: 15,
+          effectiveStart: "2026-08",
+          effectiveEnd: null,
+          status: "active",
+          entries: [{ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }],
+        },
+      ],
+      teams: [calChoiceTeam],
+      names,
+      agencyOwner: owner,
+      personKind: "agent",
+      personId: john.id,
+      lines,
+    });
+    expect(johnRows).toHaveLength(1);
+    expect(johnRows[0]).toMatchObject({
+      reviewRequired: true,
+      compensationCents: 0,
+      recipientName: EARNINGS_REVIEW_REQUIRED,
+    });
+    expect(resolveCompensationAllocation([], { groupId: 1, lineOfBusinessId: 12, paidMonth: "2026-08" }, lines)).toEqual({ status: "none" });
+    expect(projectIndividualEarnings({
+      commissions: [josesRows[4]!],
+      allocations: [],
+      teams: [],
+      names,
+      agencyOwner: owner,
+      personKind: "agent",
+      personId: mo.id,
+      lines,
+    })[0]?.compensationCents).toBe(62076);
   });
 
   it("settles people-expanded 70/20/5/5 Joses terms to John's $370.56", () => {

@@ -1,6 +1,7 @@
 import {
   allocationTotals,
   implicitAgencyAllocation,
+  resolveCompensationAllocation,
   settleAllocation,
   type AllocationCandidate,
   type PersonKind,
@@ -148,16 +149,14 @@ export function resolveEarningsAllocation(
   defaultAgency: boolean;
   reviewReason: EarningsReviewReason | null;
 } {
-  const covering = lines
-    ? coveringAllocationsForCanonicalPair(allocations, query, lines, paidMonthInRange)
-    : coveringAllocationsForPaidMonth(allocations, query);
-  if (covering.length === 0) {
+  const resolved = resolveCompensationAllocation(allocations, query, lines);
+  if (resolved.status === "none") {
     return { allocation: null, defaultAgency: true, reviewReason: null };
   }
-  if (covering.length > 1) {
+  if (resolved.status === "conflict") {
     return { allocation: null, defaultAgency: false, reviewReason: "conflicting effective allocation periods" };
   }
-  const allocation = covering[0]!;
+  const allocation = resolved.allocation;
   if (!allocationTotals(allocation.entries).complete) {
     return { allocation, defaultAgency: false, reviewReason: "allocation does not total 100%" };
   }
