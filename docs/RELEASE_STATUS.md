@@ -7,12 +7,12 @@ Authoritative owner: **Alex**. Update this file when a release is deployed or ac
 | Field | Value |
 | --- | --- |
 | URL | https://commissionapp-iota.vercel.app |
-| SHA | `eaaa7eddf74bbd2c36b2d890d0853dfbd784e0b9` |
-| Deployed | 2026-09-11 |
+| SHA | `d963ac138e8b2f2275a2e7f088ae7375353701a2` |
+| Deployed | 2026-09-14 |
 | Migrations | **0001–0011** (no new migration for this application deploy) |
 | Agency owner | Mo / `agents.id = 2`, effective **2026-09 → Present** |
-| Release state | **DEPLOYED — AWAITING LIVE PRODUCT QA** |
-| Product acceptance | Pending Mo/Tom live QA of statement post truthfulness and the Groups + People management workspace. Do not post Statement 7 or rewrite production financial records as a deploy test. |
+| Release state | **DEPLOYED — AWAITING PRODUCT ACCEPTANCE** |
+| Product acceptance | Pending Mo live Product Acceptance of Person-Centric Bulk Compensation. Do not mark Done until Mo accepts the live workflow. Do not post Statement 7, create Joses production compensation, run historical Anthem correction, or rewrite production financial records as a deploy test. |
 
 This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 
@@ -27,6 +27,7 @@ This is **not** completion of Commission App 1.0. Sprint 1 is not Done.
 - People directory + Person Detail (`/people/agent/[id]`, `/people/account-manager/[id]`): typed identities are not merged by name; assignment is not compensation; Reports deep links including separate Mo / Agency
 - Statement Post success is tied to persisted commission rows; review/mapped/zero-row responses cannot show financial success; unresolved Group/LOB blocks posting
 - Exception-oriented Group Account Manager / Primary Agent assignment with Save All (assignment ≠ compensation; missing assignment does not block posting)
+- Person-centric bulk Compensation workspace: filter Group + canonical LOB targets, Select All matching filters, template or custom people split, server preview, one atomic commit. User-facing recipients are people; Teams are templates for new writes; canonical allocation conflict is Review Required (not Mo 100% or legacy fallback)
 - Compensation allocations (Agency / Person / Team), effective dating, payout snapshots, setup queue
 - Compensation queue evaluates the current as-of month first; historical posted-month coverage cannot hide a current gap; multiple or incomplete current coverings are Review Required
 - Missing Compensation is Group-first: one queue item per Group, all coverage lines visible together, default selection of unconfigured LOBs only
