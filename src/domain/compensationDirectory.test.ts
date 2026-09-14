@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildCompensationDirectoryRows, emptyCompensationDirectoryFilters, filterCompensationDirectory, selectAllDirectoryKeys } from "./compensationDirectory";
+import {
+  buildCompensationDirectoryRows,
+  directoryBulkSelectionControl,
+  directoryOwnerCoverageWarning,
+  emptyCompensationDirectoryFilters,
+  filterCompensationDirectory,
+  selectAllDirectoryKeys,
+} from "./compensationDirectory";
 
 const owner = { personKind: "agent" as const, personId: 2 };
 const lines = [
@@ -175,5 +182,73 @@ describe("compensation directory", () => {
     }, lines);
     expect(filtered).toHaveLength(1);
     expect(filtered[0]?.key).toBe("1:medical");
+  });
+
+  it("toggles Select all matching to Deselect all once every matching target is selected", () => {
+    expect(directoryBulkSelectionControl(0, 65)).toEqual({
+      action: "select_all",
+      label: "Select all matching (65)",
+      disabled: false,
+    });
+    expect(directoryBulkSelectionControl(12, 65).action).toBe("select_all");
+    expect(directoryBulkSelectionControl(65, 65)).toEqual({
+      action: "clear",
+      label: "Deselect all (65)",
+      disabled: false,
+    });
+  });
+
+  it("does not warn when owner coverage exists and marks missing-owner defaults as Review Required", () => {
+    expect(directoryOwnerCoverageWarning(owner, "2026-09")).toBeNull();
+    expect(directoryOwnerCoverageWarning(null, "2026-08")).toBe("Agency owner is not configured for August 2026.");
+    const missingOwner = buildCompensationDirectoryRows({
+      asOfMonth: "2026-08",
+      owner: null,
+      lines,
+      personName: () => "John",
+      sources: [{
+        groupId: 1,
+        groupName: "Alpha",
+        groupNumber: null,
+        primaryAgentId: null,
+        primaryAgentName: null,
+        accountManagerId: null,
+        accountManagerName: null,
+        carrierIds: [1],
+        carrierNames: ["CaliforniaChoice"],
+        lineOfBusinessId: 1,
+        lineOfBusinessName: "Group Medical",
+        allocations: [],
+      }],
+    });
+    expect(missingOwner[0]?.compensationKind).toBe("review_required");
+    const withOwner = buildCompensationDirectoryRows({
+      asOfMonth: "2026-09",
+      owner,
+      lines,
+      personName: () => "John",
+      sources: [{
+        groupId: 1,
+        groupName: "Alpha",
+        groupNumber: null,
+        primaryAgentId: null,
+        primaryAgentName: null,
+        accountManagerId: null,
+        accountManagerName: null,
+        carrierIds: [1],
+        carrierNames: ["CaliforniaChoice"],
+        lineOfBusinessId: 1,
+        lineOfBusinessName: "Group Medical",
+        allocations: [{
+          id: 8,
+          status: "active",
+          effectiveStart: "2026-09",
+          effectiveEnd: null,
+          entries: [{ recipientType: "agency", compensationBps: 10000 }],
+        }],
+      }],
+    });
+    expect(withOwner[0]?.compensationKind).toBe("explicit_agency");
+    expect(withOwner[0]?.compensationLabel).toBe("Mo 100%");
   });
 });

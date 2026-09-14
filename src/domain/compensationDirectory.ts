@@ -1,9 +1,8 @@
 import { classifyGroupLobCompensation, type GroupLobCompensationKind } from "./groupCompensationStatus";
 import { canonicalCoverageFamilyFromName, canonicalLineIdFor, canonicalLineKey, type CanonicalLine } from "./canonicalLob";
 import { economicPeopleFromAllocation, peopleFacingRecipients, peopleFacingSummary } from "./personCompensationModel";
-import { personKey, type PersonIdentity } from "./agencyOwner";
+import { AGENCY_OWNER_DISPLAY_NAME, ownerGapWarning, personKey, type PersonIdentity } from "./agencyOwner";
 import type { AllocationEntryInput, AllocationStatus, PersonKind } from "./allocations";
-import { AGENCY_OWNER_DISPLAY_NAME } from "./agencyOwner";
 
 export type DirectoryTeam = {
   id: number;
@@ -73,6 +72,21 @@ export type CompensationDirectoryRow = {
   recipientKeys: string[];
   teamIds: number[];
 };
+
+export function directoryBulkSelectionControl(selectedCount: number, matchingCount: number) {
+  if (matchingCount <= 0) {
+    return { action: "select_all" as const, label: "Select all matching (0)", disabled: true };
+  }
+  if (selectedCount >= matchingCount) {
+    return { action: "clear" as const, label: `Deselect all (${matchingCount})`, disabled: false };
+  }
+  return { action: "select_all" as const, label: `Select all matching (${matchingCount})`, disabled: false };
+}
+
+export function directoryOwnerCoverageWarning(owner: PersonIdentity | null, asOfMonth: string) {
+  if (owner) return null;
+  return ownerGapWarning([asOfMonth]) ?? "Agency owner is not configured for this effective month.";
+}
 
 export function emptyCompensationDirectoryFilters(asOfMonth: string): CompensationDirectoryFilters {
   return {

@@ -1,22 +1,11 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
-import { AllocationRecipientEditor } from "@/components/AllocationRecipientEditor";
+import { FormEvent, useState } from "react";
 import { CompensationDirectoryPanel } from "@/components/CompensationDirectoryPanel";
-import type { CompensationDirectoryRow } from "@/domain/compensationDirectory";
+import type { CompensationDirectoryFilters, CompensationDirectoryRow } from "@/domain/compensationDirectory";
 import { CompensationCorrectionDialog } from "@/components/CompensationCorrectionDialog";
-import { CompensationReconciliation } from "@/components/CompensationReconciliation";
-import { GroupCoverageTable } from "@/components/GroupCoverageTable";
 import type { AllocationView } from "@/data/allocations";
-import {
-  afterGroupQueueRefresh,
-  closeQueue,
-  groupQueueNeedsLabel,
-  queueBannerLabel,
-  queueSessionProgressLabel,
-  skipQueueIndex,
-  type GroupCompensationQueueItem,
-} from "@/domain/compensationQueue";
+import { queueBannerLabel, type GroupCompensationQueueItem } from "@/domain/compensationQueue";
 import {
   exceptionWorkSummary,
   groupCompensationExceptions,
@@ -25,64 +14,28 @@ import {
 } from "@/domain/compensationExceptions";
 import type { TeamView } from "@/data/teams";
 import type { AccountManager, Agent, Carrier, Group, LineOfBusiness } from "@/db/schema";
-import {
-  allocationEntryPayload,
-  cancelAllocationDraft,
-  defaultAllocationDraft,
-  draftFromAllocationEntries,
-  personRoleLabel,
-} from "@/domain/allocationEditor";
-import { allocationProgressLabel, allocationTotals } from "@/domain/allocations";
-import { plannedAllocationTargets, type LineApplyMode } from "@/domain/allocationBulkApply";
-import {
-  clearCoverageModes,
-  defaultCoverageModes,
-  groupCoverageLines,
-  selectNeedingSetupModes,
-  setCoverageMode,
-} from "@/domain/groupCoverage";
-import { bulkAllocationRequestBody } from "@/domain/groupCompensationWorkspace";
-import { allocationSavedMessage, runBulkAllocationSaveFlow } from "@/domain/allocationSaveFlow";
-import type { AllocationTerms } from "@/domain/allocationTerms";
-import {
-  compensationGroupSummaries,
-  filterCompensationGroups,
-  groupActiveCountLabel,
-  futureAllocationsForGroup,
-  historicalAllocationsForGroup,
-  allocationRecipientSummary,
-} from "@/domain/compensationHome";
+import { personRoleLabel } from "@/domain/allocationEditor";
 import { runTeamSaveFlow, teamSavedMessage } from "@/domain/teamSaveFlow";
 import type { GroupLineEvidence } from "@/domain/activeGroupLines";
 import { currentPaidMonth, formatStatementMonth } from "@/domain/dates";
-import { AGENCY_OWNER_LABEL, personKey, type PersonIdentity } from "@/domain/agencyOwner";
-import {
-  businessAllocationShares,
-  compensationFilterLabel,
-  filterCompensationGroupClass,
-  type CompensationGroupClass,
-  type CompensationGroupFilter,
-  type NamedBusinessPerson,
-} from "@/domain/businessCompensation";
-import { bpsToPercentString, parsePercentToBps } from "@/domain/money";
+import type { PersonIdentity } from "@/domain/agencyOwner";
+import type { CompensationGroupClass, NamedBusinessPerson } from "@/domain/businessCompensation";
+import { bpsToPercentString } from "@/domain/money";
 import { fetchWithDeadline, httpFailureMessage, readApiJson, requestFailureMessage, runBusyAction } from "@/lib/apiClient";
 
 export function CompensationWorkspace({
-  groups,
   agents,
   accountManagers,
   linesOfBusiness,
   initialAllocations,
   initialTeams,
   initialQueue = [],
-  groupLineEvidence = [],
   focusAllocationId = null,
   reviewContext = null,
   agencyOwner = null,
-  namedPeople = [],
-  directory = [],
   compensationDirectory = [],
   carriers = [],
+  initialAsOfMonth,
 }: {
   groups: Group[];
   agents: Agent[];
@@ -103,291 +56,44 @@ export function CompensationWorkspace({
   directory?: CompensationGroupClass[];
   compensationDirectory?: CompensationDirectoryRow[];
   carriers?: Carrier[];
+  initialAsOfMonth?: string;
 }) {
   const focusedAllocation = focusAllocationId
     ? initialAllocations.find((allocation) => allocation.id === focusAllocationId) ?? null
     : null;
-  const [allocations, setAllocations] = useState(initialAllocations);
   const [teams, setTeams] = useState(initialTeams);
-  const [draft, setDraft] = useState(() => {
-    if (!focusedAllocation) return defaultAllocationDraft();
-    return {
-      groupId: String(focusedAllocation.groupId),
-      lineOfBusinessId: String(focusedAllocation.lineOfBusinessId),
-      effectiveStart: "",
-      effectiveEnd: "",
-      entries: draftFromAllocationEntries(focusedAllocation.entries.map((entry) => ({
-        recipientType: entry.recipientType,
-        personKind: entry.personKind,
-        personId: entry.personId,
-        teamId: entry.teamId,
-        compensationPercent: bpsToPercentString(entry.compensationBps),
-      }))),
-    };
-  });
-  const [error, setError] = useState(focusedAllocation ? "Enter a new effective start month, then apply. Only this Line of Coverage is selected." : "");
+  const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState(false);
-  const [query, setQuery] = useState("");
   const [teamName, setTeamName] = useState("");
   const [teamMembers, setTeamMembers] = useState<Array<{ personKind: "agent" | "account_manager"; personId: string; percent: string }>>([{ personKind: "agent", personId: "", percent: "" }]);
-  const [queueOpen, setQueueOpen] = useState(false);
-  const [queueIndex, setQueueIndex] = useState(0);
-  const [queueDone, setQueueDone] = useState(false);
-  const [queue, setQueue] = useState(initialQueue);
-  const [queueNotice, setQueueNotice] = useState("");
-  const [queueSessionTotal, setQueueSessionTotal] = useState(initialQueue.length);
-  const [queueSessionPosition, setQueueSessionPosition] = useState(0);
-  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(focusedAllocation?.groupId ?? null);
-  const [workspaceOpen, setWorkspaceOpen] = useState(Boolean(focusedAllocation));
   const [reviewActive, setReviewActive] = useState(Boolean(reviewContext));
   const [reviewCommissions, setReviewCommissions] = useState(reviewContext?.commissions ?? []);
   const [correctionOpen, setCorrectionOpen] = useState(false);
   const [correctionIds, setCorrectionIds] = useState<number[]>([]);
   const [confirmationKey, setConfirmationKey] = useState("");
-  const [workspaceKeepLineIds, setWorkspaceKeepLineIds] = useState<number[]>(focusedAllocation ? [focusedAllocation.lineOfBusinessId] : []);
-  const [showHistory, setShowHistory] = useState(false);
-  const [groupFilter, setGroupFilter] = useState<CompensationGroupFilter>("all");
-  const [lineModes, setLineModes] = useState<Record<number, LineApplyMode>>({});
-  const [overrideLineId, setOverrideLineId] = useState<number | null>(focusedAllocation?.lineOfBusinessId ?? null);
-  const allocationsRef = useRef(initialAllocations);
+  const [directoryQuery, setDirectoryQuery] = useState(focusedAllocation?.groupName ?? "");
+  const [directoryStatus, setDirectoryStatus] = useState<CompensationDirectoryFilters["compensationStatus"] | null>(null);
+  const [directoryMonth, setDirectoryMonth] = useState<string | null>(reviewContext?.paidMonth ?? initialAsOfMonth ?? null);
 
-  useEffect(() => {
-    allocationsRef.current = allocations;
-  }, [allocations]);
+  const exceptionGroups = reviewActive && reviewContext
+    ? groupCompensationExceptions(reviewCommissions, initialAllocations)
+    : [];
+  const exceptionWork = exceptionWorkSummary(exceptionGroups);
 
-  const currentQueueItem = queue[queueIndex] ?? null;
-  const draftGroupId = Number(draft.groupId) || null;
-  const totals = allocationTotals(draft.entries.flatMap((entry) => {
-    try {
-      return [{ compensationBps: parsePercentToBps(entry.percent || "0") }];
-    } catch {
-      return [];
-    }
-  }));
-
-  async function refresh(failureMessage = "Allocation saved, but the page could not refresh. Reload Compensation to continue.") {
-    const [allocationsResponse, teamsResponse, queueResponse] = await Promise.all([
-      fetchWithDeadline("/api/allocations"),
-      fetchWithDeadline("/api/teams"),
-      fetchWithDeadline("/api/allocations/queue"),
-    ]);
-    const nextAllocations = await readApiJson<AllocationView[]>(allocationsResponse);
+  async function refreshTeams(failureMessage = "Team saved, but the page could not refresh. Reload Compensation to continue.") {
+    const teamsResponse = await fetchWithDeadline("/api/teams");
     const nextTeams = await readApiJson<TeamView[]>(teamsResponse);
-    const nextQueue = await readApiJson<GroupCompensationQueueItem[]>(queueResponse);
-    if (!allocationsResponse.ok || !teamsResponse.ok || !queueResponse.ok) {
-      throw new Error(failureMessage);
-    }
-    allocationsRef.current = nextAllocations;
-    setAllocations(nextAllocations);
+    if (!teamsResponse.ok) throw new Error(failureMessage);
     setTeams(nextTeams);
-    setQueue(nextQueue);
-    return { allocations: nextAllocations, queue: nextQueue, teams: nextTeams };
-  }
-
-  function resetDraft() {
-    setDraft(cancelAllocationDraft());
-    setOverrideLineId(null);
-    setLineModes({});
-    setError("");
-  }
-
-  async function saveSelectedLines() {
-    setError("");
-    setSuccess("");
-    const targets = plannedAllocationTargets({
-      lineIds: applyLines.map((line) => line.lineOfBusinessId),
-      modes: displayedLineModes,
-      templateEntries: allocationEntryPayload(draft.entries).map((entry) => ({
-        recipientType: entry.recipientType,
-        personKind: entry.personKind,
-        personId: entry.personId,
-        teamId: entry.teamId,
-        compensationBps: parsePercentToBps(entry.compensationPercent || "0"),
-      })),
-    });
-    if (targets.length === 0) {
-      setError("Select at least one line of business to apply this setup.");
-      return;
-    }
-    const submitted: AllocationTerms[] = targets.map((target) => ({
-      groupId: Number(draft.groupId),
-      lineOfBusinessId: target.lineOfBusinessId,
-      effectiveStart: draft.effectiveStart,
-      effectiveEnd: draft.effectiveEnd || null,
-      status: "active",
-      entries: target.entries,
-    }));
-    try {
-      await runBusyAction(setBusy, async () => {
-        const result = await runBulkAllocationSaveFlow({
-          request: async () => {
-            const response = await fetchWithDeadline("/api/allocations/bulk", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(bulkAllocationRequestBody({
-                groupId: Number(draft.groupId),
-                effectiveStart: draft.effectiveStart,
-                effectiveEnd: draft.effectiveEnd,
-                targets,
-                draftEntries: draft.entries,
-              })),
-            });
-            const body = await readApiJson<{ message?: string }>(response);
-            return { ok: response.ok, message: httpFailureMessage(response.status, body.message) };
-          },
-          refresh,
-          submitted,
-        });
-        setQueue(result.queue);
-        if (result.error) {
-          setError(result.error);
-          return;
-        }
-        setSuccess(result.success ?? allocationSavedMessage());
-        setOverrideLineId(null);
-        setLineModes({});
-        if (queueOpen && currentQueueItem) {
-          const next = afterGroupQueueRefresh(result.queue, currentQueueItem.groupId, queueIndex);
-          setQueueIndex(next.index);
-          setQueueDone(next.done);
-          setQueueOpen(!next.done);
-          if (next.advance && !next.done) {
-            setQueueSessionPosition((position) => position + 1);
-            loadQueueGroup(result.queue[next.index] ?? null);
-          } else if (next.done) {
-            resetDraft();
-          }
-          return;
-        }
-        if (!queueOpen) resetDraft();
-      });
-    } catch (error) {
-      setError(requestFailureMessage(error, "Unable to save group compensation."));
-    }
-  }
-
-  function openGroupWorkspace(groupId: number, keepLineIds: number[] = []) {
-    setSelectedGroupId(groupId);
-    setWorkspaceKeepLineIds(keepLineIds);
-    setShowHistory(false);
-    setWorkspaceOpen(true);
-    setOverrideLineId(null);
-    setLineModes(keepLineIds.length
-      ? Object.fromEntries(keepLineIds.map((id) => [id, "template" as const]))
-      : {});
-    setDraft((current) => ({
-      ...current,
-      groupId: String(groupId),
-      lineOfBusinessId: "",
-      effectiveStart: current.effectiveStart || reviewContext?.paidMonth || "",
-    }));
-  }
-
-  function closeGroupWorkspace() {
-    setWorkspaceOpen(false);
-    setShowHistory(false);
-  }
-
-  function loadQueueGroup(item: GroupCompensationQueueItem | null) {
-    if (!item) return;
-    setSelectedGroupId(item.groupId);
-    setWorkspaceKeepLineIds(item.lineOfBusinessIds);
-    setOverrideLineId(null);
-    setLineModes({});
-    setDraft({
-      groupId: String(item.groupId),
-      lineOfBusinessId: "",
-      effectiveStart: item.suggestedEffectiveStart,
-      effectiveEnd: "",
-      entries: draftFromAllocationEntries([{
-        recipientType: "person",
-        personKind: "agent",
-        personId: null,
-        compensationPercent: "",
-      }]),
-    });
-    setError("");
-    setSuccess("");
-  }
-
-  function openQueue() {
-    setWorkspaceOpen(false);
-    setQueueOpen(true);
-    setQueueDone(false);
-    setQueueIndex(0);
-    setQueueNotice("");
-    setSuccess("");
-    setQueueSessionTotal(queue.length);
-    setQueueSessionPosition(0);
-    loadQueueGroup(queue[0] ?? null);
-  }
-
-  function skipCurrent() {
-    setSuccess("");
-    setError("");
-    setQueueNotice("");
-    setQueueSessionPosition((position) => position + 1);
-    const next = skipQueueIndex(queueIndex, queue.length);
-    setQueueIndex(next.index);
-    setQueueDone(next.done);
-    if (next.done) {
-      setQueueOpen(false);
-      resetDraft();
-      return;
-    }
-    loadQueueGroup(queue[next.index] ?? null);
-  }
-
-  async function changeAllocation(row: { id: number }) {
-    const allocation = allocationsRef.current.find((item) => item.id === row.id);
-    if (!allocation) return;
-    setOverrideLineId(allocation.lineOfBusinessId);
-    setSelectedGroupId(allocation.groupId);
-    setDraft({
-      groupId: String(allocation.groupId),
-      lineOfBusinessId: String(allocation.lineOfBusinessId),
-      effectiveStart: "",
-      effectiveEnd: "",
-      entries: draftFromAllocationEntries(allocation.entries.map((entry) => ({
-        recipientType: entry.recipientType,
-        personKind: entry.personKind,
-        personId: entry.personId,
-        teamId: entry.teamId,
-        compensationPercent: bpsToPercentString(entry.compensationBps),
-      }))),
-    });
-    setError("Enter a new effective start month, then apply. Only this Line of Coverage is selected.");
-  }
-
-  async function deactivate(id: number) {
-    setError("");
-    setSuccess("");
-    try {
-      await runBusyAction(setBusy, async () => {
-        const response = await fetchWithDeadline(`/api/allocations/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "inactive" }),
-        });
-        const body = await readApiJson<{ message?: string }>(response);
-        if (!response.ok) {
-          setError(httpFailureMessage(response.status, body.message));
-          return;
-        }
-        await refresh();
-        setSuccess("Allocation deactivated.");
-      });
-    } catch (error) {
-      setError(requestFailureMessage(error, "Unable to deactivate."));
-    }
+    return { teams: nextTeams };
   }
 
   async function saveTeam(event: FormEvent) {
     event.preventDefault();
     setError("");
     setSuccess("");
-    const start = draft.effectiveStart || new Date().toISOString().slice(0, 7);
+    const start = directoryMonth || currentPaidMonth();
     try {
       await runBusyAction(setBusy, async () => {
         const result = await runTeamSaveFlow({
@@ -409,7 +115,7 @@ export function CompensationWorkspace({
             const body = await readApiJson<{ message?: string }>(response);
             return { ok: response.ok, message: httpFailureMessage(response.status, body.message) };
           },
-          refresh: async () => refresh("Team saved, but the page could not refresh. Reload Compensation to continue."),
+          refresh: async () => refreshTeams(),
           savedName: teamName,
         });
         if (result.error) {
@@ -420,143 +126,16 @@ export function CompensationWorkspace({
         setTeamName("");
         setTeamMembers([{ personKind: "agent", personId: "", percent: "" }]);
       });
-    } catch (error) {
-      setError(requestFailureMessage(error, "Unable to save team."));
+    } catch (caught) {
+      setError(requestFailureMessage(caught, "Unable to save team."));
     }
   }
 
-  const groupSummaries = filterCompensationGroups(
-    filterCompensationGroupClass(directory.length ? directory : compensationGroupSummaries(allocations, groups).map((group) => ({
-      ...group,
-      needsCompensation: group.activeAllocationCount === 0,
-      configured: group.activeAllocationCount > 0,
-      historicalException: false,
-    })), groupFilter),
-    query,
-  );
-  const exceptionGroups = reviewActive && reviewContext
-    ? groupCompensationExceptions(reviewCommissions, allocations)
-    : [];
-  const exceptionWork = exceptionWorkSummary(exceptionGroups);
-  const selectedGroup = groups.find((group) => group.id === selectedGroupId) ?? null;
-  const showGroupWorkspace = Boolean(
-    workspaceOpen
-    && selectedGroup
-    && !queueOpen
-    && (!reviewActive || exceptionWork.groups.some((group) => group.groupId === selectedGroupId)),
-  );
-  const asOfMonth = draft.effectiveStart || reviewContext?.paidMonth || currentPaidMonth();
-  const selectedHistory = selectedGroupId ? historicalAllocationsForGroup(allocations, selectedGroupId, asOfMonth) : [];
-  const selectedFuture = selectedGroupId ? futureAllocationsForGroup(allocations, selectedGroupId, asOfMonth) : [];
-  const coverageLines = groupCoverageLines({
-    groupId: selectedGroupId ?? draftGroupId,
-    lines: linesOfBusiness,
-    evidence: groupLineEvidence,
-    allocations,
-    keepLineIds: [
-      ...workspaceKeepLineIds,
-      ...(currentQueueItem && (currentQueueItem.groupId === selectedGroupId || currentQueueItem.groupId === draftGroupId)
-        ? currentQueueItem.lineOfBusinessIds
-        : []),
-    ],
-    asOfMonth,
-  });
-  const applyLines = coverageLines;
-  const templateEntries = draft.entries.flatMap((entry) => {
-    try {
-      return [{
-        recipientType: entry.recipientType,
-        personKind: entry.personKind || null,
-        personId: entry.personId ? Number(entry.personId) : null,
-        teamId: entry.teamId ? Number(entry.teamId) : null,
-        compensationBps: parsePercentToBps(entry.percent || "0"),
-      }];
-    } catch {
-      return [];
-    }
-  });
-
-  const templateComplete = allocationTotals(templateEntries).complete;
-  const displayedLineModes = overrideLineId != null
-    ? Object.fromEntries(coverageLines.map((line) => [
-        line.lineOfBusinessId,
-        line.lineOfBusinessId === overrideLineId ? "template" as const : "skip" as const,
-      ]))
-    : Object.keys(lineModes).length
-      ? lineModes
-      : defaultCoverageModes(coverageLines, templateComplete);
-  const selectedApplyTargets = plannedAllocationTargets({
-    lineIds: coverageLines.map((line) => line.lineOfBusinessId),
-    modes: displayedLineModes,
-    templateEntries: [],
-  });
-  const needsTemplateEntries = selectedApplyTargets.some((target) => target.mode === "template");
-  const canApplySelected = selectedApplyTargets.length > 0 && (!needsTemplateEntries || totals.complete);
-
-  function beginLineOverride(line: (typeof coverageLines)[number]) {
-    const allocation = allocations.find((row) => row.id === line.allocationId);
-    setDraft((current) => ({
-      ...current,
-      groupId: String(selectedGroupId ?? draftGroupId ?? ""),
-      lineOfBusinessId: String(line.lineOfBusinessId),
-      entries: allocation
-        ? draftFromAllocationEntries(allocation.entries.map((entry) => ({
-          recipientType: entry.recipientType,
-          personKind: entry.personKind,
-          personId: entry.personId,
-          teamId: entry.teamId,
-          compensationPercent: bpsToPercentString(entry.compensationBps),
-        })))
-        : current.entries,
-    }));
-    setOverrideLineId(null);
-    setLineModes(Object.fromEntries(coverageLines.map((item) => [
-      item.lineOfBusinessId,
-      item.lineOfBusinessId === line.lineOfBusinessId ? "template" : "skip",
-    ])));
-    setError("Enter a new effective start month, then apply. Only this Line of Coverage is selected.");
-    setSuccess("");
+  function findGroupInDirectory(groupName: string, paidMonth?: string) {
+    setDirectoryQuery(groupName);
+    if (paidMonth) setDirectoryMonth(paidMonth);
+    setDirectoryStatus(null);
   }
-
-  const editor = (
-    <AllocationRecipientEditor
-      entries={draft.entries}
-      agents={agents}
-      accountManagers={accountManagers}
-      teams={teams}
-      onChange={(entries) => setDraft((current) => ({ ...current, entries }))}
-    />
-  );
-
-  const coverageTable = (
-    <GroupCoverageTable
-      lines={coverageLines}
-      modes={displayedLineModes}
-      templateEntries={templateEntries}
-      onToggle={(lineOfBusinessId, selected, currentMode) => {
-        setOverrideLineId(null);
-        setLineModes(setCoverageMode(
-          displayedLineModes,
-          lineOfBusinessId,
-          selected ? (currentMode === "agency" ? "agency" : "template") : "skip",
-        ));
-      }}
-      onAgency={(lineOfBusinessId) => {
-        setOverrideLineId(null);
-        setLineModes(setCoverageMode(displayedLineModes, lineOfBusinessId, "agency"));
-      }}
-      onChange={(line) => beginLineOverride(line)}
-      onDeactivate={(allocationId) => void deactivate(allocationId)}
-      onSelectNeedingSetup={() => {
-        setOverrideLineId(null);
-        setLineModes(selectNeedingSetupModes(coverageLines, templateComplete));
-      }}
-      onClearSelection={() => {
-        setOverrideLineId(null);
-        setLineModes(clearCoverageModes(coverageLines));
-      }}
-    />
-  );
 
   return (
     <>
@@ -589,15 +168,16 @@ export function CompensationWorkspace({
             <div>
               <p className="eyebrow">Affected Groups</p>
               <h2>Eligible Agency 100% fallback commissions</h2>
-              <p>Open a Group to create an allocation that covers the original paid month. Then use Correct Compensation. Allocations never rewrite payouts by themselves.</p>
+              <p>Search the Group in the directory, select the lines, Edit Compensation for the original paid month, Preview, and Commit. Then use Correct Compensation. Allocations never rewrite payouts by themselves.</p>
             </div>
           </div>
           {exceptionWork.groups.map((group) => (
             <article key={group.groupId} className="allocation-card">
-              <button type="button" className="linkish" onClick={() => openGroupWorkspace(
-                group.groupId,
-                group.lines.map((line) => line.lineOfBusinessId),
-              )}>
+              <button
+                type="button"
+                className="linkish"
+                onClick={() => findGroupInDirectory(group.groupName, reviewContext.paidMonth)}
+              >
                 <strong>{group.groupName}</strong>
               </button>
               <table>
@@ -623,18 +203,33 @@ export function CompensationWorkspace({
         </section>
       )}
 
-      {!reviewActive && (
-        <CompensationDirectoryPanel
-          initialRows={compensationDirectory}
-          initialAsOfMonth={reviewContext?.paidMonth || currentPaidMonth()}
-          agents={agents}
-          accountManagers={accountManagers}
-          linesOfBusiness={linesOfBusiness}
-          carriers={carriers}
-          teams={teams}
-          owner={agencyOwner ?? null}
-        />
+      {initialQueue.length > 0 && !reviewActive && (
+        <section className="panel queue-banner">
+          <div>
+            <p className="eyebrow">Needs attention</p>
+            <h2>{queueBannerLabel(initialQueue)}</h2>
+            <p>{initialQueue.length} group{initialQueue.length === 1 ? "" : "s"} {initialQueue.length === 1 ? "has" : "have"} Lines of Coverage that still need compensation. Search a Group below or filter Status to Default / Mo 100%, then select lines and Edit Compensation.</p>
+          </div>
+          <button type="button" className="secondary" onClick={() => setDirectoryStatus("default")}>
+            Show default Mo 100% targets
+          </button>
+        </section>
       )}
+
+      <CompensationDirectoryPanel
+        initialRows={compensationDirectory}
+        initialAsOfMonth={directoryMonth || currentPaidMonth()}
+        initialQuery={directoryQuery}
+        requestedQuery={directoryQuery || null}
+        requestedStatus={directoryStatus}
+        requestedAsOfMonth={directoryMonth}
+        agents={agents}
+        accountManagers={accountManagers}
+        linesOfBusiness={linesOfBusiness}
+        carriers={carriers}
+        teams={teams}
+        owner={agencyOwner ?? null}
+      />
 
       {correctionOpen && correctionIds.length > 0 && (
         <CompensationCorrectionDialog
@@ -649,221 +244,17 @@ export function CompensationWorkspace({
         />
       )}
 
-      {queue.length > 0 && !reviewActive && (
-        <section className="panel queue-banner">
-          <div>
-            <p className="eyebrow">Needs attention</p>
-            <h2>{queueBannerLabel(queue)}</h2>
-            <p>{queue.length} group{queue.length === 1 ? "" : "s"} {queue.length === 1 ? "has" : "have"} Lines of Coverage that still need compensation.</p>
-          </div>
-          <button type="button" onClick={openQueue}>Review groups needing allocation</button>
-        </section>
-      )}
-
-      {!reviewActive && (
-        <CompensationReconciliation namedPeople={namedPeople} ownerConfigured={Boolean(agencyOwner)} />
-      )}
-
-      {!reviewActive && <section className="panel">
-        <div className="panel-head">
-          <div>
-            <p className="eyebrow">Browse by group</p>
-            <h2>Compensation</h2>
-            <p>Search a group to see every Line of Coverage together. Enter recipients once and apply them to the selected lines. Posted commissions keep their original payout snapshots.</p>
-          </div>
-        </div>
-        <div className="form-actions" style={{ marginBottom: 12, flexWrap: "wrap" }}>
-          {(["all", "needs_compensation", "configured", "historical_exceptions"] as CompensationGroupFilter[]).map((filter) => (
-            <button
-              key={filter}
-              type="button"
-              className={groupFilter === filter ? undefined : "secondary"}
-              onClick={() => setGroupFilter(filter)}
-            >
-              {compensationFilterLabel(filter)}
-            </button>
-          ))}
-        </div>
-        <label className="directory-controls">
-          <input aria-label="Search groups" placeholder="Search groups" value={query} onChange={(event) => setQuery(event.target.value)} />
-        </label>
-        {groupSummaries.length === 0 ? (
-          <p className="empty">No group allocations match this search. Use the work queue to set up missing compensation.</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Group</th>
-                <th>Current allocations</th>
-              </tr>
-            </thead>
-            <tbody>
-              {groupSummaries.map((group) => (
-                <tr key={group.groupId} className={group.groupId === selectedGroupId ? "selected-row" : undefined}>
-                  <td>
-                    <button type="button" className="linkish" onClick={() => openGroupWorkspace(group.groupId)}>
-                      <strong>{group.groupName}</strong>
-                    </button>
-                  </td>
-                  <td>{groupActiveCountLabel(group.activeAllocationCount)}{group.currentLineNames.length ? ` · ${group.currentLineNames.join(", ")}` : ""}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>}
-
-      {showGroupWorkspace && selectedGroup && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="group-workspace-title" onClick={() => { resetDraft(); closeGroupWorkspace(); }}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <p className="eyebrow">Group compensation</p>
-            <h2 id="group-workspace-title">{selectedGroup.name}</h2>
-            <p>Enter recipients once, select the Lines of Coverage that should use this setup, then apply. Already-configured lines stay unchanged unless you intentionally select them. Current earnings use this Paid Month effective start. Posted payout snapshots are not rewritten.</p>
-            <h3>CURRENT / AS-OF COMPENSATION</h3>
-            {coverageLines.length > 0 && (
-              <>
-              <table>
-                <thead>
-                  <tr>
-                    <th>LOB</th>
-                    <th>{AGENCY_OWNER_LABEL}</th>
-                    {namedPeople.map((person) => <th key={personKey(person)}>{person.label}</th>)}
-                    <th>Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {coverageLines.map((line) => {
-                    const shares = businessAllocationShares({
-                      entries: line.entries,
-                      teams,
-                      owner: agencyOwner,
-                      namedPeople,
-                      paidMonth: draft.effectiveStart || reviewContext?.paidMonth || null,
-                    });
-                    const mixed = shares.mixedTeamVersions;
-                    const total = mixed ? 0 : (shares.totalBps || (line.configured ? 10000 : 0));
-                    const cell = (bps: number) => {
-                      if (mixed) return "—";
-                      return line.configured || shares.totalBps ? `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 2)}%` : "—";
-                    };
-                    return (
-                      <tr key={`biz-${line.lineOfBusinessId}`}>
-                        <td>{line.name}</td>
-                        <td>{cell(shares.moAgencyBps)}</td>
-                        {namedPeople.map((person) => {
-                          const bps = shares.namedBps[personKey(person)] ?? 0;
-                          return <td key={personKey(person)}>{cell(bps)}</td>;
-                        })}
-                        <td>{total ? `${(total / 100).toFixed(total % 100 === 0 ? 0 : 2)}%` : "—"}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {coverageLines.some((line) => businessAllocationShares({
-                entries: line.entries,
-                teams,
-                owner: agencyOwner,
-                namedPeople,
-                paidMonth: draft.effectiveStart || reviewContext?.paidMonth || null,
-              }).mixedTeamVersions) && (
-                <p className="muted-note">Select a paid month. Team membership versions are never combined.</p>
-              )}
-              </>
-            )}
-            {coverageTable}
-            {selectedFuture.length > 0 && (
-              <div className="related-block">
-                <h3>FUTURE</h3>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>LOB</th>
-                      <th>Recipients</th>
-                      <th>Effective start</th>
-                      <th>Effective end</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedFuture.map((row) => (
-                      <tr key={row.id}>
-                        <td>{row.lineOfBusinessName}</td>
-                        <td>{allocationRecipientSummary(row)}</td>
-                        <td>{formatStatementMonth(row.effectiveStart)}</td>
-                        <td>{row.effectiveEnd ? formatStatementMonth(row.effectiveEnd) : "Present"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            <div className="related-block">
-              <button type="button" className="secondary" onClick={() => setShowHistory((current) => !current)}>
-                {showHistory ? "Hide compensation history" : "Show compensation history"}
-              </button>
-              {showHistory && <h3>COMPENSATION HISTORY</h3>}
-              {showHistory && (selectedHistory.length === 0 ? (
-                <p className="empty">No compensation history for this group before the as-of Paid Month.</p>
-              ) : (
-                <table>
-                  <thead>
-                    <tr>
-                      <th>LOB</th>
-                      <th>Recipients</th>
-                      <th>Effective start</th>
-                      <th>Effective end</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedHistory.map((row) => (
-                      <tr key={row.id} className="history-row">
-                        <td>{row.lineOfBusinessName}</td>
-                        <td>{allocationRecipientSummary(row)}</td>
-                        <td>{formatStatementMonth(row.effectiveStart)}</td>
-                        <td>{row.effectiveEnd ? formatStatementMonth(row.effectiveEnd) : "Present"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ))}
-            </div>
-            <form className="form-grid form-grid-wide" onSubmit={(event) => { event.preventDefault(); void saveSelectedLines(); }}>
-              <label>
-                Effective start
-                <input type="month" value={draft.effectiveStart} onChange={(event) => setDraft((current) => ({ ...current, effectiveStart: event.target.value }))} required />
-              </label>
-              <label>
-                Effective end
-                <input type="month" value={draft.effectiveEnd} onChange={(event) => setDraft((current) => ({ ...current, effectiveEnd: event.target.value }))} />
-              </label>
-              {editor}
-              <p className={totals.complete ? "form-success full" : "allocation-progress full"}>{allocationProgressLabel(draft.entries.flatMap((entry) => {
-                try { return [{ compensationBps: parsePercentToBps(entry.percent || "0") }]; } catch { return []; }
-              }))}</p>
-              {error && <p className="form-error">{error}</p>}
-              {success && <p className="form-success">{success}</p>}
-              <div className="form-actions full">
-                <button type="submit" disabled={busy || !canApplySelected || coverageLines.length === 0}>
-                  {busy ? "Saving…" : "Apply to Selected Lines"}
-                </button>
-                <button type="button" className="secondary" onClick={() => { resetDraft(); closeGroupWorkspace(); }}>Close</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {!reviewActive && <section className="panel recent">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Reusable teams</p>
-            <h2>Teams</h2>
-            <p>Team member splits must total 100%. Changing a team later does not rewrite posted commissions.</p>
+            <p className="eyebrow">Reusable templates</p>
+            <h2>Compensation templates</h2>
+            <p>Save a people split as a reusable template. Applying a template later does not rewrite posted commissions or already-applied allocations.</p>
           </div>
         </div>
         <form className="form-grid" onSubmit={saveTeam}>
           <label>
-            Team name
+            Template name
             <input value={teamName} onChange={(event) => setTeamName(event.target.value)} required />
           </label>
           {teamMembers.map((member, index) => (
@@ -889,7 +280,7 @@ export function CompensationWorkspace({
           {success && <p className="form-success">{success}</p>}
           <div className="form-actions">
             <button type="button" className="secondary" onClick={() => setTeamMembers((current) => [...current, { personKind: "agent", personId: "", percent: "" }])}>Add member</button>
-            <button disabled={busy}>{busy ? "Saving…" : "Save team"}</button>
+            <button disabled={busy}>{busy ? "Saving…" : "Save template"}</button>
           </div>
         </form>
         {teams.map((team) => (
@@ -901,7 +292,7 @@ export function CompensationWorkspace({
                 <tr>
                   <th>Member</th>
                   <th>Role</th>
-                  <th>Team %</th>
+                  <th>Split %</th>
                   <th>Effective</th>
                 </tr>
               </thead>
@@ -919,39 +310,6 @@ export function CompensationWorkspace({
           </article>
         ))}
       </section>}
-
-      {queueOpen && currentQueueItem && !queueDone && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="queue-title">
-          <div className="modal">
-            <p className="eyebrow">Compensation work queue</p>
-            <h2 id="queue-title">{currentQueueItem.groupName}</h2>
-            <p>{groupQueueNeedsLabel(currentQueueItem.needingLineCount)} · {queueSessionProgressLabel(queueSessionPosition, queueSessionTotal || queue.length)}</p>
-            {coverageTable}
-            <form className="form-grid form-grid-wide" onSubmit={(event) => { event.preventDefault(); void saveSelectedLines(); }}>
-              <label>
-                Effective start
-                <input type="month" value={draft.effectiveStart} onChange={(event) => setDraft((current) => ({ ...current, effectiveStart: event.target.value }))} required />
-              </label>
-              <label>
-                Effective end
-                <input type="month" value={draft.effectiveEnd} onChange={(event) => setDraft((current) => ({ ...current, effectiveEnd: event.target.value }))} />
-              </label>
-              {editor}
-              <p className={totals.complete ? "form-success full" : "allocation-progress full"}>{allocationProgressLabel(draft.entries.flatMap((entry) => {
-                try { return [{ compensationBps: parsePercentToBps(entry.percent || "0") }]; } catch { return []; }
-              }))}</p>
-              {error && <p className="form-error">{error}</p>}
-              {queueNotice && <p className="muted-note">{queueNotice}</p>}
-              {success && <p className="form-success">{success}</p>}
-              <div className="form-actions full">
-                <button type="submit" disabled={busy || !canApplySelected}>{busy ? "Saving…" : "Apply to Selected Lines"}</button>
-                <button type="button" className="secondary" onClick={skipCurrent}>Skip for now</button>
-                <button type="button" className="secondary" onClick={() => { setQueueOpen(closeQueue().open); setQueueNotice(""); setSuccess(""); resetDraft(); }}>Close</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </>
   );
 }

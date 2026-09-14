@@ -70,14 +70,40 @@ describe("rendered Compensation workspace", () => {
         { groupId: 1, lineOfBusinessId: 3 },
         { groupId: 1, lineOfBusinessId: 4 },
       ],
+      compensationDirectory: [{
+        key: "1:medical",
+        groupId: 1,
+        groupName: "ABC COMPANY",
+        groupNumber: null,
+        primaryAgentId: null,
+        primaryAgentName: null,
+        accountManagerId: null,
+        accountManagerName: null,
+        carrierIds: [],
+        carrierNames: [],
+        lineOfBusinessId: 1,
+        lineOfBusinessName: "Group Medical",
+        canonicalKey: "1:medical",
+        compensationKind: "default_unconfigured",
+        compensationLabel: "Mo 100% — Default",
+        currentAllocationId: null,
+        currentEffectiveStart: null,
+        currentEffectiveEnd: null,
+        recipientKeys: ["agent:2"],
+        teamIds: [],
+      }],
     }));
 
     expect(html).toContain("Compensation directory");
     expect(html).toContain("1 group needs compensation attention");
-    expect(html).toContain("1 group has Lines of Coverage that still need compensation");
-    expect(html).toContain("Review groups needing allocation");
-    expect(html).toContain("ABC COMPANY");
-    expect(html).not.toContain("ABC COMPANY — Medical");
+    expect(html).toContain("Search a Group below");
+    expect(html).toContain("Show default Mo 100% targets");
+    expect(html).toContain("Select all matching");
+    expect(html).toContain("Edit compensation");
+    expect(html).not.toContain("Browse by group");
+    expect(html).not.toContain("Review groups needing allocation");
+    expect(html).not.toContain("Compensation reconciliation");
+    expect(html).not.toContain("Team parents are ignored");
     expect(html).not.toContain("Save &amp; Next");
     expect((html.match(/ABC COMPANY/g) ?? []).length).toBeGreaterThanOrEqual(1);
   });

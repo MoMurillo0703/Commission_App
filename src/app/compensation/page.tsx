@@ -23,10 +23,10 @@ export default async function CompensationPage({
   const params = searchParams ? await searchParams : {};
   const focusAllocationId = Number(params.allocationId);
   const paidMonth = params.paidMonth ?? "";
-  const ownerMonth = isPaidMonth(paidMonth) ? paidMonth : currentPaidMonth();
+  const asOfMonth = isPaidMonth(paidMonth) ? paidMonth : currentPaidMonth();
   const db = await getDb();
   const loaded = await loadCompensationWorkspaceData(db, {
-    ownerMonth,
+    ownerMonth: asOfMonth,
     review: params.review === "1" && paidMonth
       ? { paidMonth, commissionIds: parseCommissionIds(params.commissionIds) }
       : null,
@@ -60,6 +60,7 @@ export default async function CompensationPage({
         directory={loaded.directory}
         compensationDirectory={loaded.compensationDirectory}
         carriers={loaded.carriers}
+        initialAsOfMonth={asOfMonth}
       />
     </AppShell>
   );

@@ -5,6 +5,8 @@ import { PeopleSplitEditor, type PeopleSplitRow } from "@/components/PeopleSplit
 import type { TeamView } from "@/data/teams";
 import type { AccountManager, Agent, Carrier, LineOfBusiness } from "@/db/schema";
 import {
+  directoryBulkSelectionControl,
+  directoryOwnerCoverageWarning,
   emptyCompensationDirectoryFilters,
   type CompensationDirectoryFilters,
   type CompensationDirectoryRow,
@@ -19,6 +21,7 @@ type DirectoryResponse = {
   rows: CompensationDirectoryRow[];
   keys: string[];
   targets: Array<{ key: string; groupId: number; lineOfBusinessId: number }>;
+  owner: PersonIdentity | null;
   total: number;
   groupCount: number;
 };
@@ -46,15 +49,23 @@ type PreviewResponse = {
 export function CompensationDirectoryPanel({
   initialRows,
   initialAsOfMonth,
+  initialQuery = "",
+  requestedQuery,
+  requestedStatus,
+  requestedAsOfMonth,
   agents,
   accountManagers,
   linesOfBusiness,
   carriers,
   teams,
-  owner,
+  owner: initialOwner,
 }: {
   initialRows: CompensationDirectoryRow[];
   initialAsOfMonth: string;
+  initialQuery?: string;
+  requestedQuery?: string | null;
+  requestedStatus?: CompensationDirectoryFilters["compensationStatus"] | null;
+  requestedAsOfMonth?: string | null;
   agents: Agent[];
   accountManagers: AccountManager[];
   linesOfBusiness: LineOfBusiness[];
@@ -62,13 +73,30 @@ export function CompensationDirectoryPanel({
   teams: TeamView[];
   owner: PersonIdentity | null;
 }) {
-  const [filters, setFilters] = useState<CompensationDirectoryFilters>(
-    emptyCompensationDirectoryFilters(initialAsOfMonth || currentPaidMonth()),
-  );
+  const [filters, setFilters] = useState<CompensationDirectoryFilters>({
+    ...emptyCompensationDirectoryFilters(initialAsOfMonth || currentPaidMonth()),
+    query: initialQuery,
+  });
+  const [appliedQuery, setAppliedQuery] = useState(requestedQuery ?? initialQuery ?? "");
+  const [appliedStatus, setAppliedStatus] = useState(requestedStatus ?? null);
+  const [appliedAsOfMonth, setAppliedAsOfMonth] = useState(requestedAsOfMonth ?? null);
+  if (requestedQuery && requestedQuery !== appliedQuery) {
+    setAppliedQuery(requestedQuery);
+    setFilters((current) => ({ ...current, query: requestedQuery }));
+  }
+  if (requestedStatus && requestedStatus !== appliedStatus) {
+    setAppliedStatus(requestedStatus);
+    setFilters((current) => ({ ...current, compensationStatus: requestedStatus }));
+  }
+  if (requestedAsOfMonth && requestedAsOfMonth !== appliedAsOfMonth) {
+    setAppliedAsOfMonth(requestedAsOfMonth);
+    setFilters((current) => ({ ...current, asOfMonth: requestedAsOfMonth }));
+  }
   const [rows, setRows] = useState(initialRows);
   const [targets, setTargets] = useState<DirectoryResponse["targets"]>(
     initialRows.map((row) => ({ key: row.key, groupId: row.groupId, lineOfBusinessId: row.lineOfBusinessId })),
   );
+  const [owner, setOwner] = useState<PersonIdentity | null>(initialOwner);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -109,6 +137,7 @@ export function CompensationDirectoryPanel({
       }
       setRows(body.rows);
       setTargets(body.targets);
+      setOwner(body.owner ?? null);
       setSelected((current) => new Set([...current].filter((key) => body.keys.includes(key))));
       setPage(0);
     }
@@ -132,6 +161,13 @@ export function CompensationDirectoryPanel({
   function selectAllMatching() {
     setSelected(new Set(targets.map((target) => target.key)));
   }
+
+  function clearSelection() {
+    setSelected(new Set());
+  }
+
+  const selectionControl = directoryBulkSelectionControl(selected.size, targets.length);
+  const ownerWarning = directoryOwnerCoverageWarning(owner, filters.asOfMonth);
 
   async function runPreview() {
     setPreview(null);
@@ -272,14 +308,20 @@ export function CompensationDirectoryPanel({
         </label>
       </div>
       <div className="form-actions" style={{ marginTop: 16, flexWrap: "wrap" }}>
-        <button type="button" className="secondary" onClick={selectAllMatching} disabled={rows.length === 0}>
-          Select all matching ({rows.length})
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => selectionControl.action === "clear" ? clearSelection() : selectAllMatching()}
+          disabled={selectionControl.disabled}
+        >
+          {selectionControl.label}
         </button>
-        <p><strong>{selected.size}</strong> selected · {rows.length} matching Group + line targets</p>
+        <p><strong>{selected.size}</strong> selected · {targets.length} matching Group + line targets</p>
         <button type="button" disabled={selected.size === 0} onClick={() => { setEditorOpen(true); setPreview(null); setEffectiveStart(filters.asOfMonth); }}>
           Edit compensation
         </button>
       </div>
+      {ownerWarning && <p className="form-error">{ownerWarning}</p>}
       {error && <p className="form-error">{error}</p>}
       {success && <p className="result">{success}</p>}
       {rows.length === 0 ? (

@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { ReportsWorkspace } from "@/components/ReportsWorkspace";
+import { CompensationReconciliation } from "@/components/CompensationReconciliation";
 import { listAccountManagers } from "@/data/accountManagers";
 import { listAgents } from "@/data/agents";
 import { listCarriers } from "@/data/carriers";
@@ -41,7 +42,7 @@ export default async function ReportsPage({
         <div>
           <p className="eyebrow">Reporting</p>
           <h1>Reports</h1>
-          <p>Generate an Individual Commission Report from posted payouts. Choose a recipient and paid month, then run the report or download the PDF. Generating a report does not mark anyone paid.</p>
+          <p>Generate an Individual Commission Report from posted payouts. Choose a recipient and paid month, then run the report or download the PDF. Generating a report does not mark anyone paid. Use Monthly Compensation Audit below to review whether a Paid Month reconciles to the appropriate people.</p>
         </div>
       </header>
       <ReportsWorkspace
@@ -53,6 +54,7 @@ export default async function ReportsPage({
         teams={teams}
         initialFilters={parseReportsSearchParams(params)}
       />
+      <CompensationReconciliation />
     </AppShell>
   );
 }
