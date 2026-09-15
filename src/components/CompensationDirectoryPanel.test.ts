@@ -33,6 +33,7 @@ describe("rendered compensation directory", () => {
     const html = renderToStaticMarkup(createElement(CompensationDirectoryPanel, {
       initialRows: [row],
       initialAsOfMonth: "2026-09",
+      requestedAsOfMonth: "2026-09",
       agents: [{ id: 2, name: "MURILLO, MAURILIO", defaultCompensationBps: null, notes: null, createdAt: stamp, updatedAt: stamp }],
       accountManagers: [],
       linesOfBusiness: [{ id: 1, name: "Group Medical", createdAt: stamp, updatedAt: stamp }],

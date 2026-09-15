@@ -18,6 +18,10 @@ import { agencyCompensationOwners } from "@/db/schema";
 import { ConflictError, ValidationError } from "@/lib/errors";
 import { eq } from "drizzle-orm";
 import { listAgencyCompensationOwners } from "./agencyOwner";
+import {
+  buildBulkCompensationRequestBody,
+  bulkCompensationCommitReady,
+} from "@/domain/bulkCompensationEditor";
 
 async function seed() {
   const db = await createTestDb();
@@ -272,6 +276,64 @@ describe("person-centric bulk compensation", () => {
       ],
       targets: [{ groupId: group.id, lineOfBusinessId: medical.id }],
     })).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it("previews and commits a valid September 2026 split when owner coverage starts in September", async () => {
+    const db = await createTestDb();
+    const john = await createAgent(db, { name: "John Elizondo" });
+    const mo = await createAgent(db, { name: "Mo Murillo" });
+    await createAgencyCompensationOwner(db, { agentId: mo.id, effectiveStartMonth: "2026-09" });
+    const group = await createGroup(db, { name: "September Target" });
+    const medical = await createLineOfBusiness(db, { name: "Group Medical" });
+    const people = [{ personKind: "agent" as const, personId: john.id, compensationBps: 10000 }];
+    const targets = [{ groupId: group.id, lineOfBusinessId: medical.id }];
+
+    await expect(previewBulkCompensation(db, {
+      effectiveStart: "2026-08",
+      mode: "custom",
+      people,
+      targets,
+    })).rejects.toBeInstanceOf(ValidationError);
+
+    await expect(previewBulkCompensation(db, {
+      effectiveStart: "2026-09",
+      mode: "custom",
+      people: [{ personKind: "agent", personId: john.id, compensationBps: 7000 }],
+      targets,
+    })).rejects.toBeInstanceOf(ValidationError);
+
+    const editorRequest = buildBulkCompensationRequestBody({
+      effectiveStart: "2026-09",
+      mode: "custom",
+      teamId: "",
+      people: [{ personKind: "agent", personId: String(john.id), percent: "100" }],
+      targets,
+    });
+    const preview = await previewBulkCompensation(db, {
+      effectiveStart: editorRequest.effectiveStart,
+      mode: editorRequest.mode,
+      teamId: editorRequest.teamId,
+      people,
+      targets: editorRequest.targets,
+    });
+    expect(preview.previewToken).toMatch(/^[a-f0-9]{64}$/);
+    expect(preview.hasConflicts).toBe(false);
+    expect(preview.effectiveStart).toBe("2026-09");
+    expect(bulkCompensationCommitReady(preview, editorRequest)).toBe(true);
+
+    const committed = await commitBulkCompensation(db, {
+      effectiveStart: editorRequest.effectiveStart,
+      mode: editorRequest.mode,
+      teamId: editorRequest.teamId,
+      people,
+      targets: editorRequest.targets,
+      previewToken: preview.previewToken,
+    });
+    expect(committed.createdCount).toBe(1);
+    const written = (await listAllocations(db)).find((row) => row.groupId === group.id && row.effectiveStart === "2026-09");
+    expect(written?.entries).toEqual([
+      expect.objectContaining({ recipientType: "person", personKind: "agent", personId: john.id, compensationBps: 10000 }),
+    ]);
   });
 
   it("keeps Joses people terms on Paid Month after a later change", async () => {

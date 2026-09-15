@@ -11,6 +11,14 @@ import {
   type CompensationDirectoryFilters,
   type CompensationDirectoryRow,
 } from "@/domain/compensationDirectory";
+import {
+  buildBulkCompensationRequestBody,
+  bulkCompensationCommitBody,
+  bulkCompensationCommitReady,
+  bulkCompensationPreviewBlockReason,
+  directorySelectionAfterReload,
+  type BulkCompensationEditorRequest,
+} from "@/domain/bulkCompensationEditor";
 import type { PersonIdentity } from "@/domain/agencyOwner";
 import { currentPaidMonth } from "@/domain/dates";
 import { fetchWithDeadline, httpFailureMessage, readApiJson, requestFailureMessage, runBusyAction } from "@/lib/apiClient";
@@ -80,18 +88,6 @@ export function CompensationDirectoryPanel({
   const [appliedQuery, setAppliedQuery] = useState(requestedQuery ?? initialQuery ?? "");
   const [appliedStatus, setAppliedStatus] = useState(requestedStatus ?? null);
   const [appliedAsOfMonth, setAppliedAsOfMonth] = useState(requestedAsOfMonth ?? null);
-  if (requestedQuery && requestedQuery !== appliedQuery) {
-    setAppliedQuery(requestedQuery);
-    setFilters((current) => ({ ...current, query: requestedQuery }));
-  }
-  if (requestedStatus && requestedStatus !== appliedStatus) {
-    setAppliedStatus(requestedStatus);
-    setFilters((current) => ({ ...current, compensationStatus: requestedStatus }));
-  }
-  if (requestedAsOfMonth && requestedAsOfMonth !== appliedAsOfMonth) {
-    setAppliedAsOfMonth(requestedAsOfMonth);
-    setFilters((current) => ({ ...current, asOfMonth: requestedAsOfMonth }));
-  }
   const [rows, setRows] = useState(initialRows);
   const [targets, setTargets] = useState<DirectoryResponse["targets"]>(
     initialRows.map((row) => ({ key: row.key, groupId: row.groupId, lineOfBusinessId: row.lineOfBusinessId })),
@@ -108,14 +104,28 @@ export function CompensationDirectoryPanel({
   const [teamId, setTeamId] = useState("");
   const [people, setPeople] = useState<PeopleSplitRow[]>([{ personKind: "agent", personId: "", percent: "" }]);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
+  const [previewedRequest, setPreviewedRequest] = useState<BulkCompensationEditorRequest | null>(null);
 
   const visible = rows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
   const selectedTargets = useMemo(
     () => targets.filter((target) => selected.has(target.key)),
     [selected, targets],
   );
+  const editorState = {
+    effectiveStart,
+    mode,
+    teamId,
+    people,
+    targets: selectedTargets.map((target) => ({
+      groupId: target.groupId,
+      lineOfBusinessId: target.lineOfBusinessId,
+    })),
+  };
+  const previewBlockReason = bulkCompensationPreviewBlockReason(editorState);
+  const commitReady = bulkCompensationCommitReady(preview, previewedRequest);
 
   useEffect(() => {
+    if (editorOpen) return;
     let cancelled = false;
     async function load() {
       const params = new URLSearchParams();
@@ -138,12 +148,29 @@ export function CompensationDirectoryPanel({
       setRows(body.rows);
       setTargets(body.targets);
       setOwner(body.owner ?? null);
-      setSelected((current) => new Set([...current].filter((key) => body.keys.includes(key))));
+      setSelected((current) => new Set(directorySelectionAfterReload({
+        editorOpen: false,
+        selectedKeys: [...current],
+        nextKeys: body.keys,
+      })));
       setPage(0);
     }
     void load();
     return () => { cancelled = true; };
-  }, [filters]);
+  }, [filters, editorOpen]);
+
+  if (!editorOpen && requestedQuery && requestedQuery !== appliedQuery) {
+    setAppliedQuery(requestedQuery);
+    setFilters((current) => ({ ...current, query: requestedQuery }));
+  }
+  if (!editorOpen && requestedStatus && requestedStatus !== appliedStatus) {
+    setAppliedStatus(requestedStatus);
+    setFilters((current) => ({ ...current, compensationStatus: requestedStatus }));
+  }
+  if (!editorOpen && requestedAsOfMonth && requestedAsOfMonth !== appliedAsOfMonth) {
+    setAppliedAsOfMonth(requestedAsOfMonth);
+    setFilters((current) => ({ ...current, asOfMonth: requestedAsOfMonth }));
+  }
 
   function patch(next: Partial<CompensationDirectoryFilters>) {
     setFilters((current) => ({ ...current, ...next }));
@@ -167,67 +194,54 @@ export function CompensationDirectoryPanel({
   }
 
   const selectionControl = directoryBulkSelectionControl(selected.size, targets.length);
-  const ownerWarning = directoryOwnerCoverageWarning(owner, filters.asOfMonth);
+  const ownerWarning = directoryOwnerCoverageWarning(owner, editorOpen ? effectiveStart : filters.asOfMonth);
+
+  function clearPreview() {
+    setPreview(null);
+    setPreviewedRequest(null);
+  }
 
   async function runPreview() {
-    setPreview(null);
+    setError("");
+    if (previewBlockReason) {
+      setError(previewBlockReason);
+      return;
+    }
+    const request = buildBulkCompensationRequestBody(editorState);
     try {
       await runBusyAction(setBusy, async () => {
         const response = await fetchWithDeadline("/api/compensation/preview", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            effectiveStart,
-            mode,
-            teamId: mode === "template" ? Number(teamId) : null,
-            people: mode === "custom" ? people.map((row) => ({
-              personKind: row.personKind,
-              personId: Number(row.personId),
-              compensationPercent: row.percent,
-            })) : undefined,
-            targets: selectedTargets.map((target) => ({
-              groupId: target.groupId,
-              lineOfBusinessId: target.lineOfBusinessId,
-            })),
-          }),
+          body: JSON.stringify(request),
         });
         const body = await readApiJson<PreviewResponse & { message?: string }>(response);
         if (!response.ok) throw new Error(httpFailureMessage(response.status, body.message));
         setPreview(body);
+        setPreviewedRequest(request);
         setSuccess("");
       });
     } catch (caught) {
+      setPreview(null);
+      setPreviewedRequest(null);
       setError(requestFailureMessage(caught, "Unable to preview compensation."));
     }
   }
 
   async function commit() {
-    if (!preview) return;
+    if (!preview || !previewedRequest || !commitReady) return;
+    setError("");
     try {
       await runBusyAction(setBusy, async () => {
         const response = await fetchWithDeadline("/api/compensation/commit", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            previewToken: preview.previewToken,
-            effectiveStart,
-            mode,
-            teamId: mode === "template" ? Number(teamId) : null,
-            people: mode === "custom" ? people.map((row) => ({
-              personKind: row.personKind,
-              personId: Number(row.personId),
-              compensationPercent: row.percent,
-            })) : undefined,
-            targets: selectedTargets.map((target) => ({
-              groupId: target.groupId,
-              lineOfBusinessId: target.lineOfBusinessId,
-            })),
-          }),
+          body: JSON.stringify(bulkCompensationCommitBody(previewedRequest, preview.previewToken)),
         });
         const body = await readApiJson<{ message?: string; targetCount?: number }>(response);
         if (!response.ok) throw new Error(httpFailureMessage(response.status, body.message));
-        setSuccess(`Saved compensation for ${body.targetCount ?? selectedTargets.length} Group + line targets.`);
-        setPreview(null);
+        setSuccess(`Saved compensation for ${body.targetCount ?? previewedRequest.targets.length} Group + line targets.`);
+        clearPreview();
         setEditorOpen(false);
         setSelected(new Set());
         patch({ asOfMonth: filters.asOfMonth });
@@ -317,7 +331,7 @@ export function CompensationDirectoryPanel({
           {selectionControl.label}
         </button>
         <p><strong>{selected.size}</strong> selected · {targets.length} matching Group + line targets</p>
-        <button type="button" disabled={selected.size === 0} onClick={() => { setEditorOpen(true); setPreview(null); setEffectiveStart(filters.asOfMonth); }}>
+        <button type="button" disabled={selected.size === 0} onClick={() => { setEditorOpen(true); clearPreview(); setError(""); setEffectiveStart(filters.asOfMonth); }}>
           Edit compensation
         </button>
       </div>
@@ -386,11 +400,11 @@ export function CompensationDirectoryPanel({
             <div className="form-grid">
               <label>
                 Effective start month
-                <input type="month" value={effectiveStart} onChange={(event) => { setEffectiveStart(event.target.value); setPreview(null); }} />
+                <input type="month" value={effectiveStart} onChange={(event) => { setEffectiveStart(event.target.value); clearPreview(); }} />
               </label>
               <label>
                 Apply
-                <select value={mode} onChange={(event) => { setMode(event.target.value === "custom" ? "custom" : "template"); setPreview(null); }}>
+                <select value={mode} onChange={(event) => { setMode(event.target.value === "custom" ? "custom" : "template"); clearPreview(); }}>
                   <option value="template">Compensation template</option>
                   <option value="custom">Custom split</option>
                 </select>
@@ -398,7 +412,7 @@ export function CompensationDirectoryPanel({
               {mode === "template" ? (
                 <label className="full">
                   Template
-                  <select value={teamId} onChange={(event) => { setTeamId(event.target.value); setPreview(null); }}>
+                  <select value={teamId} onChange={(event) => { setTeamId(event.target.value); clearPreview(); }}>
                     <option value="">Select template</option>
                     {teams.filter((team) => team.status === "active").map((team) => (
                       <option key={team.id} value={team.id}>{team.name}</option>
@@ -411,10 +425,12 @@ export function CompensationDirectoryPanel({
                   agents={agents}
                   accountManagers={accountManagers}
                   owner={owner}
-                  onChange={(next) => { setPeople(next); setPreview(null); }}
+                  onChange={(next) => { setPeople(next); clearPreview(); }}
                 />
               )}
             </div>
+            {ownerWarning && <p className="form-error">{ownerWarning}</p>}
+            {error && <p className="form-error">{error}</p>}
             {preview && (
               <div className="result">
                 <p><strong>{preview.groupCount}</strong> Groups · <strong>{preview.targetCount}</strong> Group + line targets · effective {preview.effectiveStart}</p>
@@ -452,7 +468,7 @@ export function CompensationDirectoryPanel({
             <div className="form-actions" style={{ marginTop: 16 }}>
               <button type="button" className="secondary" onClick={() => setEditorOpen(false)}>Cancel</button>
               <button type="button" className="secondary" disabled={busy} onClick={() => void runPreview()}>Preview</button>
-              <button type="button" disabled={busy || !preview || preview.hasConflicts} onClick={() => void commit()}>Commit</button>
+              <button type="button" disabled={busy || !commitReady} onClick={() => void commit()}>Commit</button>
             </div>
           </div>
         </div>
